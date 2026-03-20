@@ -1,0 +1,43 @@
+# Workflow and Context Management Rules
+
+## Session Discipline
+
+- Each session has ONE objective. State it explicitly at the start.
+- After completing the objective, commit and suggest `/clear` for the next task.
+- If a session exceeds ~30 minutes of complex work, proactively suggest checkpointing.
+
+## Before Writing Code
+
+1. Search the codebase first: use grep/glob to find relevant patterns before reading files.
+2. Read only the 3-5 most relevant files. Do not dump entire directories into context.
+3. Check for existing tests that cover the area you're modifying.
+4. If the task is ambiguous, ask one clarifying question before proceeding.
+
+## Context Preservation
+
+- When I say "checkpoint," write to `docs/checkpoint.md`:
+  - What was accomplished this session
+  - Current state of the implementation
+  - Failing tests (if any) and why
+  - Exact next steps to resume
+- When resuming after `/clear`, read `docs/checkpoint.md` first.
+
+## Commit Practices
+
+- Commit after each passing test cycle (red → green → refactor → commit).
+- Message format: `type(scope): description` — e.g., `feat(auth): add JWT refresh token rotation`
+- Types: feat, fix, refactor, test, docs, chore, perf
+- Never commit with failing tests.
+
+## Delegation
+
+- Use sub-agents for: researching unfamiliar APIs, reading large files, exploring codebase structure.
+- Keep the main session for: implementation decisions, writing code, running tests.
+- When spawning a sub-agent, give it a specific question to answer, not an open-ended exploration.
+
+## Error Recovery
+
+- After 2 failed attempts at the same approach, STOP.
+- Write what you've learned to `docs/checkpoint.md`.
+- Suggest: "This approach isn't working. Let me outline alternatives."
+- Do not keep trying variations of a failing strategy.

@@ -31,6 +31,9 @@ cp ~/projects/claude-code-scaffold/GLOBAL_CLAUDE.md ~/.claude/CLAUDE.md
 
 # Copy the /init slash command — lets you type /init in any new project
 cp ~/projects/claude-code-scaffold/global-commands/init.md ~/.claude/commands/init.md
+
+# Copy the /update-scaffold command — upstream project improvements back to the scaffold
+cp ~/projects/claude-code-scaffold/global-commands/update-scaffold.md ~/.claude/commands/update-scaffold.md
 ```
 
 Edit `~/.claude/CLAUDE.md` to match your preferences (name, communication style, workflow defaults).
@@ -92,6 +95,7 @@ Every file and directory in this scaffold is listed below, grouped by where it g
 |---|---|---|---|
 | `GLOBAL_CLAUDE.md` | `~/.claude/CLAUDE.md` | Your personal preferences — name, communication style, workflow defaults. Claude Code loads this for every project on your machine. | Yes. Edit after copying to match your preferences. |
 | `global-commands/init.md` | `~/.claude/commands/init.md` | The `/init` slash command. Type `/init` in any new project directory and Claude Code reads the scaffold README, copies the files, and asks about your stack to customize. Deterministic — fires exactly when you invoke it, not probabilistically like a skill. | No. Works out of the box as long as the scaffold lives at `~/projects/claude-code-scaffold`. If you store the scaffold elsewhere, update the paths in this file. |
+| `global-commands/update-scaffold.md` | `~/.claude/commands/update-scaffold.md` | The `/update-scaffold` slash command (global version). Run from any scaffolded project to diff customizations against the source scaffold and upstream generalizable changes. Identical to the project-level version — install globally so it works in projects initialized before this feature existed. | No. Works out of the box. |
 
 ### Files that go to your project root (per-project setup)
 
@@ -114,9 +118,11 @@ Copy the whole directory with `cp -r .claude ./.claude`. Here's what's inside:
 | `.claude/skills/tdd/SKILL.md` | `./.claude/skills/tdd/SKILL.md` | The full TDD workflow skill. When triggered (by saying "tdd" or "test first"), Claude follows a structured specification → red → green → refactor → commit procedure. Skills load on-demand, not at startup, so they don't consume context when unused. | Sometimes. Replace `$TEST_COMMAND` references if you want the skill to reference your exact test command. |
 | `.claude/agents/code-reviewer.md` | `./.claude/agents/code-reviewer.md` | A sub-agent that reviews uncommitted changes for correctness, test coverage, security issues, performance, and convention adherence. Runs in its own isolated context window. Invoked by the `/review` command. | Rarely. Modify if you want to add project-specific review criteria. |
 | `.claude/agents/spec-writer.md` | `./.claude/agents/spec-writer.md` | A sub-agent that analyzes feature requests and produces structured specifications with testable acceptance criteria. Runs in its own isolated context window. Writes output to `docs/spec.md`. | Rarely. Modify if your team uses a different specification format. |
+| `.claude/agents/scaffold-differ.md` | `./.claude/agents/scaffold-differ.md` | A sub-agent that compares a downstream project's scaffold files against the source scaffold and produces a structured report of generalizable changes worth upstreaming. Used by `/update-scaffold`. | Rarely. Modify if you want to change classification heuristics for what counts as generalizable. |
 | `.claude/commands/catchup.md` | `./.claude/commands/catchup.md` | Defines the `/catchup` slash command. When invoked, reads `docs/checkpoint.md`, recent git history, and current diff to orient after a `/clear` reset. Does NOT implement anything — it only reports status. | No. This is workflow infrastructure. |
 | `.claude/commands/plan.md` | `./.claude/commands/plan.md` | Defines the `/plan` slash command. When invoked, reads the spec and codebase, then writes an ordered implementation plan to `docs/plan.md`. Each step is sized for one TDD cycle. Does NOT implement anything — it only plans. | No. This is workflow infrastructure. |
 | `.claude/commands/review.md` | `./.claude/commands/review.md` | Defines the `/review` slash command. When invoked, delegates to the code-reviewer sub-agent to review all uncommitted changes. | No. This is workflow infrastructure. |
+| `.claude/commands/update-scaffold.md` | `./.claude/commands/update-scaffold.md` | Defines the `/update-scaffold` slash command. Compares this project's scaffold customizations against the source scaffold and proposes upstreaming generalizable changes (new rules, commands, skills, agents, workflow improvements). | No. This is workflow infrastructure. |
 
 ### The `docs/` directory (copy entire directory to project root)
 
@@ -225,6 +231,7 @@ You:  "Fix the billing calculation bug: invoice totals are off by 1 cent
 | `/catchup` | Read checkpoint + git state, orient without implementing |
 | `/plan` | Create an implementation plan from a spec |
 | `/review` | Spawn code-reviewer agent on uncommitted changes |
+| `/update-scaffold` | Diff project customizations against scaffold, upstream generalizable changes |
 | `/clear` | Reset context (built-in). Use between tasks. |
 | `/compact` | Summarize context to free space (built-in). Use proactively at ~60%. |
 | `/cost` | Show token usage (built-in). Monitor your burn rate. |

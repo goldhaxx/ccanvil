@@ -15,7 +15,7 @@
 
 ## Context Preservation
 
-- When I say "checkpoint," write to `docs/checkpoint.md`:
+- When I say "checkpoint," write to `docs/checkpoint.md` (see `docs/templates/checkpoint.md` for format):
   - What was accomplished this session
   - Current state of the implementation
   - Failing tests (if any) and why

@@ -16,7 +16,14 @@ For each tracked file, compare the scaffold's current version against the lockfi
 - Log: `./scripts/scaffold-sync.sh log-detail "AUTO-UPDATED <file>"`
 
 ### Conflict (scaffold changed, local is modified)
-Present the user with:
+
+**Section-merge files (GUIDE.md, CLAUDE.md):** If the scaffold version of the file contains `<!-- NODE-SPECIFIC-START -->` or `<!-- HUB-MANAGED-START -->`, use section-merge instead of the standard conflict flow:
+1. Run `./scripts/scaffold-sync.sh section-merge <scaffold_source>/<file> <file>` to produce the merged result
+2. Show the user what will change (hub sections updated, node sections preserved)
+3. If user approves, write the merged result to the file
+4. Log: `SECTION-MERGED <file>`
+
+**All other files:** Present the user with:
 ```
 CONFLICT: <file>
   Both scaffold and local have changes since last sync.

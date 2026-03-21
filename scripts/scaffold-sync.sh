@@ -10,6 +10,7 @@
 #   scaffold-sync.sh lock-update <file> <field> <value>  Update a lockfile field
 #   scaffold-sync.sh log <message>          Append to project sync log
 #   scaffold-sync.sh changelog <message>    Append to scaffold changelog
+#   scaffold-sync.sh section-merge <s> <l>  Merge hub/node sections of a delimited file
 #   scaffold-sync.sh scan                   List all trackable files in the project
 
 set -euo pipefail
@@ -29,6 +30,9 @@ TRACKED_PATTERNS=(
   ".claude/settings.json"
   "docs/templates/*.md"
   "scripts/*.sh"
+  "GUIDE.md"
+  "CLAUDE.md"
+  "SCAFFOLD_FRAMEWORK.md"
 )
 
 # Files to never track
@@ -490,6 +494,66 @@ cmd_changelog_detail() {
   mv "$tmp" "$changelog"
 }
 
+cmd_section_merge() {
+  local scaffold_file="${1:?Usage: scaffold-sync.sh section-merge <scaffold-file> <local-file>}"
+  local local_file="${2:?Usage: scaffold-sync.sh section-merge <scaffold-file> <local-file>}"
+
+  [[ -f "$scaffold_file" ]] || die "Scaffold file not found: $scaffold_file"
+  [[ -f "$local_file" ]] || die "Local file not found: $local_file"
+
+  # Detect which delimiter the scaffold file uses
+  local delimiter=""
+  if grep -q '<!-- NODE-SPECIFIC-START -->' "$scaffold_file"; then
+    delimiter="<!-- NODE-SPECIFIC-START -->"
+  elif grep -q '<!-- HUB-MANAGED-START -->' "$scaffold_file"; then
+    delimiter="<!-- HUB-MANAGED-START -->"
+  else
+    # No delimiter in scaffold file — not a section-merge file
+    echo "ERROR: No section delimiter found in scaffold file" >&2
+    return 1
+  fi
+
+  if [[ "$delimiter" == "<!-- NODE-SPECIFIC-START -->" ]]; then
+    # Pattern: hub content above delimiter, node content below
+    # Take ABOVE delimiter from scaffold, BELOW delimiter from local
+
+    # Get hub content (everything before delimiter) from scaffold
+    sed -n "/$delimiter/q;p" "$scaffold_file"
+
+    # Get node content (delimiter + everything after) from local
+    if grep -q "$delimiter" "$local_file"; then
+      sed -n "/$delimiter/,\$p" "$local_file"
+    else
+      # Local has no delimiter — treat entire local file as node content
+      echo "$delimiter"
+      echo "<!-- Everything above is managed by the scaffold hub and updated via /scaffold-pull. -->"
+      echo "<!-- Everything below is specific to this project. -->"
+      echo ""
+      echo "## Project-Specific Features"
+      echo ""
+      echo "_Migrated from pre-delimiter version:_"
+      echo ""
+      cat "$local_file"
+    fi
+
+  elif [[ "$delimiter" == "<!-- HUB-MANAGED-START -->" ]]; then
+    # Pattern: node content above delimiter, hub content below
+    # Take ABOVE delimiter from local, BELOW delimiter from scaffold
+
+    # Get node content (everything before delimiter) from local
+    if grep -q "$delimiter" "$local_file"; then
+      sed -n "/$delimiter/q;p" "$local_file"
+    else
+      # Local has no delimiter — treat entire local file as node content
+      cat "$local_file"
+      echo ""
+    fi
+
+    # Get hub content (delimiter + everything after) from scaffold
+    sed -n "/$delimiter/,\$p" "$scaffold_file"
+  fi
+}
+
 cmd_scan() {
   echo "Tracked files in project:"
   scan_tracked_files | while IFS= read -r f; do
@@ -527,6 +591,7 @@ case "${1:-}" in
   log-detail)       shift; cmd_log_detail "$@" ;;
   changelog)        shift; cmd_changelog "$@" ;;
   changelog-detail) shift; cmd_changelog_detail "$@" ;;
+  section-merge)    shift; cmd_section_merge "$@" ;;
   scan)             cmd_scan ;;
   *)
     echo "Usage: scaffold-sync.sh <command> [args]"
@@ -545,6 +610,7 @@ case "${1:-}" in
     echo "  log-detail <detail>                   Add detail to last log entry"
     echo "  changelog <message>                   Append to scaffold changelog"
     echo "  changelog-detail <detail>             Add detail to last changelog entry"
+    echo "  section-merge <scaffold> <local>       Merge hub/node sections of delimited file"
     echo "  scan                                  List all trackable files"
     exit 1
     ;;

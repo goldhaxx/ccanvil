@@ -46,3 +46,7 @@ Thumbs.db
 package-lock.json
 pnpm-lock.yaml
 yarn.lock
+
+# Scaffold sync state (machine-managed, not useful in context)
+.claude/scaffold.lock
+.claude/scaffold-sync.log

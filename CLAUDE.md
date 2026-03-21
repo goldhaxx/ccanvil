@@ -49,6 +49,9 @@ docs/
 - Environment variables: typed in a dedicated config module, never accessed raw.
 
 ## Reference Documents
+### Scaffold Guide — @GUIDE.md
+**Read when:** Adding or modifying scaffold commands, rules, agents, skills, hooks, or scripts. Update its diagrams and tables to reflect the change.
+
 ### Architecture Decisions — @docs/decisions.md
 **Read when:** Making structural changes, adding dependencies, or changing patterns.
 

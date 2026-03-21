@@ -40,6 +40,7 @@
 - After adding a new rule, command, agent, or skill, consider whether it's project-specific or globally useful.
 - Run `/scaffold-status` periodically to check for scaffold updates.
 - Before starting a new project, pull latest scaffold changes into your current project first.
+- When scaffold structure changes (new/modified commands, rules, agents, skills, hooks, or scripts), `GUIDE.md` must be updated to reflect the change — diagrams, tables, and descriptions must stay accurate.
 
 ## Error Recovery
 

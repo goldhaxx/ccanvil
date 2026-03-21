@@ -709,3 +709,11 @@ Every scaffold feature traces back to transformer architecture research. This ta
 | Progressive disclosure (`@path`) | Loading detailed docs on-demand prevents attention dilution. Every token competes; don't load what isn't needed now. |
 | Templates separate from active docs | Format guides persist as scaffold resources; active docs are overwritten freely. Agents always have the format reference available. |
 | Scaffold sync with lockfile | Configuration inheritance with provenance tracking. Enables knowledge reuse across projects while respecting local customization. |
+
+<!-- NODE-SPECIFIC-START -->
+<!-- Everything above is managed by the scaffold hub and updated via /scaffold-pull. -->
+<!-- Everything below is specific to this project. Add project-specific commands, rules, workflows here. -->
+
+## Project-Specific Features
+
+_No project-specific features yet. As you add local commands, rules, agents, or skills, document them here._

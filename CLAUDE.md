@@ -30,6 +30,10 @@ docs/
 └── checkpoint.md # Progress state for session continuity
 ```
 
+<!-- HUB-MANAGED-START -->
+<!-- Everything above is project-specific (name, stack, commands, architecture). -->
+<!-- Everything below is managed by the scaffold hub and updated via /scaffold-pull. -->
+
 ## Workflow: Specification → Test → Implement → Verify
 
 **Every feature follows this sequence. No exceptions.**

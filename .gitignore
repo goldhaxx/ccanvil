@@ -19,5 +19,10 @@ generated/
 *.swp
 *.swo
 
-# Claude Code memory (per-user, not project)
-.claude/settings.json
+# Claude Code local settings (per-user, not shared)
+.claude/settings.local.json
+.claude/local/
+
+# Scaffold sync state (machine-generated)
+.claude/scaffold.lock
+.claude/scaffold-sync.log

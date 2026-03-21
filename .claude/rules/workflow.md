@@ -35,6 +35,12 @@
 - Keep the main session for: implementation decisions, writing code, running tests.
 - When spawning a sub-agent, give it a specific question to answer, not an open-ended exploration.
 
+## Scaffold Sync
+
+- After adding a new rule, command, agent, or skill, consider whether it's project-specific or globally useful.
+- Run `/scaffold-status` periodically to check for scaffold updates.
+- Before starting a new project, pull latest scaffold changes into your current project first.
+
 ## Error Recovery
 
 - After 2 failed attempts at the same approach, STOP.

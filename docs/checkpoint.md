@@ -2,28 +2,29 @@
 
 # Checkpoint
 
-> Feature: epoch-timestamps
-> Last updated: 1774211169
+> Feature: determinism-enforcement
+> Last updated: 1774211916
 > Plan hash: dae15f7e
-> Session objective: Implement docs-check.sh lifecycle linking + scaffold-wide epoch timestamps
+> Session objective: Implement docs-check.sh lifecycle linking + scaffold-wide epoch timestamps + spec determinism enforcement
 <!-- Reminder: if no plan exists yet, run /plan before checkpointing (plan before checkpoint). -->
 
 ## Accomplished
 
-- **docs-check.sh implemented** — 9-step TDD plan, all steps complete. Three subcommands: `status` (metadata extraction + content hashing), `validate` (aligned/stale-plan/stale-checkpoint/mismatched/unlinked), `recommend` (state machine → next action). 36 tests.
-- **Templates updated** — spec.md, plan.md, checkpoint.md now have lifecycle metadata fields (Feature, Spec hash, Plan hash) with epoch placeholders.
-- **Agents/commands/rules wired** — spec-writer populates feature_id + epoch, /plan computes spec_hash, workflow rule populates plan_hash in checkpoints, /catchup runs validate + recommend before reading docs.
-- **Epoch timestamps converted** — `scaffold-sync.sh` `timestamp()` and `manifest-check.sh` `verified`/`meta.last_verified` now use `date +%s`. Lockfile regenerated with epoch format.
-- **Sync failure analysis** — identified accept-new data loss bug, 6 historical sync bugs, and two hardening opportunities (defensive guards + --dry-run). Backlogged.
+- **docs-check.sh implemented** — 9-step TDD plan, all steps complete. Three subcommands: `status`, `validate`, `recommend`. 36 tests.
+- **Templates, agents, commands, rules wired** — full lifecycle metadata flow from spec-writer through /catchup.
+- **Epoch timestamps converted** — scaffold-sync.sh and manifest-check.sh now use `date +%s`. Lockfiles regenerated.
+- **Sync failure analysis** — identified 6 historical bugs, two hardening opportunities backlogged.
+- **Determinism enforcement specced** — 11 ACs, 3 parts. Key insight: warm-context review during checkpoint is primary mechanism, audit-session script is safety net.
+- **Doc archival concept backlogged** — unique doc identity + lifespan + archive on completion (needs deep research).
 
 ## Current State
 
 - **Branch:** main
-- **Tests:** 144/144 passing (36 docs-check + 31 manifest + 41 sync + 15 security + 12 lint + 9 format)
+- **Tests:** 144/144 passing
 - **Uncommitted changes:** None (this checkpoint not yet committed)
 - **Build status:** Clean
-- **Manifest:** 56/56 verified, zero issues
-- **Unpushed:** 16 commits since last push
+- **Manifest:** 56/56 verified
+- **Unpushed:** 19 commits
 
 ## Blocked On
 
@@ -32,34 +33,28 @@
 ## Next Steps
 
 ### 1. Push to GitHub
-- 16 commits unpushed on main
+- 19 commits unpushed on main
 
 ### 2. Sync to downstream (fucina)
-- New scripts: `docs-check.sh`
-- Updated scripts: `scaffold-sync.sh` (epoch timestamp), `manifest-check.sh` (epoch verified)
-- Updated templates, agents, commands, rules
-- Run `/scaffold-pull` in fucina
+- New: `docs-check.sh`. Updated: `scaffold-sync.sh`, `manifest-check.sh`, templates, agents, commands, rules.
 
-### 3. Spec determinism enforcement (next feature)
-- **Mandatory determinism review in checkpoint template** — required section, not optional
-- **Deterministic session audit** — script scans git diff for stochastic patterns (manual cp, jq, shasum, git -C in diffs). Not perfect, but a deterministic signal.
-- **Surface in /catchup** — if previous checkpoint has determinism notes, highlight as "outstanding improvements from last session"
-- All three options in one spec → plan → build cycle
+### 3. `/plan` for determinism enforcement
+- Spec at `docs/spec.md` (feature: determinism-enforcement, 11 ACs)
+- Run `/plan` to create TDD steps, then build
 
-### 4. Spec sync hardening (backlog)
-- **Defensive guards on destructive operations** — every cp/overwrite/delete in scaffold-sync.sh should verify preconditions before acting
-- **`--dry-run` mode for pull** — show what would happen without doing it
-- Both follow existing pattern: bash script, subcommands, bats tests
+### 4. Backlog (in priority order)
+- **Sync hardening** — defensive guards on destructive ops + --dry-run mode for pull
+- **Doc archival lifecycle** — unique doc identity + lifespan + archive on completion (needs deep research)
 
-## Determinism Notes
+## Determinism Review
 
-- **All new work is maximally deterministic** — docs-check.sh is pure script (hash comparison, metadata parsing, state machine). No Claude judgment needed at any step.
-- **Epoch conversion was a 1:1 replacement** — no new logic, just format change. Deterministic by definition.
-- **Feedback captured:** Zach corrected mid-implementation when I skipped spec→plan for the epoch feature. Even small changes should follow the workflow. Saved as lesson for future sessions.
-- **Self-review rule is passive** — `self-review.md` relies on Claude remembering to assess determinism during checkpoints. Nothing enforces it. The checkpoint template has no required field, `/catchup` doesn't check for outstanding notes, and no script scans for stochastic patterns. This is the next feature to spec (determinism enforcement — 3 parts).
+- **operations_reviewed:** 5
+- **candidates_found:** 1
+- **Self-review rule is passive** — `self-review.md` relies on Claude remembering to assess determinism during checkpoints. Nothing enforces it. This is exactly what the determinism-enforcement feature addresses. The spec restructure (warm-context primary, script safety net) was driven by Zach's insight that context-aware review before `/clear` catches far more than post-hoc diff scanning.
+- **Feedback captured:** Zach corrected mid-session when spec→plan was skipped for epoch timestamps. Saved as `feedback_always_spec_plan.md`.
+- No other stochastic operations identified — all implementation was script code via TDD, no manual sync or improvised workarounds.
 
 ## Context Notes
 
-- The docs lifecycle feature was self-referential: the spec, plan, and checkpoint for this feature are the first docs to carry lifecycle metadata.
-- The `/catchup` command now runs `docs-check.sh validate` and `recommend` as steps 0a/0b — next session should see this in action.
-- The `fetch-license.sh` `date +%Y` is intentionally NOT converted (license text needs year string).
+- The plan.md still references the epoch-timestamps feature. Next session should run `/plan` which will overwrite it with determinism-enforcement steps.
+- The determinism enforcement spec was restructured late in the session after Zach's feedback about warm-context review. The 11 ACs reflect the final structure.

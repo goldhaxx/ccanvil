@@ -1,7 +1,7 @@
 # Global Preferences
 
 ## Identity
-- My name is Zach. Address me by name when clarifying decisions.
+- My name is [Your name]. Address me by name when clarifying decisions.
 - I value first-principles thinking. Explain *why* before *how*.
 - I prefer concise, direct communication. Skip preamble.
 

@@ -53,7 +53,13 @@ require_lockfile() {
 }
 
 get_scaffold_source() {
+  # Returns absolute path (for filesystem operations)
   jq -r '.scaffold_source' "$LOCKFILE" | sed "s|^~|$HOME|"
+}
+
+get_scaffold_source_display() {
+  # Returns path with ~ (for commit messages, output — no PII)
+  jq -r '.scaffold_source' "$LOCKFILE"
 }
 
 file_hash() {
@@ -181,8 +187,9 @@ cmd_init() {
     fi
   done < <(scan_scaffold_files "$scaffold_path")
 
-  # Write lockfile
-  jq -n --arg src "$scaffold_path" --arg ver "$scaffold_version" --arg ts "$(timestamp)" --argjson files "$files_json" \
+  # Write lockfile (store ~ instead of absolute home path to avoid PII in tracked files)
+  local display_path="${scaffold_path/#$HOME/~}"
+  jq -n --arg src "$display_path" --arg ver "$scaffold_version" --arg ts "$(timestamp)" --argjson files "$files_json" \
     '{scaffold_source: $src, scaffold_version: $ver, synced_at: $ts, files: $files}' > "$LOCKFILE"
 
   local total
@@ -194,7 +201,7 @@ cmd_init() {
   scaffold_only=$(echo "$files_json" | jq '[.[] | select(.status == "scaffold-only")] | length')
 
   echo "Scaffold lockfile generated: $LOCKFILE"
-  echo "  Scaffold: $scaffold_path @ $scaffold_version"
+  echo "  Scaffold: $display_path @ $scaffold_version"
   echo "  Total files: $total"
   echo "  Clean: $clean | Modified: $modified | Local: $local_only | Scaffold-only: $scaffold_only"
 }
@@ -209,7 +216,7 @@ cmd_status() {
   local synced_at
   synced_at=$(jq -r '.synced_at' "$LOCKFILE")
 
-  echo "Scaffold: $scaffold_source @ $scaffold_version"
+  echo "Scaffold: $(get_scaffold_source_display) @ $scaffold_version"
   echo "Last synced: $synced_at"
   echo ""
 
@@ -883,8 +890,10 @@ cmd_pull_finalize() {
       local file_count
       file_count=$(echo "$all_changes" | wc -l | tr -d ' ')
 
+      local display_source
+      display_source=$(get_scaffold_source_display)
       local commit_body=""
-      commit_body+="Scaffold source: $scaffold_source @ $new_version"$'\n'
+      commit_body+="Scaffold source: $display_source @ $new_version"$'\n'
       commit_body+=""$'\n'
       commit_body+="Files synced ($file_count):"$'\n'
       while IFS= read -r f; do

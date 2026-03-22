@@ -554,6 +554,496 @@ cmd_section_merge() {
   fi
 }
 
+# ---------------------------------------------------------------------------
+# Compound Commands — high-level operations that replace manual orchestration
+# ---------------------------------------------------------------------------
+
+# Pre-check: verify scaffold repo is clean and accessible
+cmd_pre_check() {
+  require_lockfile
+  local scaffold_source
+  scaffold_source=$(get_scaffold_source)
+
+  [[ -d "$scaffold_source" ]] || die "Scaffold not found at: $scaffold_source"
+
+  if git -C "$scaffold_source" rev-parse HEAD >/dev/null 2>&1; then
+    local dirty
+    dirty=$(git -C "$scaffold_source" status --porcelain 2>/dev/null)
+    if [[ -n "$dirty" ]]; then
+      echo "ERROR: Scaffold repo has uncommitted changes:" >&2
+      echo "$dirty" >&2
+      echo "" >&2
+      echo "Commit or stash changes in $scaffold_source before syncing." >&2
+      exit 1
+    fi
+  fi
+  echo "OK"
+}
+
+# pull-plan: Compute the full pull plan as JSON
+# Output: JSON array of {file, action, reason} objects
+# Actions: auto-update, section-merge, conflict, new, removed, skip
+cmd_pull_plan() {
+  require_lockfile
+  local scaffold_source
+  scaffold_source=$(get_scaffold_source)
+
+  local plan="[]"
+
+  # Check each tracked file in the lockfile
+  while IFS= read -r file; do
+    local status origin scaffold_hash local_hash
+    status=$(jq -r --arg f "$file" '.files[$f].status' "$LOCKFILE")
+    origin=$(jq -r --arg f "$file" '.files[$f].origin' "$LOCKFILE")
+    scaffold_hash=$(jq -r --arg f "$file" '.files[$f].scaffold_hash // "null"' "$LOCKFILE")
+    local_hash=$(jq -r --arg f "$file" '.files[$f].local_hash // "null"' "$LOCKFILE")
+
+    # Skip local-only files (nothing to pull)
+    if [[ "$status" == "local-only" ]]; then
+      continue
+    fi
+
+    local scaffold_file="$scaffold_source/$file"
+
+    # Check if file was removed from scaffold
+    if [[ ! -f "$scaffold_file" ]]; then
+      plan=$(echo "$plan" | jq --arg f "$file" \
+        '. + [{"file": $f, "action": "removed", "reason": "File no longer exists in scaffold"}]')
+      continue
+    fi
+
+    # Compute current hashes
+    local current_scaffold_h current_local_h
+    current_scaffold_h=$(file_hash "$scaffold_file")
+    current_local_h=$(file_hash "$file" 2>/dev/null || echo "MISSING")
+
+    # Has scaffold changed since last sync?
+    local scaffold_changed=false
+    if [[ "$current_scaffold_h" != "$scaffold_hash" ]]; then
+      scaffold_changed=true
+    fi
+
+    # Has local file changed since last sync?
+    local local_changed=false
+    if [[ "$current_local_h" != "$local_hash" && "$current_local_h" != "MISSING" ]]; then
+      local_changed=true
+    fi
+
+    if [[ "$scaffold_changed" == "false" ]]; then
+      # Scaffold hasn't changed — nothing to pull
+      continue
+    fi
+
+    if [[ "$current_local_h" == "MISSING" ]]; then
+      # File exists in lockfile but not locally (deleted locally)
+      plan=$(echo "$plan" | jq --arg f "$file" \
+        '. + [{"file": $f, "action": "new", "reason": "File missing locally but exists in scaffold"}]')
+      continue
+    fi
+
+    # Scaffold changed — check if local is clean or modified
+    if [[ "$local_changed" == "false" && "$status" != "modified" ]]; then
+      # Local is clean — safe to auto-update
+      plan=$(echo "$plan" | jq --arg f "$file" \
+        '. + [{"file": $f, "action": "auto-update", "reason": "Scaffold changed, local is clean"}]')
+    else
+      # Both sides changed — check for section-merge capability
+      local has_delimiter=false
+      if grep -q '<!-- NODE-SPECIFIC-START -->' "$scaffold_file" 2>/dev/null || \
+         grep -q '<!-- HUB-MANAGED-START -->' "$scaffold_file" 2>/dev/null; then
+        has_delimiter=true
+      fi
+
+      if [[ "$has_delimiter" == "true" ]]; then
+        plan=$(echo "$plan" | jq --arg f "$file" \
+          '. + [{"file": $f, "action": "section-merge", "reason": "Both changed, file has section delimiter"}]')
+      else
+        plan=$(echo "$plan" | jq --arg f "$file" \
+          '. + [{"file": $f, "action": "conflict", "reason": "Both scaffold and local have changes"}]')
+      fi
+    fi
+  done < <(jq -r '.files | keys[]' "$LOCKFILE" | sort)
+
+  # Check for new files in scaffold not in lockfile
+  while IFS= read -r file; do
+    if ! jq -e --arg f "$file" '.files[$f]' "$LOCKFILE" >/dev/null 2>&1; then
+      plan=$(echo "$plan" | jq --arg f "$file" \
+        '. + [{"file": $f, "action": "new", "reason": "New file in scaffold, not yet tracked"}]')
+    fi
+  done < <(scan_scaffold_files "$scaffold_source")
+
+  echo "$plan" | jq '.'
+}
+
+# pull-auto: Execute all auto-updates in one pass
+# Processes only files with action "auto-update" from pull-plan
+cmd_pull_auto() {
+  require_lockfile
+  local scaffold_source
+  scaffold_source=$(get_scaffold_source)
+
+  local count=0
+  local plan
+  plan=$(cmd_pull_plan)
+
+  echo "$plan" | jq -r '.[] | select(.action == "auto-update") | .file' | while IFS= read -r file; do
+    local scaffold_file="$scaffold_source/$file"
+    local new_hash
+    new_hash=$(file_hash "$scaffold_file")
+
+    # Ensure target directory exists
+    mkdir -p "$(dirname "$file")"
+
+    # Copy scaffold version
+    cp "$scaffold_file" "$file"
+
+    # Update lockfile in one pass
+    local tmp
+    tmp=$(mktemp)
+    jq --arg f "$file" --arg h "$new_hash" \
+      '.files[$f].scaffold_hash = $h | .files[$f].local_hash = $h | .files[$f].status = "clean"' \
+      "$LOCKFILE" > "$tmp"
+    mv "$tmp" "$LOCKFILE"
+
+    # Log
+    cmd_log_detail "AUTO-UPDATED $file"
+    count=$((count + 1))
+    echo "AUTO-UPDATED: $file"
+  done
+
+  echo "---"
+  echo "Auto-updated files complete."
+}
+
+# pull-apply: Apply a specific resolution for a single file
+# Usage: pull-apply <file> <action> [merged-content-file]
+# Actions: take-scaffold, keep-local, section-merge, accept-new, delete, write-merged <path>
+cmd_pull_apply() {
+  require_lockfile
+  local file="${1:?Usage: scaffold-sync.sh pull-apply <file> <action> [merged-content-file]}"
+  local action="${2:?}"
+  local merged_file="${3:-}"
+
+  local scaffold_source
+  scaffold_source=$(get_scaffold_source)
+  local scaffold_file="$scaffold_source/$file"
+
+  case "$action" in
+    take-scaffold)
+      [[ -f "$scaffold_file" ]] || die "Scaffold file not found: $scaffold_file"
+      mkdir -p "$(dirname "$file")"
+      cp "$scaffold_file" "$file"
+      local new_hash
+      new_hash=$(file_hash "$file")
+      local tmp; tmp=$(mktemp)
+      jq --arg f "$file" --arg h "$new_hash" \
+        '.files[$f].scaffold_hash = $h | .files[$f].local_hash = $h | .files[$f].status = "clean"' \
+        "$LOCKFILE" > "$tmp"
+      mv "$tmp" "$LOCKFILE"
+      cmd_log_detail "OVERWRITTEN $file — took scaffold version"
+      echo "APPLIED: $file (took scaffold)"
+      ;;
+
+    keep-local)
+      # Update scaffold_hash to acknowledge we've seen the change, keep local as-is
+      local new_scaffold_hash
+      new_scaffold_hash=$(file_hash "$scaffold_file")
+      local current_local_hash
+      current_local_hash=$(file_hash "$file")
+      local tmp; tmp=$(mktemp)
+      jq --arg f "$file" --arg sh "$new_scaffold_hash" --arg lh "$current_local_hash" \
+        '.files[$f].scaffold_hash = $sh | .files[$f].local_hash = $lh | .files[$f].status = "modified"' \
+        "$LOCKFILE" > "$tmp"
+      mv "$tmp" "$LOCKFILE"
+      cmd_log_detail "SKIPPED $file — kept local version"
+      echo "APPLIED: $file (kept local)"
+      ;;
+
+    section-merge)
+      [[ -f "$scaffold_file" ]] || die "Scaffold file not found: $scaffold_file"
+      [[ -f "$file" ]] || die "Local file not found: $file"
+      local merged
+      merged=$(cmd_section_merge "$scaffold_file" "$file")
+      echo "$merged" > "$file"
+      local new_hash
+      new_hash=$(file_hash "$file")
+      local new_scaffold_hash
+      new_scaffold_hash=$(file_hash "$scaffold_file")
+      local tmp; tmp=$(mktemp)
+      jq --arg f "$file" --arg sh "$new_scaffold_hash" --arg lh "$new_hash" \
+        '.files[$f].scaffold_hash = $sh | .files[$f].local_hash = $lh | .files[$f].status = "clean"' \
+        "$LOCKFILE" > "$tmp"
+      mv "$tmp" "$LOCKFILE"
+      cmd_log_detail "SECTION-MERGED $file"
+      echo "APPLIED: $file (section-merged)"
+      ;;
+
+    accept-new)
+      [[ -f "$scaffold_file" ]] || die "Scaffold file not found: $scaffold_file"
+      mkdir -p "$(dirname "$file")"
+      cp "$scaffold_file" "$file"
+      local new_hash
+      new_hash=$(file_hash "$file")
+      # Add new lockfile entry
+      cmd_lock_add "$file" "scaffold" "$new_hash" "$new_hash" "clean"
+      cmd_log_detail "ADDED $file"
+      echo "APPLIED: $file (accepted new)"
+      ;;
+
+    delete)
+      if [[ -f "$file" ]]; then
+        rm "$file"
+      fi
+      cmd_lock_remove "$file"
+      cmd_log_detail "DELETED $file"
+      echo "APPLIED: $file (deleted)"
+      ;;
+
+    write-merged)
+      [[ -n "$merged_file" ]] || die "Usage: pull-apply <file> write-merged <merged-content-file>"
+      [[ -f "$merged_file" ]] || die "Merged content file not found: $merged_file"
+      mkdir -p "$(dirname "$file")"
+      cp "$merged_file" "$file"
+      local new_hash
+      new_hash=$(file_hash "$file")
+      local new_scaffold_hash
+      new_scaffold_hash=$(file_hash "$scaffold_file")
+      local tmp; tmp=$(mktemp)
+      jq --arg f "$file" --arg sh "$new_scaffold_hash" --arg lh "$new_hash" \
+        '.files[$f].scaffold_hash = $sh | .files[$f].local_hash = $lh | .files[$f].status = "modified"' \
+        "$LOCKFILE" > "$tmp"
+      mv "$tmp" "$LOCKFILE"
+      cmd_log_detail "MERGED $file — Claude-proposed merge applied"
+      echo "APPLIED: $file (merged)"
+      ;;
+
+    *)
+      die "Unknown action: $action. Use: take-scaffold, keep-local, section-merge, accept-new, delete, write-merged"
+      ;;
+  esac
+}
+
+# pull-finalize: Update version, write log header, output summary
+cmd_pull_finalize() {
+  require_lockfile
+  local scaffold_source
+  scaffold_source=$(get_scaffold_source)
+
+  local new_version
+  if git -C "$scaffold_source" rev-parse HEAD >/dev/null 2>&1; then
+    new_version=$(git -C "$scaffold_source" rev-parse --short HEAD)
+  else
+    new_version="unknown"
+  fi
+
+  cmd_lock_set_version "$new_version"
+  cmd_log "pull from scaffold @ $new_version"
+
+  echo "Pull finalized. Scaffold version: $new_version"
+}
+
+# push-candidates: List files eligible for push with current state
+# Output: JSON array of {file, status, has_diff, first_lines}
+cmd_push_candidates() {
+  require_lockfile
+  local scaffold_source
+  scaffold_source=$(get_scaffold_source)
+  local specific_file="${1:-}"
+
+  local candidates="[]"
+
+  while IFS= read -r file; do
+    local status
+    status=$(jq -r --arg f "$file" '.files[$f].status' "$LOCKFILE")
+
+    # Only modified and local-only files are push candidates
+    if [[ "$status" != "modified" && "$status" != "local-only" && "$status" != "promoted" ]]; then
+      continue
+    fi
+
+    # If user specified a file, skip others
+    if [[ -n "$specific_file" && "$file" != "$specific_file" ]]; then
+      continue
+    fi
+
+    [[ -f "$file" ]] || continue
+
+    local has_diff="false"
+    local scaffold_file="$scaffold_source/$file"
+    if [[ -f "$scaffold_file" ]]; then
+      if ! diff -q "$scaffold_file" "$file" >/dev/null 2>&1; then
+        has_diff="true"
+      fi
+    fi
+
+    candidates=$(echo "$candidates" | jq --arg f "$file" --arg s "$status" --arg d "$has_diff" \
+      '. + [{"file": $f, "status": $s, "has_diff": ($d == "true")}]')
+  done < <(jq -r '.files | keys[]' "$LOCKFILE" | sort)
+
+  echo "$candidates" | jq '.'
+}
+
+# push-apply: Push a single file to the scaffold
+# Usage: push-apply <file> [description]
+cmd_push_apply() {
+  require_lockfile
+  local file="${1:?Usage: scaffold-sync.sh push-apply <file> [description]}"
+  local description="${2:-updated $file}"
+
+  local scaffold_source
+  scaffold_source=$(get_scaffold_source)
+  local status
+  status=$(jq -r --arg f "$file" '.files[$f].status // "unknown"' "$LOCKFILE")
+
+  [[ -f "$file" ]] || die "File not found: $file"
+
+  # Ensure target directory exists in scaffold
+  mkdir -p "$(dirname "$scaffold_source/$file")"
+
+  # Copy to scaffold
+  cp "$file" "$scaffold_source/$file"
+
+  # Update lockfile based on current status
+  local new_hash
+  new_hash=$(file_hash "$file")
+
+  local tmp; tmp=$(mktemp)
+  if [[ "$status" == "local-only" ]]; then
+    # Promoting: update origin and status
+    jq --arg f "$file" --arg h "$new_hash" \
+      '.files[$f].origin = "scaffold" | .files[$f].scaffold_hash = $h | .files[$f].local_hash = $h | .files[$f].status = "promoted"' \
+      "$LOCKFILE" > "$tmp"
+    cmd_log_detail "PROMOTED $file"
+    cmd_changelog_detail "ADDED $file — $description"
+  else
+    # Modified → synced: update hashes and status
+    jq --arg f "$file" --arg h "$new_hash" \
+      '.files[$f].scaffold_hash = $h | .files[$f].local_hash = $h | .files[$f].status = "clean"' \
+      "$LOCKFILE" > "$tmp"
+    cmd_log_detail "UPDATED $file"
+    cmd_changelog_detail "MODIFIED $file — $description"
+  fi
+  mv "$tmp" "$LOCKFILE"
+
+  echo "PUSHED: $file ($status → pushed)"
+}
+
+# push-finalize: Commit in scaffold repo, update version, write logs
+# Usage: push-finalize <commit-message>
+cmd_push_finalize() {
+  require_lockfile
+  local message="${1:?Usage: scaffold-sync.sh push-finalize <commit-message>}"
+
+  local scaffold_source
+  scaffold_source=$(get_scaffold_source)
+
+  # Get project name for logging
+  local project_name
+  project_name=$(basename "$(pwd)")
+
+  # Stage and commit in scaffold
+  git -C "$scaffold_source" add -A
+  git -C "$scaffold_source" commit -m "$message" || echo "Nothing to commit in scaffold"
+
+  # Update version
+  local new_version
+  if git -C "$scaffold_source" rev-parse HEAD >/dev/null 2>&1; then
+    new_version=$(git -C "$scaffold_source" rev-parse --short HEAD)
+  else
+    new_version="unknown"
+  fi
+
+  cmd_lock_set_version "$new_version"
+  cmd_log "push to scaffold @ $new_version"
+  cmd_changelog "push from $project_name"
+
+  echo "Push finalized. Scaffold version: $new_version"
+}
+
+# promote: Full promote workflow for a single file
+# Usage: promote <file>
+cmd_promote() {
+  require_lockfile
+  local file="${1:?Usage: scaffold-sync.sh promote <file>}"
+
+  local status
+  status=$(jq -r --arg f "$file" '.files[$f].status // "unknown"' "$LOCKFILE")
+
+  if [[ "$status" == "clean" || "$status" == "promoted" ]]; then
+    echo "SKIP: $file is already $status — nothing to promote."
+    exit 0
+  fi
+
+  if [[ "$status" != "local-only" ]]; then
+    die "Cannot promote: $file has status '$status'. Only local-only files can be promoted."
+  fi
+
+  [[ -f "$file" ]] || die "File not found: $file"
+
+  local scaffold_source
+  scaffold_source=$(get_scaffold_source)
+
+  # Copy to scaffold
+  mkdir -p "$(dirname "$scaffold_source/$file")"
+  cp "$file" "$scaffold_source/$file"
+
+  # Update lockfile
+  local new_hash
+  new_hash=$(file_hash "$file")
+  local tmp; tmp=$(mktemp)
+  jq --arg f "$file" --arg h "$new_hash" \
+    '.files[$f].origin = "scaffold" | .files[$f].scaffold_hash = $h | .files[$f].local_hash = $h | .files[$f].status = "promoted"' \
+    "$LOCKFILE" > "$tmp"
+  mv "$tmp" "$LOCKFILE"
+
+  # Log
+  cmd_log_detail "PROMOTED $file"
+  cmd_changelog_detail "ADDED $file — promoted from $(basename "$(pwd)")"
+
+  # Commit in scaffold
+  git -C "$scaffold_source" add -A
+  git -C "$scaffold_source" commit -m "chore(scaffold): add $(basename "$file") from $(basename "$(pwd)")"
+
+  # Update version
+  local new_version
+  new_version=$(git -C "$scaffold_source" rev-parse --short HEAD 2>/dev/null || echo "unknown")
+  cmd_lock_set_version "$new_version"
+  cmd_log "promote to scaffold @ $new_version"
+  cmd_changelog "promote from $(basename "$(pwd)")"
+
+  echo "PROMOTED: $file → scaffold @ $new_version"
+}
+
+# demote: Full demote workflow for a single file
+# Usage: demote <file>
+cmd_demote() {
+  require_lockfile
+  local file="${1:?Usage: scaffold-sync.sh demote <file>}"
+
+  local status
+  status=$(jq -r --arg f "$file" '.files[$f].status // "unknown"' "$LOCKFILE")
+
+  if [[ "$status" == "modified" || "$status" == "local-only" ]]; then
+    echo "SKIP: $file is already $status — effectively demoted."
+    exit 0
+  fi
+
+  if [[ "$status" != "clean" ]]; then
+    die "Cannot demote: $file has status '$status'. Only clean files can be demoted."
+  fi
+
+  # Mark as modified (prevents auto-update on future pulls)
+  local tmp; tmp=$(mktemp)
+  jq --arg f "$file" '.files[$f].status = "modified"' "$LOCKFILE" > "$tmp"
+  mv "$tmp" "$LOCKFILE"
+
+  # Log
+  cmd_log "demote"
+  cmd_log_detail "DEMOTED $file — marked as local override"
+
+  echo "DEMOTED: $file (future pulls will show diff instead of auto-updating)"
+}
+
 cmd_scan() {
   echo "Tracked files in project:"
   scan_tracked_files | while IFS= read -r f; do
@@ -578,6 +1068,7 @@ cmd_scan() {
 require_jq
 
 case "${1:-}" in
+  # --- Atomic commands (building blocks) ---
   init)             shift; cmd_init "$@" ;;
   status)           cmd_status ;;
   diff)             shift; cmd_diff "${1:-}" ;;
@@ -593,10 +1084,35 @@ case "${1:-}" in
   changelog-detail) shift; cmd_changelog_detail "$@" ;;
   section-merge)    shift; cmd_section_merge "$@" ;;
   scan)             cmd_scan ;;
+
+  # --- Compound commands (replace manual orchestration) ---
+  pre-check)        cmd_pre_check ;;
+  pull-plan)        cmd_pull_plan ;;
+  pull-auto)        cmd_pull_auto ;;
+  pull-apply)       shift; cmd_pull_apply "$@" ;;
+  pull-finalize)    cmd_pull_finalize ;;
+  push-candidates)  shift; cmd_push_candidates "${1:-}" ;;
+  push-apply)       shift; cmd_push_apply "$@" ;;
+  push-finalize)    shift; cmd_push_finalize "$@" ;;
+  promote)          shift; cmd_promote "$@" ;;
+  demote)           shift; cmd_demote "$@" ;;
+
   *)
     echo "Usage: scaffold-sync.sh <command> [args]"
     echo ""
-    echo "Commands:"
+    echo "Compound commands (use these — they handle copy + lockfile + log in one call):"
+    echo "  pre-check                             Verify scaffold repo is clean"
+    echo "  pull-plan                             Compute pull plan as JSON"
+    echo "  pull-auto                             Execute all auto-updates in one pass"
+    echo "  pull-apply <file> <action> [merged]   Apply a conflict resolution"
+    echo "  pull-finalize                         Update version and write log"
+    echo "  push-candidates [file]                List push-eligible files as JSON"
+    echo "  push-apply <file> [description]       Push a file to scaffold"
+    echo "  push-finalize <commit-message>        Commit in scaffold and update version"
+    echo "  promote <file>                        Full promote workflow"
+    echo "  demote <file>                         Full demote workflow"
+    echo ""
+    echo "Atomic commands (building blocks — prefer compound commands):"
     echo "  init [scaffold-path]                  Generate lockfile from current state"
     echo "  status                                Show file provenance and sync state"
     echo "  diff [file]                           Show diff between local and scaffold"

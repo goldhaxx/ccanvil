@@ -15,7 +15,8 @@ A visual, browsable guide to the scaffold system: how it works, when to use each
 5. [Scaffold Sync System](#scaffold-sync-system)
 6. [Command Reference](#command-reference)
 7. [Configuration Layers](#configuration-layers)
-8. [Decision Guide: When To Use What](#decision-guide)
+8. [Hooks System](#hooks-system)
+9. [Decision Guide: When To Use What](#decision-guide)
 
 ---
 
@@ -407,150 +408,121 @@ stateDiagram-v2
 
 ### Pull Flow (Hub → Project)
 
+Every step is handled by a script command except conflict merge proposals, which require Claude's semantic understanding.
+
 ```mermaid
 flowchart TD
-    START["/scaffold-pull"]
-    CHECK{"Scaffold repo<br/>has uncommitted<br/>changes?"}
-    STOP["STOP — warn user"]
-    SCAN["Compare each file's<br/>scaffold_hash vs current scaffold"]
-
-    subgraph "For each file"
-        CHANGED{"Scaffold<br/>changed?"}
-        LOCAL{"Local file<br/>is clean?"}
-        AUTO["AUTO-UPDATE<br/><i>copy scaffold version</i>"]
-        CONFLICT["CONFLICT<br/><i>both sides changed</i>"]
-        SKIP_NC["Skip — no change"]
-        SKIP_LO["Skip — local changes preserved"]
-
-        OPT{"User chooses:"}
-        KEEP["Keep local"]
-        TAKE["Take scaffold"]
-        MERGE["Merge both<br/><i>Claude proposes combined version</i>"]
-        DIFF["Show full diff<br/><i>then choose</i>"]
+    subgraph DETERMINISTIC ["Deterministic (script handles)"]
+        START["pre-check"]
+        PLAN["pull-plan → JSON"]
+        AUTO["pull-auto<br/><i>all clean files in one pass</i>"]
+        SM["pull-apply file section-merge"]
+        TAKE["pull-apply file take-scaffold"]
+        KEEP["pull-apply file keep-local"]
+        ACCEPT["pull-apply file accept-new"]
+        DEL["pull-apply file delete"]
+        FIN["pull-finalize"]
     end
 
-    NEW{"New file<br/>in scaffold?"}
-    OFFER["Offer to add"]
-    ACCEPT["Copy to project"]
-    DECLINE["Skip"]
+    subgraph STOCHASTIC ["Claude judgment"]
+        MERGE["Read both versions,<br/>propose combined content"]
+    end
 
-    UPDATE["Update lockfile<br/>hashes + version"]
-    LOG["Write sync log entry"]
+    subgraph USER ["User decision"]
+        OPT{"Conflict:<br/>keep / take /<br/>merge / diff?"}
+        NEW_OPT{"New file:<br/>accept / skip?"}
+        RM_OPT{"Removed:<br/>keep / delete?"}
+        APPROVE{"Approve<br/>merged content?"}
+    end
 
-    START --> CHECK
-    CHECK -->|"Yes"| STOP
-    CHECK -->|"No"| SCAN
-    SCAN --> CHANGED
-    CHANGED -->|"No"| LOCAL
-    LOCAL -->|"Clean"| SKIP_NC
-    LOCAL -->|"Modified"| SKIP_LO
-    CHANGED -->|"Yes"| LOCAL
-    LOCAL -->|"Clean"| AUTO
-    LOCAL -->|"Modified"| CONFLICT
+    START --> PLAN
+    PLAN -->|"auto-update"| AUTO
+    PLAN -->|"section-merge"| SM
+    PLAN -->|"conflict"| OPT
+    PLAN -->|"new"| NEW_OPT
+    PLAN -->|"removed"| RM_OPT
 
-    CONFLICT --> OPT
-    OPT --> KEEP
-    OPT --> TAKE
-    OPT --> MERGE
-    OPT --> DIFF
-    DIFF --> OPT
+    OPT -->|"Take scaffold"| TAKE
+    OPT -->|"Keep local"| KEEP
+    OPT -->|"Merge"| MERGE
+    MERGE --> APPROVE
+    APPROVE -->|"Yes"| TAKE
+    APPROVE -->|"No"| OPT
 
-    SCAN --> NEW
-    NEW -->|"Yes"| OFFER
-    OFFER --> ACCEPT
-    OFFER --> DECLINE
+    NEW_OPT -->|"Accept"| ACCEPT
+    RM_OPT -->|"Keep"| KEEP
+    RM_OPT -->|"Delete"| DEL
 
-    AUTO --> UPDATE
-    KEEP --> UPDATE
-    TAKE --> UPDATE
-    MERGE --> UPDATE
-    ACCEPT --> UPDATE
-    UPDATE --> LOG
+    AUTO --> FIN
+    SM --> FIN
+    TAKE --> FIN
+    KEEP --> FIN
+    ACCEPT --> FIN
+    DEL --> FIN
 
-    style AUTO fill:#c8e6c9
-    style CONFLICT fill:#ffcdd2
-    style MERGE fill:#fff3e0
-    style STOP fill:#ffcdd2,stroke:#333,stroke-width:2px
+    style DETERMINISTIC fill:#c8e6c9,stroke:#333,stroke-width:2px
+    style STOCHASTIC fill:#fff3e0,stroke:#333,stroke-width:2px
+    style USER fill:#e3f2fd,stroke:#333,stroke-width:2px
 ```
 
 ### Push Flow (Project → Hub)
 
+Every step is handled by a script command except change classification, which requires Claude's semantic understanding.
+
 ```mermaid
 flowchart TD
-    START["/scaffold-push"]
-    CHECK{"Scaffold repo<br/>has uncommitted<br/>changes?"}
-    STOP["STOP — warn user"]
-
-    GATHER["Gather candidates:<br/>MODIFIED + LOCAL files"]
-
-    subgraph "For each candidate"
-        READ["Read file content"]
-        CLASSIFY{"Classify change"}
-        GEN["GENERALIZABLE<br/><i>useful across projects</i>"]
-        SPEC["PROJECT-SPECIFIC<br/><i>references project details</i>"]
-        MIX["MIXED<br/><i>extract generalizable parts</i>"]
-
-        PRESENT["Present classification<br/>+ diff to user"]
-        DECIDE{"User decision"}
-        APPROVE["Approved"]
-        EDIT["Edit first"]
-        SKIP["Skip"]
+    subgraph DETERMINISTIC ["Deterministic (script handles)"]
+        START["pre-check"]
+        CANDS["push-candidates → JSON"]
+        DIFF["diff file"]
+        APPLY["push-apply file desc"]
+        FIN["push-finalize message"]
     end
 
-    APPLY["Copy to scaffold<br/><i>only generalizable parts</i>"]
-    COMMIT["Commit in scaffold repo"]
-    CHANGELOG["Write SCAFFOLD_CHANGELOG.md"]
-    LOCKUP["Update lockfile"]
-    LOG["Write sync log"]
+    subgraph STOCHASTIC ["Claude judgment"]
+        CLASSIFY{"Classify change:<br/>generalizable /<br/>project-specific / mixed"}
+    end
 
-    START --> CHECK
-    CHECK -->|"Yes"| STOP
-    CHECK -->|"No"| GATHER
-    GATHER --> READ
-    READ --> CLASSIFY
-    CLASSIFY --> GEN
-    CLASSIFY --> SPEC
-    CLASSIFY --> MIX
-    GEN --> PRESENT
-    MIX --> PRESENT
-    SPEC --> SKIP
+    subgraph USER ["User decision"]
+        PRESENT["Review classification<br/>+ diff"]
+        DECIDE{"Approve / skip /<br/>edit first?"}
+    end
 
+    START --> CANDS
+    CANDS --> DIFF
+    DIFF --> CLASSIFY
+    CLASSIFY -->|"project-specific"| SKIP["Auto-skip"]
+    CLASSIFY -->|"generalizable / mixed"| PRESENT
     PRESENT --> DECIDE
-    DECIDE --> APPROVE
-    DECIDE --> EDIT
-    DECIDE --> SKIP
-    EDIT --> PRESENT
+    DECIDE -->|"Approve"| APPLY
+    DECIDE -->|"Skip"| SKIP
+    DECIDE -->|"Edit"| PRESENT
+    APPLY --> FIN
 
-    APPROVE --> APPLY
-    APPLY --> COMMIT
-    COMMIT --> CHANGELOG
-    CHANGELOG --> LOCKUP
-    LOCKUP --> LOG
-
-    style GEN fill:#c8e6c9
-    style SPEC fill:#ffcdd2
-    style MIX fill:#fff3e0
-    style STOP fill:#ffcdd2,stroke:#333,stroke-width:2px
+    style DETERMINISTIC fill:#c8e6c9,stroke:#333,stroke-width:2px
+    style STOCHASTIC fill:#fff3e0,stroke:#333,stroke-width:2px
+    style USER fill:#e3f2fd,stroke:#333,stroke-width:2px
 ```
 
 ### Promote and Demote
 
+Demote is fully deterministic. Promote has one judgment call: checking for project-specific content.
+
 ```mermaid
 flowchart LR
     subgraph Promote ["/scaffold-promote file"]
-        P1["Verify file is<br/>local-only"] --> P2["Check for<br/>project-specific content"]
-        P2 --> P3["Copy to scaffold hub"]
-        P3 --> P4["Status: local-only → promoted"]
+        P1["Claude: check for<br/>project-specific content"] --> P2["scaffold-sync.sh promote file<br/><i>verify + copy + lockfile + git + log</i>"]
     end
 
-    subgraph Demote ["/scaffold-demote file"]
-        D1["Verify file is<br/>clean"] --> D2["Mark as local override"]
-        D2 --> D3["Status: clean → modified"]
-        D3 --> D4["Future pulls show diff<br/>instead of auto-updating"]
+    subgraph Demote ["/scaffold-demote file — fully deterministic"]
+        D1["scaffold-sync.sh demote file<br/><i>verify + lockfile + log</i>"]
     end
 
     style Promote fill:#c8e6c9
     style Demote fill:#fff3e0
+    style P1 fill:#fff3e0
+    style P2 fill:#c8e6c9
+    style D1 fill:#c8e6c9
 ```
 
 ### Document Inheritance (Section-Merge)
@@ -678,23 +650,129 @@ graph LR
     style CMDS fill:#fff3e0
 ```
 
-**The principle:** Use hooks for things that must ALWAYS happen (formatting, security). Use rules and CLAUDE.md for things requiring judgment (coding patterns, conventions). Use skills/agents for workflows that only activate sometimes.
+**The principle:** Use hooks for things that must ALWAYS happen (formatting, security). Use rules and CLAUDE.md for things requiring judgment (coding patterns, conventions). Use skills/agents for workflows that only activate sometimes. See the [Deterministic-First rule](#deterministic-first-principle) for the full hierarchy.
 
-### Hooks (settings.json)
+### Hooks (`.claude/hooks/`)
 
-| Hook | Event | What it does |
-|------|-------|-------------|
-| Security blocker | Pre-write | Blocks writes to `.env`, `*credentials*`, `*secret*` files |
-| Auto-format | Post-write | Runs formatter (commented out — uncomment for your project) |
+Hook scripts live in `.claude/hooks/` and are referenced from `settings.json`. They receive JSON on stdin and control behavior via exit codes.
+
+| Hook | Event | Script | What it does |
+|------|-------|--------|-------------|
+| File protection | PreToolUse (Write\|Edit\|MultiEdit) | `protect-files.sh` | Blocks writes to `.env`, credentials, `SCAFFOLD_FRAMEWORK.md`, `node_modules/`, `dist/`, `generated/` |
+| Auto-format | PostToolUse (Write\|Edit\|MultiEdit) | `format-on-write.sh` | Runs project formatter (uncomment for your stack: Prettier, Black, gofmt, etc.) |
 
 ### Rules (loaded at launch)
 
 | Rule file | Concern | Key behaviors enforced |
 |-----------|---------|----------------------|
+| `deterministic-first.md` | Architecture | Use scripts/hooks over Claude reasoning for computable operations; hierarchy: hook → script → slash command → pure reasoning |
 | `tdd.md` | Testing | Red-green-refactor cycle, test naming, fix implementation not tests |
 | `workflow.md` | Sessions | One objective per session, checkpoint, delegate research, stop after 2 failures |
 | `code-quality.md` | Code | Follow existing patterns, typed errors, pin dependencies, intent-revealing names |
 | `tls-troubleshooting.md` | Certs | Auto-detect WARP cert errors, fix with CA bundle, never disable TLS |
+
+---
+
+## Hooks System
+
+Hooks are deterministic automation that runs at Claude Code lifecycle events — outside the reasoning loop, at zero context cost. They are the foundation of the [deterministic-first principle](#deterministic-first-principle).
+
+> **Reference:** See `docs/templates/hooks-reference.md` for the complete hook specification including JSON schemas, all event types, and writing conventions.
+
+### How Hooks Work
+
+```mermaid
+sequenceDiagram
+    participant C as Claude
+    participant CC as Claude Code
+    participant H as Hook Script
+    participant F as File System
+
+    C->>CC: Write tool call
+    CC->>H: PreToolUse (JSON on stdin)
+    alt Exit 0 (allow)
+        H-->>CC: OK
+        CC->>F: Write file
+        F-->>CC: Done
+        CC->>H: PostToolUse (JSON on stdin)
+        H->>F: Run formatter
+        H-->>CC: OK
+    else Exit 2 (block)
+        H-->>CC: BLOCKED: reason (stderr)
+        CC->>C: "Hook blocked: reason"
+        Note over C: Claude adjusts approach
+    end
+```
+
+### Deterministic-First Principle
+
+Every operation falls somewhere on the deterministic-stochastic spectrum. The scaffold enforces this hierarchy:
+
+```mermaid
+graph TD
+    subgraph "1. HOOK — zero context cost"
+        H1["Block writes to .env"]
+        H2["Auto-format on save"]
+        H3["Protect SCAFFOLD_FRAMEWORK.md"]
+    end
+
+    subgraph "2. SCRIPT — one command instead of many"
+        S1["pull-auto: copy + lockfile + log"]
+        S2["promote: verify + copy + git + log"]
+        S3["demote: verify + lockfile + log"]
+    end
+
+    subgraph "3. SLASH COMMAND — script calls + judgment"
+        C1["scaffold-pull: script plans, Claude resolves conflicts"]
+        C2["scaffold-push: script lists candidates, Claude classifies"]
+    end
+
+    subgraph "4. PURE CLAUDE — semantic understanding only"
+        L1["Propose merge content"]
+        L2["Classify generalizable vs specific"]
+        L3["Write specs and code"]
+    end
+
+    style H1 fill:#c8e6c9
+    style H2 fill:#c8e6c9
+    style H3 fill:#c8e6c9
+    style S1 fill:#e8f4e8
+    style S2 fill:#e8f4e8
+    style S3 fill:#e8f4e8
+    style C1 fill:#e3f2fd
+    style C2 fill:#e3f2fd
+    style L1 fill:#fff3e0
+    style L2 fill:#fff3e0
+    style L3 fill:#fff3e0
+```
+
+**The test:** "Can this step produce a wrong answer?" If no → it belongs in a script or hook, not Claude's reasoning.
+
+### Hook vs Rule vs Skill
+
+| Situation | Mechanism | Why |
+|-----------|-----------|-----|
+| "Never write to .env files" | **Hook** (PreToolUse, exit 2) | Binary file path check, zero context cost |
+| "Always format code after writing" | **Hook** (PostToolUse) | Deterministic formatter, zero context cost |
+| "Protect SCAFFOLD_FRAMEWORK.md" | **Hook** (PreToolUse, exit 2) | Binary check, enforced even if Claude forgets the rule |
+| "Follow existing code patterns" | **Rule** | Requires semantic understanding of codebase |
+| "Don't add unnecessary dependencies" | **Rule** | Requires judgment about "unnecessary" |
+| "Run TDD red-green-refactor cycle" | **Skill** | Multi-step workflow with verification |
+
+### Active Hooks
+
+| Script | Event | Exit 2 blocks | What it checks |
+|--------|-------|---------------|----------------|
+| `protect-files.sh` | PreToolUse | Yes | `.env`, `*credentials*`, `*secret*`, `*.pem`, `*.key`, `SCAFFOLD_FRAMEWORK.md`, `node_modules/`, `dist/`, `generated/`, `.git/` |
+| `format-on-write.sh` | PostToolUse | No | Detects file type, runs appropriate formatter (uncomment for your stack) |
+
+### Adding a New Hook
+
+1. Create script in `.claude/hooks/` (use `protect-files.sh` as template)
+2. `chmod +x .claude/hooks/my-hook.sh`
+3. Add entry to `.claude/settings.json` under the appropriate event
+4. Test: `echo '{"tool_input":{"file_path":"test.env"}}' | .claude/hooks/my-hook.sh; echo "exit: $?"`
+5. Update this section and `docs/templates/hooks-reference.md`
 
 ---
 
@@ -768,6 +846,9 @@ Every scaffold feature traces back to transformer architecture research. This ta
 
 | Practice | Research basis |
 |----------|--------------|
+| Deterministic-first principle | Every token Claude spends on a deterministic operation (cp, diff, hash, lockfile update) is a token stolen from judgment calls that need a transformer. Computable operations must be scripts/hooks. |
+| Hooks over rules for binary checks | Hooks run outside the context window at zero cost. Rules consume instruction slots and can be forgotten under context pressure. Hooks enforce unconditionally. |
+| Compound script commands | One `pull-auto` call replaces 4-6 manual commands per file (cp + hash + lock-update ×3 + log). Reduces context burn by ~70% during sync operations. |
 | CLAUDE.md under 80 lines | U-shaped attention: models attend to beginning/end, lose the middle. ~150-200 effective instruction slots. |
 | TDD verification loops | Without tests, 80% accuracy per decision × 20 decisions = 1.2% overall success. Tests provide external oracle. |
 | Spec before code | "Instruction loss" is the primary bottleneck — models lose track of earlier requirements when multiple features specified together. |

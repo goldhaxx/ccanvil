@@ -30,24 +30,24 @@
     ]
   },
   "hooks": {
-    "PostToolUse": [
-      {
-        "matcher": "Write|Edit|MultiEdit",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "# Auto-format after file edits (uncomment the right one for your project)\n# npx prettier --write \"$CLAUDE_FILE_PATHS\" 2>/dev/null || true\n# pnpm exec prettier --write \"$CLAUDE_FILE_PATHS\" 2>/dev/null || true\necho 'File written: '$CLAUDE_FILE_PATHS"
-          }
-        ]
-      }
-    ],
     "PreToolUse": [
       {
         "matcher": "Write|Edit|MultiEdit",
         "hooks": [
           {
             "type": "command",
-            "command": "# Block writes to sensitive files\nfor f in $CLAUDE_FILE_PATHS; do\n  case \"$f\" in\n    *.env|*.env.*|*credentials*|*secret*)\n      echo 'BLOCKED: Cannot write to sensitive file: '$f\n      exit 1\n      ;;\n  esac\ndone"
+            "command": "\"$CLAUDE_PROJECT_DIR\"/.claude/hooks/protect-files.sh"
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "Write|Edit|MultiEdit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"$CLAUDE_PROJECT_DIR\"/.claude/hooks/format-on-write.sh"
           }
         ]
       }

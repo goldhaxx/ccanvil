@@ -1,48 +1,48 @@
 Push project customizations to the scaffold hub for review.
 
-## Pre-checks
+All deterministic operations (copy, hash, lockfile, git commit, logging) are handled by the script. Claude's role is LIMITED to: classifying changes as generalizable vs project-specific.
 
-1. Run `./scripts/scaffold-sync.sh status` to get current state.
-2. Read `.claude/scaffold.lock` to get the scaffold source path.
-3. Check if the scaffold repo has uncommitted changes: `git -C <scaffold_source> status --porcelain`. If dirty, STOP and warn the user.
+## Step 1: Pre-check and identify candidates (deterministic)
 
-## Identify candidates
+```bash
+./scripts/scaffold-sync.sh pre-check
+./scripts/scaffold-sync.sh push-candidates
+```
 
-Gather files that could be pushed:
-- **MODIFIED** files — scaffold-origin files with local changes
-- **LOCAL** files — project-only files not in scaffold
-- If the user specified a file argument, only process that file.
+If the user specified a file: `./scripts/scaffold-sync.sh push-candidates <file>`
 
-## For each candidate
+Read the JSON output: array of `{file, status, has_diff}` objects.
+
+## Step 2: For each candidate (JUDGMENT CALL)
 
 1. Read the file content.
-2. If it's a MODIFIED scaffold file, show the diff between scaffold version and local version.
-3. If it's a LOCAL file, show the full content.
-4. Classify the change:
-   - **Generalizable** — useful across projects (new rule, improved workflow, better agent prompt, new command, new skill, utility script)
+2. If `has_diff` is true, show the diff: `./scripts/scaffold-sync.sh diff <file>`
+3. **Classify the change** — this is Claude's judgment call:
+   - **Generalizable** — useful across projects (new rule, improved workflow, better agent prompt, utility script)
    - **Project-specific** — references project names, specific APIs, domain logic, tech stack details
-5. Present the classification and rationale to the user.
-6. Ask the user to approve, skip, or edit before pushing.
+   - **Mixed** — extract generalizable parts
+4. Present the classification and rationale to the user.
+5. User approves, skips, or edits.
 
-## Apply approved pushes
+## Step 3: Apply approved pushes (deterministic)
 
 For each approved file:
-1. Copy the file to the scaffold at the corresponding path: `cp <project_file> <scaffold_source>/<file>`
-2. For MODIFIED files where only parts are generalizable: read the scaffold version, apply only the generalizable changes, show the result to the user for approval.
-3. Update the lockfile:
-   - For LOCAL → PROMOTED: `./scripts/scaffold-sync.sh lock-update <file> status promoted` and update `scaffold_hash`
-   - For MODIFIED → clean: update `scaffold_hash` to match new scaffold version
-4. Log to changelog: `./scripts/scaffold-sync.sh changelog "push from <project_name>"` and `changelog-detail "ADDED/MODIFIED <file> — <description>"`
-5. Log locally: `./scripts/scaffold-sync.sh log "push to scaffold"` and `log-detail "PROMOTED/UPDATED <file>"`
+```bash
+./scripts/scaffold-sync.sh push-apply <file> "<brief description>"
+```
 
-## Finalize
+For mixed files where only parts are generalizable: read the scaffold version, apply only the generalizable changes to a temp file, show the user for approval, then push the temp file content.
 
-1. Commit in the scaffold repo: `git -C <scaffold_source> add -A && git commit -m "chore(scaffold): upstream <description>"`
-2. Update scaffold version in lockfile: `./scripts/scaffold-sync.sh lock-set-version <new_commit>`
-3. Summarize what was pushed.
+## Step 4: Finalize (deterministic)
+
+```bash
+./scripts/scaffold-sync.sh push-finalize "chore(scaffold): upstream <description>"
+```
+
+Report what was pushed.
 
 ## Rules
+- NEVER run `cp`, `jq`, `lock-update`, or `git -C` manually. Use compound commands.
 - NEVER push project-specific content (tech stack, project names, API endpoints, domain logic).
-- NEVER overwrite scaffold files wholesale with a project-specific version. Extract only generalizable changes.
+- NEVER push the CLAUDE.md node section (above the delimiter).
 - ALWAYS show the user what will be written to the scaffold before committing.
-- The scaffold's CLAUDE.md is NEVER pushed to — it has `[Project Name]` placeholders that must be preserved.

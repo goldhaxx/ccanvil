@@ -1,60 +1,70 @@
 Pull updates from the scaffold hub into this project.
 
-## Pre-checks
+All deterministic operations (copy, hash, lockfile, logging) are handled by the script. Claude's role is LIMITED to judgment calls: conflict resolution and merge proposals.
 
-1. Run `./scripts/scaffold-sync.sh status` to get current state.
-2. Read `.claude/scaffold.lock` to get the scaffold source path and version.
-3. Check if the scaffold repo has uncommitted changes: `git -C <scaffold_source> status --porcelain`. If dirty, STOP and warn the user.
+## Step 1: Pre-check and plan (deterministic)
 
-## Pull workflow
-
-For each tracked file, compare the scaffold's current version against the lockfile's `scaffold_hash`:
-
-### Auto-update (scaffold changed, local is clean)
-- Copy the scaffold version to the project
-- Update the lockfile: `./scripts/scaffold-sync.sh lock-update <file> scaffold_hash <new_hash>` and `lock-update <file> local_hash <new_hash>`
-- Log: `./scripts/scaffold-sync.sh log-detail "AUTO-UPDATED <file>"`
-
-### Conflict (scaffold changed, local is modified)
-
-**Section-merge files (GUIDE.md, CLAUDE.md):** If the scaffold version of the file contains `<!-- NODE-SPECIFIC-START -->` or `<!-- HUB-MANAGED-START -->`, use section-merge instead of the standard conflict flow:
-1. Run `./scripts/scaffold-sync.sh section-merge <scaffold_source>/<file> <file>` to produce the merged result
-2. Show the user what will change (hub sections updated, node sections preserved)
-3. If user approves, write the merged result to the file
-4. Log: `SECTION-MERGED <file>`
-
-**All other files:** Present the user with:
+```bash
+./scripts/scaffold-sync.sh pre-check
+./scripts/scaffold-sync.sh pull-plan
 ```
-CONFLICT: <file>
-  Both scaffold and local have changes since last sync.
+
+Read the JSON output. It contains an array of `{file, action, reason}` objects.
+
+## Step 2: Execute auto-updates (deterministic)
+
+If the plan contains `auto-update` entries:
+```bash
+./scripts/scaffold-sync.sh pull-auto
 ```
-Show the diff between scaffold and local versions.
-Offer four options:
-1. **Keep local** — skip this update
-2. **Take scaffold** — overwrite local with scaffold version
-3. **Merge** — read both versions, propose a combined version, show it to the user for approval before writing
-4. **Show full diff** — display side-by-side before deciding
 
-Log the resolution: `SKIPPED`, `OVERWRITTEN`, or `MERGED`
+This copies all clean files, updates the lockfile, and logs — in one call. Do NOT manually `cp` or `lock-update`.
 
-### New in scaffold (file exists in scaffold but not in project/lockfile)
-Show the file's purpose and first few lines. Ask the user to accept or skip.
-If accepted:
-- Copy to project
-- Add lockfile entry: `./scripts/scaffold-sync.sh lock-add <file> scaffold <hash> <hash> clean`
-- Log: `ADDED <file>`
+## Step 3: Handle section-merges (deterministic)
 
-### Removed from scaffold (file in lockfile but gone from scaffold)
-Ask the user: keep locally or delete?
-Log: `KEPT <file>` or `DELETED <file>`
+For each file with action `section-merge`:
+```bash
+./scripts/scaffold-sync.sh pull-apply <file> section-merge
+```
 
-## Finalize
+Show the user what changed (hub sections updated, node sections preserved). No Claude judgment needed — the delimiter-based merge is deterministic.
 
-1. Update scaffold version in lockfile: `./scripts/scaffold-sync.sh lock-set-version <current_scaffold_commit>`
-2. Write the sync log header: `./scripts/scaffold-sync.sh log "pull from scaffold @ <version>"`
-3. Summarize what happened: N auto-updated, N conflicts resolved, N new files added, N skipped.
+## Step 4: Handle conflicts (JUDGMENT CALL)
+
+For each file with action `conflict`:
+1. Show the diff: `./scripts/scaffold-sync.sh diff <file>`
+2. Present four options:
+   - **Keep local** → `./scripts/scaffold-sync.sh pull-apply <file> keep-local`
+   - **Take scaffold** → `./scripts/scaffold-sync.sh pull-apply <file> take-scaffold`
+   - **Merge** → Claude reads both versions, proposes a combined version, writes it to a temp file, user approves → `./scripts/scaffold-sync.sh pull-apply <file> write-merged <temp-file>`
+   - **Show full diff** → display side-by-side, then ask again
+
+**This is the ONLY step where Claude exercises judgment** — proposing merged content.
+
+## Step 5: Handle new files (deterministic with user confirmation)
+
+For each file with action `new`:
+1. Show the file's first few lines from the scaffold
+2. If user accepts → `./scripts/scaffold-sync.sh pull-apply <file> accept-new`
+3. If user declines → skip
+
+## Step 6: Handle removed files (user confirmation)
+
+For each file with action `removed`:
+1. Ask user: keep locally or delete?
+2. Keep → `./scripts/scaffold-sync.sh pull-apply <file> keep-local`
+3. Delete → `./scripts/scaffold-sync.sh pull-apply <file> delete`
+
+## Step 7: Finalize (deterministic)
+
+```bash
+./scripts/scaffold-sync.sh pull-finalize
+```
+
+Report what happened: N auto-updated, N section-merged, N conflicts resolved, N new files, N skipped.
 
 ## Rules
-- NEVER auto-update a file whose local hash differs from the lockfile's local_hash — that means it was locally modified.
+- NEVER run `cp`, `jq`, `shasum`, or `lock-update` manually. Use compound commands.
+- NEVER auto-update a file that has local changes — the script enforces this.
 - ALWAYS show the user what will change before writing.
-- For merge conflicts, Claude proposes the merge but the user must approve before it's written.
+- For merge conflicts, Claude proposes the merge but the user must approve.

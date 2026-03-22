@@ -473,6 +473,8 @@ flowchart TD
     style USER fill:#e3f2fd,stroke:#333,stroke-width:2px
 ```
 
+**Bootstrap requirement:** The pull process uses `scaffold-sync.sh` itself. If the hub has a newer version of the script with new commands, the node's old script won't know them. When this happens, manually copy the new script first: `cp <hub>/scripts/scaffold-sync.sh scripts/scaffold-sync.sh`, then run `/scaffold-pull`.
+
 ### Push Flow (Project → Hub)
 
 Every step is handled by a script command except change classification, which requires Claude's semantic understanding.

@@ -1,93 +1,179 @@
-# Implementation Plan: Hub/Node Document Inheritance
+# Plan: Node-Only Classification + Fucina Full Sync
 
-> Created: 2026-03-20
-> Based on: docs/spec.md
+> Created: 2026-03-21
+> Status: Draft
 
-## Objective
+## Overview
 
-Make GUIDE.md, CLAUDE.md, and SCAFFOLD_FRAMEWORK.md propagate to downstream projects through the sync system — SCAFFOLD_FRAMEWORK.md as a standard tracked file, GUIDE.md and CLAUDE.md with section-based merge that preserves node-specific content while syncing hub-managed methodology.
+Two interleaved workstreams:
+1. **Node-only classification** — build the `sync` field so files can be permanently excluded from sync consideration
+2. **Fucina full sync** — push generalizable fucina changes up, pull hub changes down, classify fucina's files
 
-## Sequence
+The sync is the proving ground for the classification system. Build just enough to support the sync, then complete the remaining features.
 
-### Step 1: Restructure hub CLAUDE.md with delimiter
-- **Implement:** Add `<!-- NODE-SPECIFIC-START -->` delimiter to CLAUDE.md in the hub. The top half (above delimiter) becomes the node-specific zone: project name, description, tech stack, commands, architecture. The bottom half (below a `<!-- HUB-MANAGED-START -->` marker at the very top) contains: workflow, conventions, reference documents, do not. Restructure so the hub-managed content is at the bottom after the delimiter, and the node-specific project identity content is at the top.
-- **Files:** `CLAUDE.md`
-- **Verify:** CLAUDE.md still under 80 lines. Delimiter present. Hub sections (Workflow, Conventions, Reference Documents, Do Not) are below it. Node sections (name, tech stack, commands, architecture) are above it.
+## Problem
 
-### Step 2: Add delimiter to hub GUIDE.md
-- **Implement:** Append `<!-- NODE-SPECIFIC-START -->` delimiter and a starter node section template to the end of GUIDE.md. The hub version's node section contains placeholder text explaining what goes there.
-- **Files:** `GUIDE.md`
-- **Verify:** Delimiter is present, file still renders correctly in markdown preview.
+The scaffold sync system describes **sync state** (clean, modified, local-only) but not **sync intent**. There's no way to say "this file is intentionally local — stop asking about it." This wastes context every sync cycle on files that will never move.
 
-### Step 3: Track GUIDE.md, CLAUDE.md, and SCAFFOLD_FRAMEWORK.md in scaffold-sync.sh
-- **Implement:** Add explicit named file entries to `TRACKED_PATTERNS` in scaffold-sync.sh: `"GUIDE.md"`, `"CLAUDE.md"`, `"SCAFFOLD_FRAMEWORK.md"`. Remove CLAUDE.md from the "NOT tracked" list in the plan documentation — it is now tracked.
+### Fucina's current state
+
+| File | Status | Intent | Action needed |
+|------|--------|--------|---------------|
+| `.claude/settings.json` | MODIFIED | Partially tracked — hooks should update, PlatformIO perms are project-specific | Sync hooks section, mark as node-only after |
+| `.claude/skills/tdd/SKILL.md` | MODIFIED | Node-only — test command example is intentionally `pio test` | Mark node-only |
+| `.claude/rules/sketches.md` | LOCAL | Node-only — firmware-specific workflow | Mark node-only |
+| `GUIDE.md` | MODIFIED* | Tracked — hub section should update (section-merge handles this) | Pull via section-merge |
+
+Additionally, the hub has significant new content to push to fucina: hooks system, compound sync commands, deterministic-first rule, hooks reference template, updated slash commands, GUIDE updates.
+
+## Design Decision: Lockfile `sync` field
+
+Add a `sync` field to each lockfile entry: `"tracked"` (default) or `"node-only"`.
+
+```json
+{
+  ".claude/rules/sketches.md": {
+    "origin": "local",
+    "scaffold_hash": null,
+    "local_hash": "abc123",
+    "status": "local-only",
+    "sync": "node-only"
+  }
+}
+```
+
+### Why this over alternatives
+
+| Option | Pros | Cons | Verdict |
+|--------|------|------|---------|
+| **Lockfile `sync` field** | Single source of truth, backward-compatible (missing = tracked), separates intent from state | Slightly more complex lockfile schema | **Chosen** |
+| `.scaffold-ignore` file | Familiar gitignore pattern | Two sources of truth; loses provenance ("came from scaffold, I chose to keep my version") | Rejected |
+| New `node-only` status | Simple, no new fields | Conflates state with intent. A file can be `modified` AND `node-only` — these are orthogonal. | Rejected |
+
+### Behavior changes
+
+| Operation | `sync: "tracked"` (default) | `sync: "node-only"` |
+|-----------|---------------------------|---------------------|
+| `pull-plan` | Included in plan | **Skipped entirely** |
+| `pull-auto` | Auto-updated if clean | **Skipped** |
+| `push-candidates` | Listed as candidate | **Skipped** |
+| `scaffold-status` | Shows current status | Shows **NODE-ONLY** badge |
+| `scaffold-demote` | Changes status to modified | Suggest `node-only` instead |
+
+---
+
+## Implementation Steps
+
+### Phase 1: Build node-only infrastructure (hub)
+
+#### Step 1: Add `sync` field support to lockfile operations
+- Update `cmd_lock_add` to accept optional `sync` parameter (default `"tracked"`)
+- Update `cmd_init` to default `sync: "tracked"` on all entries
+- Backward compatibility: all read operations treat missing `sync` field as `"tracked"`
 - **Files:** `scripts/scaffold-sync.sh`
-- **Verify:** `./scripts/scaffold-sync.sh scan` lists all three files.
+- **Verify:** `scaffold-sync.sh init` produces entries with `sync` field. Existing lockfiles (fucina) still work without it.
 
-### Step 4: Add `section-merge` subcommand to scaffold-sync.sh
-- **Implement:** New subcommand `scaffold-sync.sh section-merge <scaffold-file> <local-file>` that:
-  1. Looks for `<!-- NODE-SPECIFIC-START -->` in both files
-  2. Takes everything ABOVE the delimiter from the scaffold version (hub-managed content)
-  3. Takes everything FROM the delimiter onward from the local version (node-specific content)
-  4. Concatenates and writes to stdout
-  5. If local has no delimiter, outputs scaffold content above delimiter + delimiter + full local content (graceful first-time handling)
-  6. If scaffold has no delimiter, falls back to standard diff (not a section-merge file)
+#### Step 2: Add `node-only`, `track`, and `classify` commands
+- `cmd_node_only <file>`: set `.files[file].sync = "node-only"`, log the change
+- `cmd_track <file>`: set `.files[file].sync = "tracked"`, log the change
+- `cmd_classify`: output JSON of all modified/local files without `sync: "node-only"` — `{file, status, origin}` per entry. Claude reads this and calls node-only/track for each after user confirms.
 - **Files:** `scripts/scaffold-sync.sh`
-- **Verify:** Test with pairs of files. Confirm hub content replaced, node content preserved. Confirm graceful fallback when delimiter missing from local.
+- **Verify:** Toggle `node-only` ↔ `track` on a file. `classify` lists candidates.
 
-### Step 5: Update /scaffold-pull to use section-merge for delimited files
-- **Implement:** Add a rule to the pull command: when processing a file that contains `<!-- NODE-SPECIFIC-START -->` in the scaffold version, use `section-merge` instead of the standard four-option conflict flow. This applies to both GUIDE.md and CLAUDE.md (and any future delimited files). Present the merged result to the user for approval before writing. If the file is clean (no local node content yet), auto-update as normal.
-- **Files:** `.claude/commands/scaffold-pull.md`
-- **Verify:** Trace the pull flow for both GUIDE.md and CLAUDE.md. Hub content updates while node content is preserved.
+#### Step 3: Update compound commands to respect `sync` field
+- `cmd_pull_plan`: skip files where `sync == "node-only"`
+- `cmd_push_candidates`: skip files where `sync == "node-only"`
+- `cmd_status`: show `NODE-ONLY` badge when `sync == "node-only"`
+- **Files:** `scripts/scaffold-sync.sh`
+- **Verify:** Mark a file as node-only → it disappears from pull-plan, push-candidates. Status shows NODE-ONLY.
 
-### Step 6: Update scaffold-differ to classify node sections as project-specific
-- **Implement:** Add a rule to the scaffold-differ agent: for any file with `<!-- NODE-SPECIFIC-START -->`, everything below the delimiter is always classified as project-specific. This covers GUIDE.md, CLAUDE.md, and any future delimited files generically.
-- **Files:** `.claude/agents/scaffold-differ.md`
-- **Verify:** Read the updated instructions and confirm the generic delimiter-aware classification logic.
+#### Step 4: Add `/scaffold-ignore` slash command
+- Confirm with user, run `scaffold-sync.sh node-only <file>`
+- **Files:** `.claude/commands/scaffold-ignore.md`
 
-### Step 7: Update /init to copy all three files and generate initial node sections
-- **Implement:** Modify `/init` to:
-  1. Copy `GUIDE.md`, `CLAUDE.md`, and `SCAFFOLD_FRAMEWORK.md` to the new project
-  2. For CLAUDE.md: replace `[Project Name]` and `[One-line description]` placeholders in the node section (top). Hub section (bottom) stays as-is.
-  3. For GUIDE.md: scan the project for existing `.claude/` files (rules, commands, agents, skills) not from the scaffold. Generate an initial node-specific section listing what was found, or a placeholder if the project is empty.
-  4. SCAFFOLD_FRAMEWORK.md: copy as-is, no modification.
-  5. Lockfile generation picks up all three files via updated TRACKED_PATTERNS.
-- **Files:** `global-commands/init.md`
-- **Verify:** Instructions clearly describe copying all three files and generating node sections.
+#### Step 5: Update workflow rule with creation-time classification guidance
+- When creating new files in tracked scaffold directories, ask: "node-only or tracked?"
+- Record the answer with the appropriate script command
+- **Why a rule, not a hook:** Classification needs human judgment. Per deterministic-first: judgment → rule, recording → script.
+- **Files:** `.claude/rules/workflow.md`
 
-### Step 8: Update /plan for hub vs node GUIDE.md and CLAUDE.md awareness
-- **Implement:** Refine step 7 of `/plan`: when the plan involves local-only changes (new project command/rule/agent), the update step targets the node-specific sections of both GUIDE.md and CLAUDE.md. When it's a scaffold-wide change, it targets the hub sections. Make this generic — "update the appropriate section (hub or node) of delimited files."
-- **Files:** `.claude/commands/plan.md`
-- **Verify:** Read the updated instructions and confirm the distinction is clear.
+#### Step 6: Commit hub changes
+- Single commit with all node-only infrastructure
+- **Verify:** Hub repo is clean. `scaffold-sync.sh` help shows new commands.
 
-### Step 9: Update GUIDE.md hub section with documentation for this feature
-- **Implement:** Read `GUIDE.md` and update the hub section:
-  - Add SCAFFOLD_FRAMEWORK.md to the System Overview diagram as a tracked reference document
-  - Add a "Document Inheritance" subsection in Scaffold Sync System explaining the delimiter convention, section-merge behavior, and which files use it
-  - Update the pull flow diagram to show the section-merge path for delimited files
-  - Add CLAUDE.md to the sync system architecture diagram (it was previously excluded)
-  - Update command reference tables if any command behavior changed
+### Phase 2: Fucina sync (hub ↔ fucina)
+
+#### Step 7: Evaluate fucina → hub push candidates
+- Run `scaffold-sync.sh push-candidates` from fucina
+- Review the 4 changed files:
+  - `settings.json` — MODIFIED, partially generalizable (hook pattern improvement) but the hub already has the new hooks. No push needed.
+  - `SKILL.md` — MODIFIED, project-specific test command. No push.
+  - `sketches.md` — LOCAL, fully project-specific. No push.
+  - `GUIDE.md` — MODIFIED*, node section only. Never push node sections.
+- **Expected outcome:** Nothing to push. All changes are project-specific.
+- **Verify:** Confirm with user that no fucina changes need to go upstream.
+
+#### Step 8: Pull hub → fucina
+- Run from fucina: `scaffold-sync.sh pre-check` then `scaffold-sync.sh pull-plan`
+- Expected plan:
+  - **Auto-update** (~20 clean files): commands, rules, agents, scripts, templates, SCAFFOLD_FRAMEWORK.md
+  - **Section-merge** (1 file): `GUIDE.md` — hub section updates, node section preserved
+  - **Conflict** (2 files): `settings.json` (both changed), `SKILL.md` (both changed)
+  - **New** (3 files): `deterministic-first.md`, `protect-files.sh`, `format-on-write.sh`, `hooks-reference.md`
+- Execute: `pull-auto` for clean files, `pull-apply` for each conflict/new/merge
+- **Verify:** All files updated. Fucina's node-specific content preserved.
+
+#### Step 9: Resolve conflicts
+- `settings.json`: The hub now has proper hook script references. Fucina needs those PLUS its PlatformIO permissions. Take scaffold version, then re-add PlatformIO permissions. Mark as node-only after.
+- `SKILL.md`: Keep fucina's version (project-specific test command). Mark as node-only.
+- **Verify:** Both files have correct content. Lockfile updated.
+
+#### Step 10: Classify fucina's files
+- Run `scaffold-sync.sh classify` to list remaining unclassified files
+- Mark node-only: `settings.json`, `SKILL.md`, `sketches.md`
+- Keep tracked: everything else
+- **Verify:** `scaffold-sync.sh status` shows NODE-ONLY badges on the right files.
+
+#### Step 11: Finalize and commit
+- Run `scaffold-sync.sh pull-finalize` in fucina
+- Commit fucina changes
+- **Verify:** `scaffold-sync.sh status` shows clean state with NODE-ONLY badges. No pending conflicts.
+
+### Phase 3: Documentation (hub)
+
+#### Step 12: Update GUIDE.md
+- Add `NODE-ONLY` to the File Status Lifecycle diagram
+- Add `/scaffold-ignore` to the sync command reference table
+- Add to Decision Guide: "When should I mark a file as node-only?"
+- Add `node-only` / `track` / `classify` to the compound commands in the help output
 - **Files:** `GUIDE.md`
-- **Verify:** All diagrams render correctly. Guide accurately describes the new feature.
 
-## Risks
+#### Step 13: Commit hub documentation
+- Single commit with GUIDE updates
+- **Verify:** Diagrams render correctly. Tables are accurate.
 
-- **Delimiter corruption:** If a user removes `<!-- NODE-SPECIFIC-START -->`, the merge fails. Mitigation: `section-merge` detects missing delimiter and falls back to appending full local content as node section.
-- **CLAUDE.md 80-line budget:** The delimiter comment costs 1 line. Mitigation: the line budget is already tight at 63 lines — there's room. The delimiter enables syncing the methodology sections, which is worth 1 line.
-- **Large GUIDE.md in context:** Reading GUIDE.md for updates is expensive. Mitigation: only read during the specific plan step, only when scaffold structure changed.
-- **Existing projects without delimiters:** fucina's CLAUDE.md and GUIDE.md (once copied) won't have delimiters. Mitigation: `section-merge` graceful fallback treats the entire local file as node content, then adds hub content above. User reviews the result.
-- **Hub content order matters for attention:** CLAUDE.md hub sections (Workflow, Do Not) are at the bottom. The U-shaped attention curve means beginning and end get most attention. Mitigation: "Do Not" is already at the end (high attention), and the Workflow summary at the boundary is reinforced by rules files.
+---
 
 ## Definition of Done
 
-- [ ] AC-1: `/init` copies GUIDE.md, CLAUDE.md, and SCAFFOLD_FRAMEWORK.md, all tracked in lockfile
-- [ ] AC-2: SCAFFOLD_FRAMEWORK.md auto-updates on pull (standard tracked file)
-- [ ] AC-3: GUIDE.md has hub section + delimiter + node section
-- [ ] AC-4: CLAUDE.md has node section (top: identity) + delimiter + hub section (bottom: methodology)
-- [ ] AC-5: `/scaffold-pull` uses section-merge for delimited files, preserving node content
-- [ ] AC-6: `/scaffold-push` never pushes node-specific content from delimited files
-- [ ] AC-7: `/plan` distinguishes hub vs node section updates
-- [ ] AC-8: Node sections document local-only commands, rules, agents, skills
-- [ ] AC-9: Graceful fallback when local file has no delimiter (first-time or legacy projects)
-- [ ] All existing scaffold sync functionality still works
-- [ ] Code reviewed (run /review)
+### Node-only classification
+- [ ] Lockfile entries support `sync: "tracked" | "node-only"` field
+- [ ] `node-only` and `track` commands toggle the field
+- [ ] `classify` lists unclassified modified/local files as JSON
+- [ ] `pull-plan` and `push-candidates` skip node-only files
+- [ ] `status` shows NODE-ONLY badge
+- [ ] `/scaffold-ignore` slash command works
+- [ ] `workflow.md` includes creation-time classification guidance
+- [ ] Backward compatible: old lockfiles without `sync` field still work
+
+### Fucina sync
+- [ ] No generalizable fucina changes lost (confirmed nothing to push)
+- [ ] Hub changes pulled to fucina: hooks, compound commands, deterministic-first rule, updated slash commands, hooks reference, GUIDE updates
+- [ ] `GUIDE.md` section-merged: hub documentation updated, node features preserved
+- [ ] `settings.json` resolved: hub hook scripts + fucina PlatformIO perms
+- [ ] `SKILL.md`, `sketches.md`, `settings.json` marked node-only
+- [ ] Fucina's `scaffold-sync.sh status` is clean with appropriate NODE-ONLY badges
+
+### Documentation
+- [ ] GUIDE.md updated with node-only feature
+- [ ] All done items verified

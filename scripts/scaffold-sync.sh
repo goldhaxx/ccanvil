@@ -77,6 +77,20 @@ datestamp() {
   date +"%Y-%m-%d %H:%M"
 }
 
+get_sync_field() {
+  # Returns the sync field for a file, defaulting to "tracked" for backward compat
+  local file="$1"
+  local val
+  val=$(jq -r --arg f "$file" '.files[$f].sync // "tracked"' "$LOCKFILE")
+  echo "$val"
+}
+
+is_node_only() {
+  # Returns 0 (true) if file is marked node-only, 1 (false) otherwise
+  local file="$1"
+  [[ "$(get_sync_field "$file")" == "node-only" ]]
+}
+
 is_excluded() {
   local file="$1"
   for excluded in "${EXCLUDED_FILES[@]}"; do
@@ -154,11 +168,11 @@ cmd_init() {
       fi
 
       files_json=$(echo "$files_json" | jq --arg f "$file" --arg sh "$scaffold_h" --arg lh "$local_h" --arg st "$status" \
-        '. + {($f): {"origin": "scaffold", "scaffold_hash": $sh, "local_hash": $lh, "status": $st}}')
+        '. + {($f): {"origin": "scaffold", "scaffold_hash": $sh, "local_hash": $lh, "status": $st, "sync": "tracked"}}')
     else
       # File exists locally but not in scaffold
       files_json=$(echo "$files_json" | jq --arg f "$file" --arg lh "$local_h" \
-        '. + {($f): {"origin": "local", "scaffold_hash": null, "local_hash": $lh, "status": "local-only"}}')
+        '. + {($f): {"origin": "local", "scaffold_hash": null, "local_hash": $lh, "status": "local-only", "sync": "tracked"}}')
     fi
   done < <(scan_tracked_files)
 
@@ -168,7 +182,7 @@ cmd_init() {
       local scaffold_h
       scaffold_h=$(file_hash "$scaffold_path/$file")
       files_json=$(echo "$files_json" | jq --arg f "$file" --arg sh "$scaffold_h" \
-        '. + {($f): {"origin": "scaffold", "scaffold_hash": $sh, "local_hash": null, "status": "scaffold-only"}}')
+        '. + {($f): {"origin": "scaffold", "scaffold_hash": $sh, "local_hash": null, "status": "scaffold-only", "sync": "tracked"}}')
     fi
   done < <(scan_scaffold_files "$scaffold_path")
 
@@ -229,21 +243,29 @@ cmd_status() {
     local recorded_local_hash
     recorded_local_hash=$(jq -r --arg f "$file" '.files[$f].local_hash // "null"' "$LOCKFILE")
 
+    # Check node-only classification
+    local sync_field
+    sync_field=$(get_sync_field "$file")
+
     local display_status
-    case "$status" in
-      clean)
-        if [[ -n "$current_hash" && "$current_hash" != "$recorded_local_hash" ]]; then
-          display_status="MODIFIED*"  # Changed since last sync
-        else
-          display_status="CLEAN"
-        fi
-        ;;
-      modified)     display_status="MODIFIED" ;;
-      local-only)   display_status="LOCAL" ;;
-      promoted)     display_status="PROMOTED" ;;
-      scaffold-only) display_status="SCAFFOLD-ONLY" ;;
-      *)            display_status="UNKNOWN" ;;
-    esac
+    if [[ "$sync_field" == "node-only" ]]; then
+      display_status="NODE-ONLY"
+    else
+      case "$status" in
+        clean)
+          if [[ -n "$current_hash" && "$current_hash" != "$recorded_local_hash" ]]; then
+            display_status="MODIFIED*"  # Changed since last sync
+          else
+            display_status="CLEAN"
+          fi
+          ;;
+        modified)     display_status="MODIFIED" ;;
+        local-only)   display_status="LOCAL" ;;
+        promoted)     display_status="PROMOTED" ;;
+        scaffold-only) display_status="SCAFFOLD-ONLY" ;;
+        *)            display_status="UNKNOWN" ;;
+      esac
+    fi
 
     printf "  %-16s %s\n" "$display_status" "$file"
     has_output=true
@@ -255,7 +277,8 @@ cmd_status() {
 
   echo ""
   echo "Statuses: CLEAN=synced, MODIFIED=locally changed, MODIFIED*=changed since last sync,"
-  echo "          LOCAL=project-only, PROMOTED=pushed to scaffold, SCAFFOLD-ONLY=not yet pulled"
+  echo "          LOCAL=project-only, PROMOTED=pushed to scaffold, SCAFFOLD-ONLY=not yet pulled,"
+  echo "          NODE-ONLY=excluded from sync (use /scaffold-ignore to set, scaffold-sync.sh track to undo)"
 }
 
 cmd_diff() {
@@ -558,6 +581,78 @@ cmd_section_merge() {
 # Compound Commands — high-level operations that replace manual orchestration
 # ---------------------------------------------------------------------------
 
+# Node-only classification commands
+cmd_node_only() {
+  require_lockfile
+  local file="${1:?Usage: scaffold-sync.sh node-only <file>}"
+
+  # Verify file exists in lockfile
+  local exists
+  exists=$(jq -r --arg f "$file" '.files[$f] // "null"' "$LOCKFILE")
+  [[ "$exists" != "null" ]] || die "File not tracked in lockfile: $file"
+
+  local current_sync
+  current_sync=$(get_sync_field "$file")
+  if [[ "$current_sync" == "node-only" ]]; then
+    echo "SKIP: $file is already node-only."
+    return 0
+  fi
+
+  local tmp; tmp=$(mktemp)
+  jq --arg f "$file" '.files[$f].sync = "node-only"' "$LOCKFILE" > "$tmp"
+  mv "$tmp" "$LOCKFILE"
+
+  cmd_log "classify"
+  cmd_log_detail "NODE-ONLY $file — excluded from sync"
+  echo "NODE-ONLY: $file (excluded from future pull/push)"
+}
+
+cmd_track() {
+  require_lockfile
+  local file="${1:?Usage: scaffold-sync.sh track <file>}"
+
+  local exists
+  exists=$(jq -r --arg f "$file" '.files[$f] // "null"' "$LOCKFILE")
+  [[ "$exists" != "null" ]] || die "File not tracked in lockfile: $file"
+
+  local current_sync
+  current_sync=$(get_sync_field "$file")
+  if [[ "$current_sync" == "tracked" ]]; then
+    echo "SKIP: $file is already tracked."
+    return 0
+  fi
+
+  local tmp; tmp=$(mktemp)
+  jq --arg f "$file" '.files[$f].sync = "tracked"' "$LOCKFILE" > "$tmp"
+  mv "$tmp" "$LOCKFILE"
+
+  cmd_log "classify"
+  cmd_log_detail "TRACKED $file — re-included in sync"
+  echo "TRACKED: $file (re-included in future pull/push)"
+}
+
+# classify: list all modified/local files that need classification
+# Output: JSON array of {file, status, origin, sync} for unclassified files
+cmd_classify() {
+  require_lockfile
+  local candidates="[]"
+
+  while IFS= read -r file; do
+    local status origin sync_field
+    status=$(jq -r --arg f "$file" '.files[$f].status' "$LOCKFILE")
+    origin=$(jq -r --arg f "$file" '.files[$f].origin' "$LOCKFILE")
+    sync_field=$(get_sync_field "$file")
+
+    # Only show files that are modified or local-only and not yet classified as node-only
+    if [[ "$sync_field" != "node-only" && ("$status" == "modified" || "$status" == "local-only") ]]; then
+      candidates=$(echo "$candidates" | jq --arg f "$file" --arg s "$status" --arg o "$origin" \
+        '. + [{"file": $f, "status": $s, "origin": $o}]')
+    fi
+  done < <(jq -r '.files | keys[]' "$LOCKFILE" | sort)
+
+  echo "$candidates" | jq '.'
+}
+
 # Pre-check: verify scaffold repo is clean and accessible
 cmd_pre_check() {
   require_lockfile
@@ -597,6 +692,11 @@ cmd_pull_plan() {
     origin=$(jq -r --arg f "$file" '.files[$f].origin' "$LOCKFILE")
     scaffold_hash=$(jq -r --arg f "$file" '.files[$f].scaffold_hash // "null"' "$LOCKFILE")
     local_hash=$(jq -r --arg f "$file" '.files[$f].local_hash // "null"' "$LOCKFILE")
+
+    # Skip node-only files (permanently excluded from sync)
+    if is_node_only "$file"; then
+      continue
+    fi
 
     # Skip local-only files (nothing to pull)
     if [[ "$status" == "local-only" ]]; then
@@ -856,6 +956,11 @@ cmd_push_candidates() {
     local status
     status=$(jq -r --arg f "$file" '.files[$f].status' "$LOCKFILE")
 
+    # Skip node-only files (permanently excluded from sync)
+    if is_node_only "$file"; then
+      continue
+    fi
+
     # Only modified and local-only files are push candidates
     if [[ "$status" != "modified" && "$status" != "local-only" && "$status" != "promoted" ]]; then
       continue
@@ -1085,6 +1190,11 @@ case "${1:-}" in
   section-merge)    shift; cmd_section_merge "$@" ;;
   scan)             cmd_scan ;;
 
+  # --- Classification commands ---
+  node-only)        shift; cmd_node_only "$@" ;;
+  track)            shift; cmd_track "$@" ;;
+  classify)         cmd_classify ;;
+
   # --- Compound commands (replace manual orchestration) ---
   pre-check)        cmd_pre_check ;;
   pull-plan)        cmd_pull_plan ;;
@@ -1099,6 +1209,11 @@ case "${1:-}" in
 
   *)
     echo "Usage: scaffold-sync.sh <command> [args]"
+    echo ""
+    echo "Classification commands:"
+    echo "  node-only <file>                      Mark file as node-only (exclude from sync)"
+    echo "  track <file>                          Mark file as tracked (re-include in sync)"
+    echo "  classify                              List unclassified modified/local files as JSON"
     echo ""
     echo "Compound commands (use these — they handle copy + lockfile + log in one call):"
     echo "  pre-check                             Verify scaffold repo is clean"

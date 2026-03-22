@@ -1047,6 +1047,22 @@ RULES="$BATS_TEST_DIRNAME/../.claude/rules"
   [ "$output" -ge 1 ]
 }
 
+# ===========================================================================
+# Step 8: Self-review.md update
+# ===========================================================================
+
+@test "self-review: references mandatory Determinism Review section" {
+  run grep -c "Determinism Review" "$RULES/self-review.md"
+  [ "$status" -eq 0 ]
+  [ "$output" -ge 1 ]
+}
+
+@test "self-review: references the checkpoint template" {
+  run grep -c "checkpoint.md\|checkpoint template" "$RULES/self-review.md"
+  [ "$status" -eq 0 ]
+  [ "$output" -ge 1 ]
+}
+
 @test "audit-session: clean commit messages produce no findings" {
   local repo
   repo=$(create_audit_repo)

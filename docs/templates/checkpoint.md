@@ -31,6 +31,13 @@
 
 [Anything the next session needs to know that isn't captured elsewhere — failed approaches, decisions made, alternatives considered]
 
+## Determinism Review
+
+- **operations_reviewed:** [count]
+- **candidates_found:** [count]
+- [For each candidate: **[operation]**: Claude [what happened]. Should be [deterministic replacement]. Impact: [high/medium/low].]
+- [If no candidates: "No candidates this session."]
+
 <!-- NODE-SPECIFIC-START -->
 <!-- Add project-specific content below this line. -->
 <!-- Hub content above is updated via /scaffold-pull. -->

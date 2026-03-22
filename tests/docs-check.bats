@@ -601,3 +601,25 @@ TEMPLATES="$BATS_TEST_DIRNAME/../docs/templates"
   [ "$status" -eq 0 ]
   [ "$output" -ge 1 ]
 }
+
+# ===========================================================================
+# Step 1: Checkpoint template — Determinism Review section (AC-1)
+# ===========================================================================
+
+@test "template: checkpoint.md has Determinism Review section" {
+  run grep -c "^## Determinism Review" "$TEMPLATES/checkpoint.md"
+  [ "$status" -eq 0 ]
+  [ "$output" -ge 1 ]
+}
+
+@test "template: checkpoint.md has operations_reviewed field" {
+  run grep -c "operations_reviewed" "$TEMPLATES/checkpoint.md"
+  [ "$status" -eq 0 ]
+  [ "$output" -ge 1 ]
+}
+
+@test "template: checkpoint.md has candidates_found field" {
+  run grep -c "candidates_found" "$TEMPLATES/checkpoint.md"
+  [ "$status" -eq 0 ]
+  [ "$output" -ge 1 ]
+}

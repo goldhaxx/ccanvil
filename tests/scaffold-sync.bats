@@ -91,12 +91,8 @@ Node identity here.
 Hub methodology here.
 HUBEOF
 
-  # Create a non-markdown script (should NOT be treated as section-merge)
-  cat > "$HUB/scripts/scaffold-sync.sh" <<'HUBEOF'
-#!/usr/bin/env bash
-# This script contains <!-- NODE-SPECIFIC-START --> as a literal string
-echo "hello"
-HUBEOF
+  # Copy the real sync script to the hub (so bootstrap doesn't fire on every test)
+  cp "$SCRIPT" "$HUB/scripts/scaffold-sync.sh"
 
   # Initialize a git repo in hub (needed for scaffold_version)
   git -C "$HUB" init -q
@@ -688,4 +684,95 @@ EOF
   local body
   body=$(git -C "$NODE" log -1 --format='%b')
   echo "$body" | grep -q "catchup.md"
+}
+
+
+# =========================================================================
+# adopt-clean / adopt-conflict tests
+# =========================================================================
+
+@test "pull-plan: new file in scaffold + identical local copy → adopt-clean" {
+  cd "$NODE"
+
+  # Add file to hub
+  cat > "$HUB/.claude/rules/new-rule.md" <<'EOF'
+# New Rule
+Same content.
+EOF
+  git -C "$HUB" add -A && git -C "$HUB" commit -q -m "add new rule"
+
+  # Manually copy the same file to node (simulates prior manual copy)
+  cp "$HUB/.claude/rules/new-rule.md" "$NODE/.claude/rules/new-rule.md"
+  git -C "$NODE" add -A && git -C "$NODE" commit -q -m "manual copy"
+
+  result=$(bash "$NODE/scripts/scaffold-sync.sh" pull-plan)
+
+  echo "$result" | jq -e '.[] | select(.file == ".claude/rules/new-rule.md" and .action == "adopt-clean")'
+}
+
+@test "pull-plan: new file in scaffold + different local copy → adopt-conflict" {
+  cd "$NODE"
+
+  # Add file to hub
+  cat > "$HUB/.claude/rules/new-rule.md" <<'EOF'
+# New Rule
+Hub version.
+EOF
+  git -C "$HUB" add -A && git -C "$HUB" commit -q -m "add new rule"
+
+  # Create different local version
+  cat > "$NODE/.claude/rules/new-rule.md" <<'EOF'
+# New Rule
+Local version with custom content.
+EOF
+  git -C "$NODE" add -A && git -C "$NODE" commit -q -m "local version"
+
+  result=$(bash "$NODE/scripts/scaffold-sync.sh" pull-plan)
+
+  echo "$result" | jq -e '.[] | select(.file == ".claude/rules/new-rule.md" and .action == "adopt-conflict")'
+}
+
+@test "pull-auto: adopt-clean files are tracked in lockfile" {
+  cd "$NODE"
+
+  # Add file to hub
+  cat > "$HUB/.claude/rules/new-rule.md" <<'EOF'
+# New Rule
+Same content.
+EOF
+  git -C "$HUB" add -A && git -C "$HUB" commit -q -m "add new rule"
+
+  # Copy identical file to node
+  cp "$HUB/.claude/rules/new-rule.md" "$NODE/.claude/rules/new-rule.md"
+  git -C "$NODE" add -A && git -C "$NODE" commit -q -m "manual copy"
+
+  bash "$NODE/scripts/scaffold-sync.sh" pull-auto
+
+  # Should now be in lockfile as clean
+  status=$(jq -r '.files[".claude/rules/new-rule.md"].status' "$NODE/.claude/scaffold.lock")
+  [ "$status" = "clean" ]
+}
+
+
+# =========================================================================
+# bootstrap tests
+# =========================================================================
+
+@test "pre-check: bootstraps stale sync script from hub" {
+  cd "$NODE"
+
+  # Modify the hub's sync script (simulate newer version)
+  echo '# updated' >> "$HUB/scripts/scaffold-sync.sh"
+  git -C "$HUB" add -A && git -C "$HUB" commit -q -m "update sync script"
+
+  # Node's script is now stale
+  run bash "$NODE/scripts/scaffold-sync.sh" pre-check
+  [ "$status" -eq 0 ]
+  echo "$output" | grep -q "BOOTSTRAPPED"
+
+  # Local script should now match hub
+  local hub_h node_h
+  hub_h=$(shasum -a 256 "$HUB/scripts/scaffold-sync.sh" | awk '{print $1}')
+  node_h=$(shasum -a 256 "$NODE/scripts/scaffold-sync.sh" | awk '{print $1}')
+  [ "$hub_h" = "$node_h" ]
 }

@@ -688,6 +688,21 @@ cmd_pre_check() {
     fi
   fi
 
+  # Bootstrap: if the hub has a newer sync script, copy it before proceeding
+  local hub_script="$scaffold_source/scripts/scaffold-sync.sh"
+  local local_script="scripts/scaffold-sync.sh"
+  if [[ -f "$hub_script" && -f "$local_script" ]]; then
+    local hub_hash local_hash
+    hub_hash=$(file_hash "$hub_script")
+    local_hash=$(file_hash "$local_script")
+    if [[ "$hub_hash" != "$local_hash" ]]; then
+      cp "$hub_script" "$local_script"
+      echo "BOOTSTRAPPED: Updated scripts/scaffold-sync.sh from hub"
+      echo "  Re-run your command to use the updated script."
+      exit 0
+    fi
+  fi
+
   echo "OK"
 }
 
@@ -786,8 +801,22 @@ cmd_pull_plan() {
   # Check for new files in scaffold not in lockfile
   while IFS= read -r file; do
     if ! jq -e --arg f "$file" '.files[$f]' "$LOCKFILE" >/dev/null 2>&1; then
-      plan=$(echo "$plan" | jq --arg f "$file" \
-        '. + [{"file": $f, "action": "new", "reason": "New file in scaffold, not yet tracked"}]')
+      if [[ -f "$file" ]]; then
+        # File exists locally but isn't in lockfile (e.g., manual copy)
+        local scaffold_h local_h
+        scaffold_h=$(file_hash "$scaffold_source/$file")
+        local_h=$(file_hash "$file")
+        if [[ "$scaffold_h" == "$local_h" ]]; then
+          plan=$(echo "$plan" | jq --arg f "$file" \
+            '. + [{"file": $f, "action": "adopt-clean", "reason": "New in scaffold, identical local copy exists — will track as clean"}]')
+        else
+          plan=$(echo "$plan" | jq --arg f "$file" \
+            '. + [{"file": $f, "action": "adopt-conflict", "reason": "New in scaffold, different local copy exists — needs resolution"}]')
+        fi
+      else
+        plan=$(echo "$plan" | jq --arg f "$file" \
+          '. + [{"file": $f, "action": "new", "reason": "New file in scaffold, not yet tracked"}]')
+      fi
     fi
   done < <(scan_scaffold_files "$scaffold_source")
 
@@ -805,7 +834,8 @@ cmd_pull_auto() {
   local plan
   plan=$(cmd_pull_plan)
 
-  echo "$plan" | jq -r '.[] | select(.action == "auto-update") | .file' | while IFS= read -r file; do
+  # Also adopt-clean files (identical local copies not yet in lockfile)
+  echo "$plan" | jq -r '.[] | select(.action == "auto-update" or .action == "adopt-clean") | .file' | while IFS= read -r file; do
     local scaffold_file="$scaffold_source/$file"
     local new_hash
     new_hash=$(file_hash "$scaffold_file")
@@ -816,11 +846,11 @@ cmd_pull_auto() {
     # Copy scaffold version
     cp "$scaffold_file" "$file"
 
-    # Update lockfile in one pass
+    # Update lockfile in one pass (works for both existing and new entries)
     local tmp
     tmp=$(mktemp)
     jq --arg f "$file" --arg h "$new_hash" \
-      '.files[$f].scaffold_hash = $h | .files[$f].local_hash = $h | .files[$f].status = "clean"' \
+      '.files[$f].scaffold_hash = $h | .files[$f].local_hash = $h | .files[$f].status = "clean" | .files[$f].origin = "scaffold" | .files[$f].sync = "tracked"' \
       "$LOCKFILE" > "$tmp"
     mv "$tmp" "$LOCKFILE"
 
@@ -836,7 +866,7 @@ cmd_pull_auto() {
 
 # pull-apply: Apply a specific resolution for a single file
 # Usage: pull-apply <file> <action> [merged-content-file]
-# Actions: take-scaffold, keep-local, section-merge, accept-new, delete, write-merged <path>
+# Actions: take-scaffold, keep-local, section-merge, accept-new, adopt-conflict, delete, write-merged <path>
 cmd_pull_apply() {
   require_lockfile
   local file="${1:?Usage: scaffold-sync.sh pull-apply <file> <action> [merged-content-file]}"
@@ -897,10 +927,23 @@ cmd_pull_apply() {
       echo "APPLIED: $file (section-merged)"
       ;;
 
+    adopt-conflict)
+      # File exists locally with different content and isn't in lockfile yet.
+      # Same as take-scaffold but adds a new lockfile entry.
+      [[ -f "$scaffold_file" ]] || die "Scaffold file not found: $scaffold_file"
+      mkdir -p "$(dirname "$file")"
+      cp "$scaffold_file" "$file"
+      local new_hash
+      new_hash=$(file_hash "$file")
+      cmd_lock_add "$file" "scaffold" "$new_hash" "$new_hash" "clean"
+      cmd_log_detail "ADOPTED $file — took scaffold, tracked as clean"
+      echo "APPLIED: $file (adopted — took scaffold)"
+      ;;
+
     accept-new)
       [[ -f "$scaffold_file" ]] || die "Scaffold file not found: $scaffold_file"
       if [[ -f "$file" ]]; then
-        echo "WARNING: $file already exists locally. Use 'take-scaffold' or 'section-merge' instead." >&2
+        echo "WARNING: $file already exists locally. Use 'take-scaffold', 'adopt-conflict', or 'section-merge' instead." >&2
         die "Refusing to overwrite existing file with accept-new. File: $file"
       fi
       mkdir -p "$(dirname "$file")"

@@ -2,14 +2,6 @@ Pull updates from the scaffold hub into this project.
 
 All deterministic operations (copy, hash, lockfile, logging) are handled by the script. Claude's role is LIMITED to judgment calls: conflict resolution and merge proposals.
 
-## Step 0: Bootstrap check (deterministic)
-
-If `scripts/scaffold-sync.sh` itself has changed in the hub (check with `diff`), copy the new version first — the old script may lack commands needed by the pull:
-```bash
-scaffold_source=$(jq -r '.scaffold_source' .claude/scaffold.lock | sed "s|^~|$HOME|")
-diff -q scripts/scaffold-sync.sh "$scaffold_source/scripts/scaffold-sync.sh" || cp "$scaffold_source/scripts/scaffold-sync.sh" scripts/scaffold-sync.sh
-```
-
 ## Step 1: Pre-check and plan (deterministic)
 
 ```bash
@@ -17,7 +9,16 @@ diff -q scripts/scaffold-sync.sh "$scaffold_source/scripts/scaffold-sync.sh" || 
 ./scripts/scaffold-sync.sh pull-plan
 ```
 
-Read the JSON output. It contains an array of `{file, action, reason}` objects.
+Pre-check verifies both repos are clean and auto-bootstraps the sync script if the hub has a newer version (prints "BOOTSTRAPPED" and exits — re-run the command).
+
+Read the JSON output. It contains an array of `{file, action, reason}` objects. Actions:
+- `auto-update` — scaffold changed, local is clean. Safe to apply automatically.
+- `adopt-clean` — new file in scaffold, identical local copy exists. Tracked automatically.
+- `section-merge` — both changed, file has delimiter. Hub section updated, node section preserved.
+- `conflict` — both changed, no delimiter. Requires human decision.
+- `adopt-conflict` — new in scaffold, different local copy exists. Requires human decision.
+- `new` — new file in scaffold, doesn't exist locally.
+- `removed` — file removed from scaffold.
 
 ## Step 2: Execute auto-updates (deterministic)
 
@@ -26,7 +27,7 @@ If the plan contains `auto-update` entries:
 ./scripts/scaffold-sync.sh pull-auto
 ```
 
-This copies all clean files, updates the lockfile, and logs — in one call. Do NOT manually `cp` or `lock-update`.
+This handles both `auto-update` and `adopt-clean` files in one pass — copies, updates lockfile, logs. Do NOT manually `cp` or `lock-update`.
 
 ## Step 3: Handle section-merges (deterministic)
 

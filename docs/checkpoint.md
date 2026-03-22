@@ -2,24 +2,28 @@
 
 # Checkpoint
 
-> Last updated: 2026-03-22
-> Session objective: Fix manifest issues, push repos, spec + plan docs lifecycle linking
+> Feature: epoch-timestamps
+> Last updated: 1774211169
+> Plan hash: dae15f7e
+> Session objective: Implement docs-check.sh lifecycle linking + scaffold-wide epoch timestamps
+<!-- Reminder: if no plan exists yet, run /plan before checkpointing (plan before checkpoint). -->
 
 ## Accomplished
 
-- **Manifest issues fixed** — `docs/templates/github/` expanded from directory entry to 7 individual file entries; `.claude/lint.json` removed from hub manifest (downstream-only). Manifest now clean: 55/55 verified.
-- **Hub pushed** — 14 commits to GitHub (manifest-check feature + fix)
-- **Fucina synced** — pulled GUIDE.md update, fetch-license.sh, manifest-check.sh; pushed to GitHub
-- **Docs lifecycle linking specced** — 14 ACs covering docs-check.sh (status, validate, recommend), template metadata, agent/command/rule updates, epoch timestamps
-- **Plan written** — 9-step TDD plan ready for implementation
-- **Epoch timestamps added to spec** — AC-14: all timestamp metadata uses Unix epoch instead of date strings for deterministic ordering and within-day granularity
+- **docs-check.sh implemented** — 9-step TDD plan, all steps complete. Three subcommands: `status` (metadata extraction + content hashing), `validate` (aligned/stale-plan/stale-checkpoint/mismatched/unlinked), `recommend` (state machine → next action). 36 tests.
+- **Templates updated** — spec.md, plan.md, checkpoint.md now have lifecycle metadata fields (Feature, Spec hash, Plan hash) with epoch placeholders.
+- **Agents/commands/rules wired** — spec-writer populates feature_id + epoch, /plan computes spec_hash, workflow rule populates plan_hash in checkpoints, /catchup runs validate + recommend before reading docs.
+- **Epoch timestamps converted** — `scaffold-sync.sh` `timestamp()` and `manifest-check.sh` `verified`/`meta.last_verified` now use `date +%s`. Lockfile regenerated with epoch format.
+- **Sync failure analysis** — identified accept-new data loss bug, 6 historical sync bugs, and two hardening opportunities (defensive guards + --dry-run). Backlogged.
 
 ## Current State
 
 - **Branch:** main
-- **Tests:** 106/106 passing
-- **Uncommitted changes:** spec.md, plan.md, checkpoint.md (this commit)
+- **Tests:** 144/144 passing (36 docs-check + 31 manifest + 41 sync + 15 security + 12 lint + 9 format)
+- **Uncommitted changes:** None (this checkpoint not yet committed)
 - **Build status:** Clean
+- **Manifest:** 56/56 verified, zero issues
+- **Unpushed:** 16 commits since last push
 
 ## Blocked On
 
@@ -27,23 +31,28 @@
 
 ## Next Steps
 
-### 1. Implement docs-check.sh via 9-step TDD plan
-- Follow `docs/plan.md` steps 1-9
-- Start with Step 1: metadata extraction + `status` subcommand
-- Pattern follows `manifest-check.sh` (bash script, subcommands, JSON output, bats tests)
+### 1. Push to GitHub
+- 16 commits unpushed on main
 
-### 2. After implementation, self-test the lifecycle
-- The spec, plan, and checkpoint for *this feature* should be the first docs to carry lifecycle metadata
-- Run `docs-check.sh validate` against the feature's own docs as a real integration test
+### 2. Sync to downstream (fucina)
+- New scripts: `docs-check.sh`
+- Updated scripts: `scaffold-sync.sh` (epoch timestamp), `manifest-check.sh` (epoch verified)
+- Updated templates, agents, commands, rules
+- Run `/scaffold-pull` in fucina
+
+### 3. Spec sync hardening (backlog)
+- **Defensive guards on destructive operations** — every cp/overwrite/delete in scaffold-sync.sh should verify preconditions before acting
+- **`--dry-run` mode for pull** — show what would happen without doing it
+- Both follow existing pattern: bash script, subcommands, bats tests
 
 ## Determinism Notes
 
-- **Manifest issues were fully deterministic fixes** — directory→files expansion and hub-only file removal. No judgment calls.
-- **The lifecycle linking feature is designed for maximum determinism** — hash comparison, metadata parsing, and state machine recommendations are all script-based. Claude's judgment is only needed for: populating metadata when writing docs (unavoidable — doc content is stochastic).
-- **"Plan before checkpoint" convention identified** — planning in warm context is cheaper than in cold context. Codified as: (1) `recommend` subcommand in docs-check.sh (deterministic state machine), (2) workflow rule (judgment-based convention), (3) checkpoint template comment (passive reminder).
+- **All new work is maximally deterministic** — docs-check.sh is pure script (hash comparison, metadata parsing, state machine). No Claude judgment needed at any step.
+- **Epoch conversion was a 1:1 replacement** — no new logic, just format change. Deterministic by definition.
+- **Feedback captured:** Zach corrected mid-implementation when I skipped spec→plan for the epoch feature. Even small changes should follow the workflow. Saved as lesson for future sessions.
 
 ## Context Notes
 
-- The `recommend` subcommand maps document state → next action. Key states: spec-only → "/plan", spec+plan → "build", stale-plan → "re-run /plan", all-linked-with-checkpoint → "/clear + /catchup", nothing → "describe a feature".
-- Metadata lives in blockquote `>` lines after the heading. Hash is sha256 (first 8 chars) of content below the metadata section, so metadata changes don't invalidate the chain.
-- Templates get placeholder fields; agents/commands/rules get instructions to populate them. The script validates; it never writes.
+- The docs lifecycle feature was self-referential: the spec, plan, and checkpoint for this feature are the first docs to carry lifecycle metadata.
+- The `/catchup` command now runs `docs-check.sh validate` and `recommend` as steps 0a/0b — next session should see this in action.
+- The `fetch-license.sh` `date +%Y` is intentionally NOT converted (license text needs year string).

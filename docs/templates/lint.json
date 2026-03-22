@@ -1,0 +1,5 @@
+{
+  "_comment": "Project-specific linters for the lint-on-write hook. Add entries for your stack.",
+  "_docs": "Each key is a glob pattern (pipe-separated for multiple). 'check' is the command (file path appended). 'name' is the display name for error messages.",
+  "linters": {}
+}

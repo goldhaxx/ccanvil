@@ -46,3 +46,7 @@ Replace these with your project's actual commands:
 - NEVER write implementation code without a failing test driving it.
 - NEVER refactor while tests are failing.
 - If stuck after 2 attempts, stop and write alternatives to `docs/checkpoint.md`.
+
+<!-- NODE-SPECIFIC-START -->
+<!-- Add project-specific content below this line. -->
+<!-- Hub content above is updated via /scaffold-pull. -->

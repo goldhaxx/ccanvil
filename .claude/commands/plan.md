@@ -14,3 +14,7 @@ Create an implementation plan for the feature described in the user's message (o
    - **Local-only changes** (adding project-specific commands, rules, agents): update the node-specific section of `GUIDE.md` (below `<!-- NODE-SPECIFIC-START -->`). If the project's tech stack, commands, or architecture changed, update the node section of `CLAUDE.md` (above `<!-- HUB-MANAGED-START -->`).
 
 Do NOT implement anything. Plan only.
+
+<!-- NODE-SPECIFIC-START -->
+<!-- Add project-specific content below this line. -->
+<!-- Hub content above is updated via /scaffold-pull. -->

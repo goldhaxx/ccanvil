@@ -23,3 +23,7 @@ Diagnose and fix TLS certificate issues caused by Cloudflare WARP VPN.
    ```
 
 7. Report what was fixed and what the user should verify.
+
+<!-- NODE-SPECIFIC-START -->
+<!-- Add project-specific content below this line. -->
+<!-- Hub content above is updated via /scaffold-pull. -->

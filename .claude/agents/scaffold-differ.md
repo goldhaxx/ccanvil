@@ -94,3 +94,7 @@ Run `./scripts/scaffold-sync.sh diff <file>` to see exactly what changed. Identi
 - Consider whether a "generalizable" change would actually help a fresh project, not just this one
 - For `settings.json` changes, only recommend pushing permission patterns that are universally useful
 - For files with section delimiters (`<!-- NODE-SPECIFIC-START -->` or `<!-- HUB-MANAGED-START -->`): content in the node-specific section is ALWAYS project-specific — never recommend pushing it. Hub-managed sections already came from the scaffold so there is no need to push them back either. Only flag delimited files if the user explicitly modified a hub-managed section with a generalizable improvement.
+
+<!-- NODE-SPECIFIC-START -->
+<!-- Add project-specific content below this line. -->
+<!-- Hub content above is updated via /scaffold-pull. -->

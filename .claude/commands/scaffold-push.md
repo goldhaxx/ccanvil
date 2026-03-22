@@ -46,3 +46,7 @@ Report what was pushed.
 - NEVER push project-specific content (tech stack, project names, API endpoints, domain logic).
 - NEVER push the CLAUDE.md node section (above the delimiter).
 - ALWAYS show the user what will be written to the scaffold before committing.
+
+<!-- NODE-SPECIFIC-START -->
+<!-- Add project-specific content below this line. -->
+<!-- Hub content above is updated via /scaffold-pull. -->

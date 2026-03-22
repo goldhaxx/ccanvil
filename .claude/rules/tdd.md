@@ -33,3 +33,7 @@ When implementing any feature or fix:
 
 After every file edit, the test suite runs automatically via hooks.
 If tests fail after your change, fix immediately before proceeding.
+
+<!-- NODE-SPECIFIC-START -->
+<!-- Add project-specific content below this line. -->
+<!-- Hub content above is updated via /scaffold-pull. -->

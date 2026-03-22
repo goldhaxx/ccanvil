@@ -36,3 +36,7 @@
 - Boolean variables start with is/has/can/should.
 - Functions that return promises are named with verbs: `fetchUser`, `createOrder`.
 - Avoid abbreviations unless universally understood (id, url, api).
+
+<!-- NODE-SPECIFIC-START -->
+<!-- Add project-specific content below this line. -->
+<!-- Hub content above is updated via /scaffold-pull. -->

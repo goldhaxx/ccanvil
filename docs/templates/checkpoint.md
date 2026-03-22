@@ -27,3 +27,7 @@
 ## Context Notes
 
 [Anything the next session needs to know that isn't captured elsewhere — failed approaches, decisions made, alternatives considered]
+
+<!-- NODE-SPECIFIC-START -->
+<!-- Add project-specific content below this line. -->
+<!-- Hub content above is updated via /scaffold-pull. -->

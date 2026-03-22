@@ -43,3 +43,7 @@ Each criterion is independently testable. Binary pass/fail.
 - [Pattern to follow: "Same shape as src/services/existing.ts"]
 - [Technical constraints or gotchas]
 - [Performance requirements if any]
+
+<!-- NODE-SPECIFIC-START -->
+<!-- Add project-specific content below this line. -->
+<!-- Hub content above is updated via /scaffold-pull. -->

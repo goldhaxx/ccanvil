@@ -22,3 +22,7 @@ This handles: status verification, copy to scaffold, lockfile update, logging, g
 ## Rules
 - NEVER run `cp`, `lock-update`, `git -C`, or `changelog` manually. The `promote` command handles everything.
 - If the file status is not `local-only`, the script will error with a clear message.
+
+<!-- NODE-SPECIFIC-START -->
+<!-- Add project-specific content below this line. -->
+<!-- Hub content above is updated via /scaffold-pull. -->

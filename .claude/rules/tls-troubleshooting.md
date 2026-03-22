@@ -128,3 +128,7 @@ COPY combined-ca-bundle.pem /etc/ssl/certs/ca-certificates.crt
 - Do NOT use `pip install --trusted-host` as a permanent solution.
 - Do NOT use `git config http.sslVerify false`.
 - These are security bypasses, not fixes. Always use the proper CA bundle approach.
+
+<!-- NODE-SPECIFIC-START -->
+<!-- Add project-specific content below this line. -->
+<!-- Hub content above is updated via /scaffold-pull. -->

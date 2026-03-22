@@ -12,3 +12,7 @@ Then provide a brief summary:
 - What the next step should be based on checkpoint and spec
 
 Do NOT start implementing anything. Just orient and report.
+
+<!-- NODE-SPECIFIC-START -->
+<!-- Add project-specific content below this line. -->
+<!-- Hub content above is updated via /scaffold-pull. -->

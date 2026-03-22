@@ -20,3 +20,7 @@ This is a fully deterministic operation. No Claude judgment needed.
 ## Rules
 - If the file is not in the lockfile, the script will error with a clear message.
 - If the file is already node-only, the script will skip with a message.
+
+<!-- NODE-SPECIFIC-START -->
+<!-- Add project-specific content below this line. -->
+<!-- Hub content above is updated via /scaffold-pull. -->

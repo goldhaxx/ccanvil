@@ -20,3 +20,7 @@ This handles: status verification, lockfile update, and logging — all in one c
 ## Rules
 - NEVER run `lock-update` or `log` manually. The `demote` command handles everything.
 - If the file status is not `clean`, the script will error with a clear message.
+
+<!-- NODE-SPECIFIC-START -->
+<!-- Add project-specific content below this line. -->
+<!-- Hub content above is updated via /scaffold-pull. -->

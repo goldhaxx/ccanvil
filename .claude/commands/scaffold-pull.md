@@ -68,3 +68,7 @@ Report what happened: N auto-updated, N section-merged, N conflicts resolved, N 
 - NEVER auto-update a file that has local changes — the script enforces this.
 - ALWAYS show the user what will change before writing.
 - For merge conflicts, Claude proposes the merge but the user must approve.
+
+<!-- NODE-SPECIFIC-START -->
+<!-- Add project-specific content below this line. -->
+<!-- Hub content above is updated via /scaffold-pull. -->

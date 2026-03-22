@@ -41,3 +41,7 @@ When reviewing existing automations:
 - Claude running `lock-update` 3 times per file (should be one compound command)
 - Claude running `git -C <path> status --porcelain` (should be a script pre-check)
 - Inline shell in settings.json hooks (should be executable scripts in `.claude/hooks/`)
+
+<!-- NODE-SPECIFIC-START -->
+<!-- Add project-specific content below this line. -->
+<!-- Hub content above is updated via /scaffold-pull. -->

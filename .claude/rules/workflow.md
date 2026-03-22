@@ -49,3 +49,7 @@
 - Write what you've learned to `docs/checkpoint.md`.
 - Suggest: "This approach isn't working. Let me outline alternatives."
 - Do not keep trying variations of a failing strategy.
+
+<!-- NODE-SPECIFIC-START -->
+<!-- Add project-specific content below this line. -->
+<!-- Hub content above is updated via /scaffold-pull. -->

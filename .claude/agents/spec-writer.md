@@ -26,3 +26,7 @@ You are a product-minded engineer who translates feature requests into precise, 
 - Include at least one error/edge case criterion
 - Reference specific files and patterns from the existing codebase
 - Keep the spec under 100 lines — it needs to fit in context alongside implementation
+
+<!-- NODE-SPECIFIC-START -->
+<!-- Add project-specific content below this line. -->
+<!-- Hub content above is updated via /scaffold-pull. -->

@@ -160,3 +160,7 @@ exit 0  # allow
 | "Don't add unnecessary dependencies" | Rule (requires judgment about "unnecessary") |
 | "Run tests after every file change" | Hook (deterministic test runner) |
 | "Write descriptive test names" | Rule (requires understanding intent) |
+
+<!-- NODE-SPECIFIC-START -->
+<!-- Add project-specific content below this line. -->
+<!-- Hub content above is updated via /scaffold-pull. -->

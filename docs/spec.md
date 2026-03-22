@@ -1,53 +1,78 @@
-# Feature: Hub/Node Guide Inheritance
+# Feature: Universal Delimiters for Markdown Scaffold Components
 
-> Created: 2026-03-20
-> Status: Draft
+> Created: 2026-03-21
+> Status: In Progress
 
 ## Summary
 
-GUIDE.md and SCAFFOLD_FRAMEWORK.md should propagate to downstream projects through the sync system, but with different inheritance behaviors. SCAFFOLD_FRAMEWORK.md is immutable reference material — identical everywhere. GUIDE.md has a hub base layer that syncs downward, plus a node-specific layer that stays local. Hub guide updates always flow to nodes; node-specific content never flows back to the hub.
+Every markdown file synced by the scaffold system gets a `<!-- NODE-SPECIFIC-START -->` delimiter, enabling section-merge on pull instead of full-file conflicts. This means downstream projects can customize any rule, command, agent, skill, or template without losing those customizations when the hub updates.
 
 ## Job To Be Done
 
-**When** I initialize or pull updates into a downstream project,
-**I want to** have an accurate, project-specific guide that includes both the scaffold-wide documentation and my project's unique commands/rules/workflows,
-**So that** anyone working in this project understands the full system — both the shared scaffold and the local customizations.
+**When** a downstream project customizes a scaffold markdown file (e.g., adds project-specific test commands to TDD rules),
+**I want to** pull hub updates without losing my local additions,
+**So that** scaffold evolution and project customization coexist without manual conflict resolution.
 
 ## Acceptance Criteria
 
-- [ ] **AC-1:** When `/init` creates a new project, both `SCAFFOLD_FRAMEWORK.md` and `GUIDE.md` are copied and tracked in the lockfile.
-- [ ] **AC-2:** `SCAFFOLD_FRAMEWORK.md` is tracked as `clean` and auto-updated on pull, same as any other scaffold file. It is never node-specific.
-- [ ] **AC-3:** `GUIDE.md` in a node project has two distinct sections: a hub-managed section (synced from scaffold) and a node-specific section (local additions). The boundary is marked by a clear delimiter.
-- [ ] **AC-4:** When `/scaffold-pull` runs and the hub's GUIDE.md has changed, the hub-managed section is updated while the node-specific section is preserved intact.
-- [ ] **AC-5:** When `/scaffold-push` or `/scaffold-promote` evaluates GUIDE.md, it never pushes node-specific content to the hub. The node section is classified as project-specific by default.
-- [ ] **AC-6:** When the `/plan` command adds a GUIDE.md update step (because scaffold structure changed), it updates both the hub section AND the node section if the change is node-relevant (e.g., a new local command was added).
-- [ ] **AC-7:** The node-specific section of GUIDE.md documents local commands, rules, agents, skills, and workflows that exist only in that project.
+- [x] **AC-1:** All 23 markdown scaffold files (1 skill, 3 agents, 10 commands, 5 rules, 4 templates) have a `<!-- NODE-SPECIFIC-START -->` delimiter with an empty node section below it.
+- [x] **AC-2:** YAML frontmatter (in skills and agents) remains above the hub section, not split by the delimiter.
+- [x] **AC-3:** `scaffold-sync.sh pull-plan` classifies these files as `section-merge` (not `conflict`) when both hub and local have changes. (Already works — pull-plan checks for delimiter via `grep -qx` on the scaffold file.)
+- [x] **AC-4:** `scaffold-sync.sh section-merge` correctly merges a delimited hub file with a local file that has node-specific content below the delimiter. (Already works — existing section-merge logic handles this.)
+- [x] **AC-5:** `scaffold-sync.sh section-merge` correctly handles a local file that predates the delimiter (no delimiter yet) — treats entire local content as node content. (Already works — existing fallback logic.)
+- [x] **AC-6:** The delimiter line is exactly `<!-- NODE-SPECIFIC-START -->` (matches the `grep -qx` in pull-plan). Verified: no false matches in code-block examples (HTML-escaped).
+- [x] **AC-7:** GUIDE.md and CLAUDE.md are unchanged (they already have their own delimiters). GUIDE.md documentation updated to reflect universal delimiters.
 
 ## Affected Files
 
 | File | Change |
 |------|--------|
-| `scripts/scaffold-sync.sh` | Modified — add GUIDE.md and SCAFFOLD_FRAMEWORK.md to tracked patterns, add merge logic for GUIDE.md hub/node sections |
-| `.claude/commands/scaffold-pull.md` | Modified — add special handling for GUIDE.md section-based merge |
-| `.claude/commands/plan.md` | Modified — node-specific GUIDE.md section awareness |
-| `global-commands/init.md` | Modified — copy both files, generate initial node section in GUIDE.md |
-| `GUIDE.md` | Modified — add hub section delimiter marking the boundary |
-| `.claude/agents/scaffold-differ.md` | Modified — always classify GUIDE.md node section as project-specific |
+| `.claude/skills/tdd/SKILL.md` | Modified — add delimiter + empty node section |
+| `.claude/agents/spec-writer.md` | Modified — add delimiter + empty node section |
+| `.claude/agents/code-reviewer.md` | Modified — add delimiter + empty node section |
+| `.claude/agents/scaffold-differ.md` | Modified — add delimiter + empty node section |
+| `.claude/commands/plan.md` | Modified — add delimiter + empty node section |
+| `.claude/commands/review.md` | Modified — add delimiter + empty node section |
+| `.claude/commands/catchup.md` | Modified — add delimiter + empty node section |
+| `.claude/commands/scaffold-status.md` | Modified — add delimiter + empty node section |
+| `.claude/commands/fix-certs.md` | Modified — add delimiter + empty node section |
+| `.claude/commands/scaffold-pull.md` | Modified — add delimiter + empty node section |
+| `.claude/commands/scaffold-push.md` | Modified — add delimiter + empty node section |
+| `.claude/commands/scaffold-promote.md` | Modified — add delimiter + empty node section |
+| `.claude/commands/scaffold-demote.md` | Modified — add delimiter + empty node section |
+| `.claude/commands/scaffold-ignore.md` | Modified — add delimiter + empty node section |
+| `.claude/rules/tdd.md` | Modified — add delimiter + empty node section |
+| `.claude/rules/workflow.md` | Modified — add delimiter + empty node section |
+| `.claude/rules/code-quality.md` | Modified — add delimiter + empty node section |
+| `.claude/rules/deterministic-first.md` | Modified — add delimiter + empty node section |
+| `.claude/rules/tls-troubleshooting.md` | Modified — add delimiter + empty node section |
+| `docs/templates/spec.md` | Modified — add delimiter + empty node section |
+| `docs/templates/plan.md` | Modified — add delimiter + empty node section |
+| `docs/templates/checkpoint.md` | Modified — add delimiter + empty node section |
+| `docs/templates/hooks-reference.md` | Modified — add delimiter + empty node section |
+| `GUIDE.md` | Modified — document universal delimiter principle |
+| `docs/checkpoint.md` | Modified — update progress |
 
 ## Dependencies
 
-- **Requires:** Scaffold sync system (complete), GUIDE.md (complete), SCAFFOLD_FRAMEWORK.md (complete)
+- **Requires:** Section-merge system in scaffold-sync.sh (complete)
 - **Blocked by:** Nothing
 
 ## Out of Scope
 
-- Automatic generation of node-specific GUIDE.md content from scanning local files (that's a future enhancement — for now the node section is manually maintained or updated by `/plan`)
-- Merging node GUIDE.md content back into the hub GUIDE.md (explicitly blocked)
-- Versioning SCAFFOLD_FRAMEWORK.md separately from the scaffold (it uses the same commit-based versioning)
+- Adding delimiters to non-markdown files (scripts, JSON, hooks) — can't splice those safely
+- Populating node sections with content (they start empty; downstream projects add their own)
+- Updating the `/init` command to handle delimiters (already works — section-merge handles missing delimiters gracefully)
+- Writing tests for scaffold-sync.sh (separate next step)
 
 ## Implementation Notes
 
-- The hub/node boundary in GUIDE.md should use a clear, grep-able delimiter like `<!-- NODE-SPECIFIC-START -->` / `<!-- NODE-SPECIFIC-END -->` so the sync script can reliably split the file for section-based merging.
-- `scaffold-sync.sh` needs a new merge mode for GUIDE.md: replace everything above the delimiter with the hub version, preserve everything below.
-- SCAFFOLD_FRAMEWORK.md is simpler — treat it like any tracked file (clean/modified/etc). The protection rule in code-quality.md already prevents modification.
-- Both files should be added to the `TRACKED_PATTERNS` array in scaffold-sync.sh as top-level `*.md` patterns would be too broad. Track them explicitly by name.
+- Delimiter block is exactly 4 lines appended to each file:
+  ```
+  <!-- NODE-SPECIFIC-START -->
+  <!-- Add project-specific content below this line. -->
+  <!-- Hub content above is updated via /scaffold-pull. -->
+  ```
+- For files with YAML frontmatter: delimiter goes after all hub content (at the very end), not between frontmatter and body.
+- The `grep -qx` in pull-plan requires the delimiter to be on its own line with no leading/trailing whitespace.
+- AC-3 through AC-5 are already satisfied by existing section-merge logic — this is purely about adding the delimiters to hub files.

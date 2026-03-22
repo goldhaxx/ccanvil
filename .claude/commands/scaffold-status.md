@@ -7,3 +7,7 @@ Show the current sync state between this project and the scaffold hub.
 5. If there are LOCAL files, mention they can be promoted to the scaffold with `/scaffold-push`.
 
 Do NOT make any changes. Report only.
+
+<!-- NODE-SPECIFIC-START -->
+<!-- Add project-specific content below this line. -->
+<!-- Hub content above is updated via /scaffold-pull. -->

@@ -19,7 +19,10 @@
       "Bash(mv:*)",
       "Bash(./scripts/scaffold-sync.sh:*)",
       "Bash(diff:*)",
-      "Bash(shasum:*)"
+      "Bash(shasum:*)",
+      "Bash(bats:*)",
+      "Bash(bash -n:*)",
+      "Bash(echo:*)"
     ],
     "deny": [
       "Bash(rm -rf /)*",

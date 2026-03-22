@@ -1,21 +1,39 @@
-# Claude Code Development Framework
-## Setup Guide & Operating Manual
+# Claude Code Scaffold
+
+A development scaffold for [Claude Code](https://docs.anthropic.com/en/docs/claude-code) that makes AI-assisted development reliable and repeatable. Spec-driven, test-first, with bi-directional sync between a central hub and any number of downstream projects.
+
+**Why this exists:** Transformer attention is zero-sum. Every token competes for weight. Performance degrades as context fills — starting at just 3,000 tokens. This scaffold manages that constraint through specification-driven development, test-driven verification, and hierarchical context management.
+
+## Features
+
+- **Spec-first workflow** — acceptance criteria before code, every time
+- **TDD enforcement** — red-green-refactor cycle with automatic verification
+- **Context management** — hierarchical loading, aggressive clearing, checkpoint/resume
+- **Bi-directional sync** — hub/node architecture with section-merge, conflict resolution, lockfile tracking
+- **Security audit** — deterministic PII/secrets scanner, pre-push hook, integrated into reviews
+- **Universal linting** — config-driven syntax validation via `.claude/lint.json`, extensible to any language
+- **Self-review** — continuous analysis of stochastic vs deterministic surface area
+- **GitHub-ready** — README, CONTRIBUTING, issue/PR templates, pre-push hooks out of the box
+
+## Quick Start
+
+```bash
+# One-time setup
+mkdir -p ~/.claude/commands
+cp GLOBAL_CLAUDE.md ~/.claude/CLAUDE.md
+cp global-commands/init.md ~/.claude/commands/init.md
+
+# Initialize a new project
+cd ~/projects/my-project
+claude
+# Then type: /init
+```
+
+For the full setup guide with explanations, see below.
 
 ---
 
-## What This Is
-
-A drop-in scaffold for working with Claude Code on any software project. It encodes three principles grounded in how transformers actually process information:
-
-1. **Specification-driven development** — Define what you want before coding, so the model has clear constraints
-2. **Test-driven verification** — Give the model an external oracle (tests) to check itself against
-3. **Hierarchical context management** — Right information at the right time, nothing more
-
-The framework works across any tech stack (Node, Python, Go, etc.) — you customize the project-level CLAUDE.md for your specific stack.
-
----
-
-## Quick Start (5 minutes)
+## Detailed Setup (5 minutes)
 
 ### Step 1: One-time personal setup
 
@@ -108,7 +126,11 @@ Copy the whole directory with `cp -r .claude ./.claude`. Here's what's inside:
 
 | File in zip | Copy to | What it does | Customize? |
 |---|---|---|---|
-| `.claude/settings.json` | `./.claude/settings.json` | Permissions (which shell commands Claude can run) and hooks (deterministic automation that fires on every file write). Pre-configured with a Prettier auto-format hook (commented out) and a security hook that blocks writes to `.env` files. | Later. When a formatter is chosen during development, uncomment and update the formatter hook. Adjust permission allow/deny lists as the project's toolchain takes shape. |
+| `.claude/settings.json` | `./.claude/settings.json` | Permissions and hooks. Pre-configured with file protection (blocks .env writes), syntax linting (blocks broken .sh/.json/.yaml), and auto-formatting (config-driven via `.claude/lint.json`). | Later. Adjust permission allow/deny lists as the project's toolchain takes shape. |
+| `.claude/hooks/protect-files.sh` | `./.claude/hooks/protect-files.sh` | PreToolUse hook that blocks writes to .env, credentials, .pem, .key, and protected files. | Rarely. Add project-specific protected paths. |
+| `.claude/hooks/lint-on-write.sh` | `./.claude/hooks/lint-on-write.sh` | PostToolUse hook for syntax validation. Built-in: bash, json, yaml. Extensible via `.claude/lint.json`. | No. Add project linters to `.claude/lint.json` instead. |
+| `.claude/hooks/format-on-write.sh` | `./.claude/hooks/format-on-write.sh` | PostToolUse hook for auto-formatting. Config-driven via `.claude/lint.json` formatters section. | No. Add project formatters to `.claude/lint.json` instead. |
+| `.claude/lint.json` | `./.claude/lint.json` | Project-specific linters and formatters config. Empty by default — add entries for your stack. | Yes. Add linters/formatters as your stack is chosen. |
 | `.claude/rules/tdd.md` | `./.claude/rules/tdd.md` | TDD enforcement rules. Defines the red-green-refactor cycle, test naming conventions, and what to do when tests break. Loaded alongside CLAUDE.md at launch. | Rarely. These rules are tech-stack-agnostic. Modify only if your project has unusual testing requirements. |
 | `.claude/rules/workflow.md` | `./.claude/rules/workflow.md` | Session discipline and context management rules. Defines session objectives, context preservation via checkpoints, commit practices, when to use sub-agents, and error recovery (stop after 2 failed attempts). Loaded alongside CLAUDE.md at launch. | Rarely. These are general best practices. Modify if your team has specific workflow requirements. |
 | `.claude/rules/code-quality.md` | `./.claude/rules/code-quality.md` | Code standards rules. Covers pattern-following, error handling, dependency management, code organization, and naming conventions. Loaded alongside CLAUDE.md at launch. | Sometimes. Adjust naming conventions or error handling patterns to match your project's standards. |
@@ -124,6 +146,10 @@ Copy the whole directory with `cp -r .claude ./.claude`. Here's what's inside:
 | `.claude/commands/scaffold-push.md` | `./.claude/commands/scaffold-push.md` | `/scaffold-push` — push generalizable project changes to the scaffold hub. | No. Scaffold sync infrastructure. |
 | `.claude/commands/scaffold-promote.md` | `./.claude/commands/scaffold-promote.md` | `/scaffold-promote <file>` — promote a local-only file to the scaffold. | No. Scaffold sync infrastructure. |
 | `.claude/commands/scaffold-demote.md` | `./.claude/commands/scaffold-demote.md` | `/scaffold-demote <file>` — mark a scaffold file as local override. | No. Scaffold sync infrastructure. |
+| `.claude/commands/scaffold-ignore.md` | `./.claude/commands/scaffold-ignore.md` | `/scaffold-ignore <file>` — permanently exclude file from sync. | No. Scaffold sync infrastructure. |
+| `.claude/commands/scaffold-audit.md` | `./.claude/commands/scaffold-audit.md` | `/scaffold-audit` — analyze stochastic vs deterministic surface area. | No. Self-review infrastructure. |
+| `.claude/commands/security-audit.md` | `./.claude/commands/security-audit.md` | `/security-audit` — scan for PII, secrets, sensitive information. | No. Security infrastructure. |
+| `.claude/commands/fix-certs.md` | `./.claude/commands/fix-certs.md` | `/fix-certs` — diagnose and fix Cloudflare WARP TLS issues. | No. TLS troubleshooting. |
 
 ### The `docs/` directory (copy entire directory to project root)
 
@@ -134,6 +160,9 @@ Copy the whole directory with `cp -r docs ./docs`. Contains **templates** (persi
 | `docs/templates/spec.md` | `./docs/templates/spec.md` | Persistent format guide for feature specifications. Agents and commands reference this for structure. Never overwritten. | Rarely. Modify if your team uses a different spec format. |
 | `docs/templates/checkpoint.md` | `./docs/templates/checkpoint.md` | Persistent format guide for session checkpoints. Referenced when writing checkpoints. Never overwritten. | Rarely. Modify if you need different checkpoint sections. |
 | `docs/templates/plan.md` | `./docs/templates/plan.md` | Persistent format guide for implementation plans. Referenced by `/plan`. Never overwritten. | Rarely. Modify if you need different plan structure. |
+| `docs/templates/hooks-reference.md` | `./docs/templates/hooks-reference.md` | Complete hooks documentation — events, exit codes, JSON schemas, writing conventions. | Rarely. Reference when adding hooks. |
+| `docs/templates/lint.json` | `./.claude/lint.json` | Template for project-specific linter/formatter configuration. | Yes. Add entries for your stack. |
+| `docs/templates/github/` | Various (see /init) | README, CONTRIBUTING, issue/PR templates, git pre-push hook. Copied to project root and `.github/` by /init. | Yes. Customize for your project. |
 | `docs/spec.md` | `./docs/spec.md` | Active spec — overwritten each time you spec a new feature. Starts as a placeholder pointing to the template. | No. Claude fills this in. |
 | `docs/checkpoint.md` | `./docs/checkpoint.md` | Active checkpoint — overwritten when Claude checkpoints progress. | No. Claude fills this in. |
 | `docs/plan.md` | `./docs/plan.md` | Active plan — overwritten by `/plan`. | No. Claude fills this in. |
@@ -268,7 +297,7 @@ Claude: "Promoting .claude/rules/sketches.md to scaffold.
 
 You:  "Yes"
 
-         ↓ Copies to scaffold, commits, updates lockfile and changelog
+         ↓ Copies to scaffold, commits, updates lockfile
 ```
 
 ---
@@ -286,10 +315,13 @@ You:  "Yes"
 | `/scaffold-push` | Push generalizable project changes to scaffold |
 | `/scaffold-promote` | Promote a local-only file to the scaffold |
 | `/scaffold-demote` | Mark a scaffold file as local override |
+| `/scaffold-ignore` | Mark file as node-only (permanently excluded from sync) |
+| `/scaffold-audit` | Analyze scaffold for stochastic-to-deterministic improvements |
+| `/security-audit` | Scan repo for PII, secrets, and sensitive information |
+| `/fix-certs` | Diagnose and fix Cloudflare WARP TLS certificate issues |
 | `/clear` | Reset context (built-in). Use between tasks. |
 | `/compact` | Summarize context to free space (built-in). Use proactively at ~60%. |
 | `/cost` | Show token usage (built-in). Monitor your burn rate. |
-| `/context` | Show what's consuming context (built-in). |
 
 ---
 
@@ -308,7 +340,7 @@ LLMs perform best with clear, constrained objectives. A spec with binary accepta
 A fresh 30-minute session with clear context outperforms a degraded 3-hour session every time. Commit early, checkpoint often, /clear aggressively. Each session should have ONE objective.
 
 ### 5. Hooks for determinism, rules for judgment
-Use hooks (settings.json) for things that must ALWAYS happen — formatting, security blocks, lint checks. Use rules and CLAUDE.md for things that require judgment — coding patterns, architectural decisions, naming conventions.
+Use hooks for things that must ALWAYS happen — formatting, security blocks, lint checks. Use rules for things requiring judgment — coding patterns, architectural decisions. Use `.claude/lint.json` to configure project-specific linters and formatters without modifying hub scripts.
 
 ---
 

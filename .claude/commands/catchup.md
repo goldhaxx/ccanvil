@@ -10,6 +10,7 @@ Then provide a brief summary:
 - What was accomplished in previous sessions
 - Current state (clean/dirty, passing/failing tests)
 - What the next step should be based on checkpoint and spec
+- If `docs/checkpoint.md` has a "Determinism Notes" section, mention any outstanding items
 
 Do NOT start implementing anything. Just orient and report.
 

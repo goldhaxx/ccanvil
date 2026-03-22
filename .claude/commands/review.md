@@ -5,6 +5,8 @@ Delegate to the `code-reviewer` agent with this task:
 
 After the review completes, summarize the findings and recommend whether to commit or what to fix first.
 
+Additionally, do a quick self-review per `.claude/rules/self-review.md`: were there any stochastic operations in this session that should become deterministic? If so, note them briefly.
+
 <!-- NODE-SPECIFIC-START -->
 <!-- Add project-specific content below this line. -->
 <!-- Hub content above is updated via /scaffold-pull. -->

@@ -645,6 +645,7 @@ When adding a new rule, command, agent, skill, or template to the scaffold, **al
 
 | Command | What it does |
 |---------|-------------|
+| `/scaffold-audit` | Analyzes scaffold for stochastic-to-deterministic improvement opportunities |
 | `/fix-certs` | Diagnoses and repairs Cloudflare WARP TLS certificate issues |
 | `/init` | Initializes a new project from the scaffold (global command) |
 
@@ -706,6 +707,7 @@ Hook scripts live in `.claude/hooks/` and are referenced from `settings.json`. T
 | `workflow.md` | Sessions | One objective per session, checkpoint, delegate research, stop after 2 failures |
 | `code-quality.md` | Code | Follow existing patterns, typed errors, pin dependencies, intent-revealing names |
 | `tls-troubleshooting.md` | Certs | Auto-detect WARP cert errors, fix with CA bundle, never disable TLS |
+| `self-review.md` | Meta | Flag stochastic interventions during checkpoints/reviews; lightweight always-on version of `/scaffold-audit` |
 
 ---
 

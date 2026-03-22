@@ -3,17 +3,14 @@
 [One-line description.]
 
 ## Tech Stack
-<!-- Updated by Claude Code as technical decisions are made. -->
-- Runtime: TBD
-- Framework: TBD
-- Testing: TBD
-- Package Manager: TBD
+- Runtime: Bash (scaffold automation scripts)
+- Testing: bats-core 1.13.0
+- Package Manager: Homebrew (brew install bats-core)
 
 ## Commands
-<!-- Updated by Claude Code when the project toolchain is established. -->
 ```bash
-# Commands will be added here as the project is set up.
-# Example: npm run dev, npm test, npm run lint, npm run build
+bats tests/scaffold-sync.bats        # Run scaffold sync tests
+bash -n scripts/scaffold-sync.sh     # Syntax check the sync script
 ```
 
 ## Architecture

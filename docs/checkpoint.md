@@ -23,8 +23,9 @@
 
 - **Branch:** main (7 new commits, not pushed)
 - **Tests:** 106/106 passing (41 scaffold-sync + 15 security-audit + 12 lint-hook + 9 format-hook + 29 manifest-check)
-- **Uncommitted changes:** This checkpoint
+- **Uncommitted changes:** None (clean)
 - **Build status:** Clean
+- **Unpushed commits:** 12 ahead of origin/main
 
 ## Blocked On
 

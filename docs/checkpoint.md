@@ -3,31 +3,30 @@
 # Checkpoint
 
 > Last updated: 2026-03-22
-> Session objective: Fucina sync, GitHub publishing, sync log removal, push-side tests, PII scrubbing
+> Session objective: Security audit, lint hooks, GitHub-ready templates
 
 ## Accomplished
 
-- Pulled latest hub changes to fucina (5 auto-updates, 2 new files accepted, auto-committed by pull-finalize)
-- Fixed script self-replacement mid-execution: pull-auto now skips scaffold-sync.sh (bootstrap in pre-check handles it)
-- Added 9 push-side tests: push-candidates (4), push-apply (1), promote (2), demote (2) — 41/41 total
-- Removed sync log and changelog: git history is now single source of truth for all sync operations
-- Scrubbed PII from both repos:
-  - GLOBAL_CLAUDE.md: replaced "Zach" with "[Your name]" placeholder
-  - scaffold-sync.sh: stores ~/... in lockfile instead of /Users/<name>/...
-  - scaffold-sync.sh: added get_scaffold_source_display() for safe output in commits/status
-  - Fucina: rewrote git history to remove absolute path from commit messages
-  - Fucina: replaced absolute path in scaffold.lock with ~/
-- Published both repos to GitHub (public):
-  - https://github.com/goldhaxx/claude-code-scaffold
-  - https://github.com/goldhaxx/fucina
+- Created `scripts/security-audit.sh` — deterministic PII/secrets scanner (15 tests)
+  - Detects: GitHub/AWS/OpenAI tokens, absolute home paths, personal emails, .env/.pem/.key files
+  - Supports: --json, --files-only, --history-only flags
+  - Allowlists: the script itself and documentation files with example patterns
+- Created `/security-audit` command, integrated into `/review` as post-code-review step
+- Created `lint-on-write.sh` — config-driven universal syntax validation hook
+  - Built-in (hub): bash -n, jq empty, yaml check
+  - Extensible (node): .claude/lint.json config for project-specific linters
+  - Exit 2 blocks writes on syntax errors
+- Created GitHub-ready templates in `docs/templates/github/`:
+  - README.md, CONTRIBUTING.md, ISSUE_TEMPLATE/bug_report.md, ISSUE_TEMPLATE/feature_request.md, PULL_REQUEST_TEMPLATE.md
+- Created `docs/templates/lint.json` template for node lint configuration
+- Pushed all changes to GitHub
 
 ## Current State
 
-- **Branch:** main (both repos, pushed to GitHub)
-- **Tests:** 41/41 passing (`bats tests/scaffold-sync.bats`)
-- **Uncommitted changes:** This checkpoint only (hub)
+- **Branch:** main (pushed to GitHub)
+- **Tests:** 56/56 passing (41 scaffold-sync + 15 security-audit)
+- **Uncommitted changes:** This checkpoint only
 - **Build status:** Clean
-- **Both repos:** Public on GitHub, no PII in files or history
 
 ## Blocked On
 
@@ -35,67 +34,36 @@
 
 ## Next Steps
 
-### 1. PII/Sensitive Information Audit as Part of /review (HIGH PRIORITY)
+### 1. Update /init to copy GitHub templates
+- Copy `docs/templates/github/README.md` to project root
+- Copy `docs/templates/github/CONTRIBUTING.md` to project root
+- Copy `docs/templates/github/ISSUE_TEMPLATE/` to `.github/ISSUE_TEMPLATE/`
+- Copy `docs/templates/github/PULL_REQUEST_TEMPLATE.md` to `.github/`
+- Copy `docs/templates/lint.json` to `.claude/lint.json`
+- Populate README placeholders from CLAUDE.md content
 
-Add a security audit step to the review process. Two approaches:
+### 2. Sync all changes to fucina
+- Hub has 4 new commits since last fucina sync
+- Run /scaffold-pull from fucina
+- Set up fucina's .claude/lint.json for Arduino/C++ stack
 
-**Option A — Integrate into existing `/review` command:**
-- Add a "Security Audit" section to the code-reviewer agent
-- Checks: grep for patterns (emails, absolute paths with usernames, tokens, secrets, IP addresses)
-- Reports findings alongside code quality review
+### 3. Create hub's own README
+- The scaffold hub itself needs a proper README (not from the template — the hub is a meta-project)
+- Should explain: what the scaffold is, how to use /init, how sync works, link to GUIDE.md
 
-**Option B — Separate `/security-audit` command:**
-- Standalone command that can be run on demand
-- Also triggered automatically as part of `/review`
-- More thorough: checks tracked files, git history, commit messages, config files
-
-**Recommended:** Option B (separate command, integrated into /review). The security audit is a distinct concern with different patterns than code quality.
-
-Patterns to check:
-- `/Users/<name>/`, `/home/<name>/` — absolute paths with usernames
-- Email patterns: `[\w.-]+@[\w.-]+\.\w+` (excluding noreply)
-- Token patterns: `ghp_`, `gho_`, `sk-`, `Bearer`, `Authorization`
-- Secret patterns: `password`, `secret`, `api_key`, `token` (in non-doc context)
-- `.env` files, `.pem`, `.key` files tracked in git
-- Git author emails that aren't noreply format
-
-### 2. GitHub-Ready Scaffold Enhancement (HIGH PRIORITY)
-
-Enhance the scaffold so every project starts GitHub-ready:
-
-**README.md generation:**
-- Professional README template with badges, table of contents, quick start
-- Auto-populated from CLAUDE.md (project name, tech stack, commands)
-- Mermaid diagrams for architecture
-- Contributing guide section
-- License section
-
-**GitHub-specific files:**
-- `.github/ISSUE_TEMPLATE/` — bug report, feature request templates
-- `.github/PULL_REQUEST_TEMPLATE.md`
-- `LICENSE` — choice of MIT, Apache 2.0, etc.
-- `.github/workflows/` — CI template (test runner)
-- `CONTRIBUTING.md` — contributor guide
-
-**Repo optimization:**
-- GitHub topics/tags
-- Repository description
-- Social preview image guidance
-- Branch protection rules guidance
-
-### 3. Remaining infrastructure items
-- Evaluate whether `.claude/scaffold-sync.log` should be deleted from fucina (file still exists locally, just no longer written to)
-- Consider adding `gh repo edit` commands to scaffold-push for auto-updating GitHub repo metadata
+### 4. Add lint hook tests
+- Test built-in linters (sh, json, yaml validation)
+- Test config-driven linter dispatch
+- Test graceful skip when linter command not installed
 
 ## Determinism Notes
 
-- **pull-finalize commit messages now use ~/**: The `get_scaffold_source_display()` helper ensures no absolute paths leak into git history. This is a deterministic fix — no judgment needed.
-- **Script self-replacement**: pull-auto skips scaffold-sync.sh and prints SKIPPED message. Bootstrap in pre-check handles it on next run. Fully deterministic.
-- **PII audit should be deterministic**: Pattern matching for secrets/PII is computable (regex on file contents). Should be a script or hook, not Claude reasoning. Consider a `scaffold-sync.sh security-audit` command.
+- **Lint hook is config-driven**: No Claude judgment needed. Hub script handles dispatch, node JSON config handles registration. Fully deterministic.
+- **Security audit is fully deterministic**: Pattern matching via grep/regex. No semantic analysis needed. Could become a pre-push hook in the future.
+- **format-on-write.sh**: Still has commented-out formatters. Should also be config-driven like lint-on-write.sh. Same .claude/lint.json could have a "formatters" section.
 
 ## Context Notes
 
-- The sync log file still exists in fucina at `.claude/scaffold-sync.log` but is no longer written to. Can be deleted manually.
-- `SCAFFOLD_CHANGELOG.md` was deleted from the hub and removed from git.
-- Git filter-branch was used to rewrite fucina history. The `refs/original/` backup was cleaned up and garbage collected.
-- Both repos use `goldhaxx` as the GitHub org/user. Git author email is the noreply format.
+- The lint hook uses `run_linter` helper that captures stderr to a temp file and blocks with exit 2. The temp file is cleaned up via trap.
+- Config-driven linters check if the base command exists (`command -v`) before running. Missing linters are silently skipped — this prevents failures on machines without project-specific tooling.
+- The format hook (format-on-write.sh) could be merged with or made parallel to lint-on-write.sh in the future. Currently they're separate hooks: lint blocks on errors, format silently fixes style.

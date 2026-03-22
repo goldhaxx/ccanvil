@@ -938,6 +938,44 @@ EOF
 }
 
 # =========================================================================
+# Sync hardening: git commit verification guard (AC-4)
+# =========================================================================
+
+@test "pull-finalize: verifies commit was created after changes" {
+  cd "$NODE"
+  # Modify a file to create something to commit
+  echo "# Updated by pull" > "$NODE/.claude/rules/tdd.md"
+
+  # Modify hub for a version
+  echo "# minor" >> "$HUB/GUIDE.md"
+  git -C "$HUB" add -A && git -C "$HUB" commit -q -m "tweak"
+
+  local head_before
+  head_before=$(git -C "$NODE" rev-parse HEAD)
+
+  run bash "$NODE/scripts/scaffold-sync.sh" pull-finalize
+  [ "$status" -eq 0 ]
+
+  # HEAD should have changed — commit was created
+  local head_after
+  head_after=$(git -C "$NODE" rev-parse HEAD)
+  [ "$head_before" != "$head_after" ]
+  echo "$output" | grep -q "Pull finalized"
+}
+
+@test "pull-finalize: outputs commit SHA when commit succeeds" {
+  cd "$NODE"
+  echo "# Updated by pull" > "$NODE/.claude/rules/tdd.md"
+  echo "# minor" >> "$HUB/GUIDE.md"
+  git -C "$HUB" add -A && git -C "$HUB" commit -q -m "tweak"
+
+  run bash "$NODE/scripts/scaffold-sync.sh" pull-finalize
+  [ "$status" -eq 0 ]
+  # Should show the commit SHA
+  echo "$output" | grep -q "Committed:"
+}
+
+# =========================================================================
 # Sync hardening: delete guard (AC-2)
 # =========================================================================
 

@@ -939,9 +939,18 @@ cmd_pull_finalize() {
         commit_body+="  - $f"$'\n'
       done <<< "$all_changes"
 
+      local head_before
+      head_before=$(git rev-parse HEAD)
       git add -A
       git commit -m "chore(scaffold): pull from hub @ $new_version" -m "$commit_body" \
-        || echo "Nothing to commit"
+        || true
+      local head_after
+      head_after=$(git rev-parse HEAD)
+      if [[ "$head_before" != "$head_after" ]]; then
+        echo "Committed: $(git rev-parse --short HEAD)"
+      else
+        echo "WARNING: git commit produced no new commit despite $file_count changed files." >&2
+      fi
     else
       echo "No file changes to commit."
     fi
@@ -1047,8 +1056,17 @@ cmd_push_finalize() {
   scaffold_source=$(get_scaffold_source)
 
   # Stage and commit in scaffold
+  local head_before
+  head_before=$(git -C "$scaffold_source" rev-parse HEAD)
   git -C "$scaffold_source" add -A
-  git -C "$scaffold_source" commit -m "$message" || echo "Nothing to commit in scaffold"
+  git -C "$scaffold_source" commit -m "$message" || true
+  local head_after
+  head_after=$(git -C "$scaffold_source" rev-parse HEAD)
+  if [[ "$head_before" != "$head_after" ]]; then
+    echo "Committed in scaffold: $(git -C "$scaffold_source" rev-parse --short HEAD)"
+  else
+    echo "WARNING: git commit in scaffold produced no new commit." >&2
+  fi
 
   # Update version
   local new_version

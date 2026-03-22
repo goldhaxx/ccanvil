@@ -73,7 +73,7 @@ file_hash() {
 }
 
 timestamp() {
-  date -u +"%Y-%m-%dT%H:%M:%SZ"
+  date +%s
 }
 
 

@@ -40,7 +40,13 @@
 - Updated templates, agents, commands, rules
 - Run `/scaffold-pull` in fucina
 
-### 3. Spec sync hardening (backlog)
+### 3. Spec determinism enforcement (next feature)
+- **Mandatory determinism review in checkpoint template** — required section, not optional
+- **Deterministic session audit** — script scans git diff for stochastic patterns (manual cp, jq, shasum, git -C in diffs). Not perfect, but a deterministic signal.
+- **Surface in /catchup** — if previous checkpoint has determinism notes, highlight as "outstanding improvements from last session"
+- All three options in one spec → plan → build cycle
+
+### 4. Spec sync hardening (backlog)
 - **Defensive guards on destructive operations** — every cp/overwrite/delete in scaffold-sync.sh should verify preconditions before acting
 - **`--dry-run` mode for pull** — show what would happen without doing it
 - Both follow existing pattern: bash script, subcommands, bats tests
@@ -50,6 +56,7 @@
 - **All new work is maximally deterministic** — docs-check.sh is pure script (hash comparison, metadata parsing, state machine). No Claude judgment needed at any step.
 - **Epoch conversion was a 1:1 replacement** — no new logic, just format change. Deterministic by definition.
 - **Feedback captured:** Zach corrected mid-implementation when I skipped spec→plan for the epoch feature. Even small changes should follow the workflow. Saved as lesson for future sessions.
+- **Self-review rule is passive** — `self-review.md` relies on Claude remembering to assess determinism during checkpoints. Nothing enforces it. The checkpoint template has no required field, `/catchup` doesn't check for outstanding notes, and no script scans for stochastic patterns. This is the next feature to spec (determinism enforcement — 3 parts).
 
 ## Context Notes
 

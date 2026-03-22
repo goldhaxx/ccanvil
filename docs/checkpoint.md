@@ -34,14 +34,40 @@
 
 ## Next Steps
 
-### 1. Add section-merge delimiter to TDD SKILL.md
-- Add `<!-- NODE-SPECIFIC-START -->` delimiter to hub's `SKILL.md`
-- Hub section: YAML frontmatter + TDD methodology (phases, rules, commit patterns) — universal
-- Node section: Project-specific test config (`$TEST_COMMAND` value, test file patterns, framework notes)
-- This pattern generalizes to any skill with universal methodology + project-specific configuration
-- After adding delimiter in hub, pull to fucina and populate node section with `pio test` config
+### 1. Universal delimiters for all markdown scaffold components (HIGHEST PRIORITY)
+
+**Principle:** Every markdown scaffold component ships with `<!-- NODE-SPECIFIC-START -->`, even if the node section is initially empty. This enables hierarchical change management and bi-directional evolution between hub and nodes.
+
+**Components to delimit:**
+
+| Component type | Files to update | Hub section (above) | Node section (below) |
+|---|---|---|---|
+| Skills | `.claude/skills/tdd/SKILL.md` | YAML frontmatter + methodology (phases, rules, commits) | Project test command, framework config, local conventions |
+| Agents | `.claude/agents/spec-writer.md`, `code-reviewer.md`, `scaffold-differ.md` | Role definition, output format, universal rules | Project-specific context, domain knowledge, local review criteria |
+| Commands | `.claude/commands/*.md` (all sync + workflow commands) | Workflow steps, script calls, universal rules | Project-specific paths, tools, additional steps |
+| Rules | `.claude/rules/*.md` (tdd, workflow, code-quality, deterministic-first, tls) | Universal principles, anti-patterns | Project-specific exceptions, additions, local conventions |
+| Templates | `docs/templates/*.md` (spec, plan, checkpoint, hooks-reference) | Document structure, required sections | Project-specific fields, custom sections |
+
+**What does NOT get delimiters (and why):**
+
+| Component type | Why not | Alternative |
+|---|---|---|
+| Scripts (`*.sh`) | Can't splice bash arbitrarily — functions depend on each other across the file. HTML comments aren't valid bash. | Whole-file tracked. Node customization via separate scripts or node-only fork. |
+| Hooks (`*.sh`) | Same as scripts. | **Stack hooks:** hub provides universal hooks, node adds additional hook entries in settings.json for project-specific checks. Multiple hooks fire on the same event. |
+| `settings.json` | JSON has no comments. | Node-only. Hub hook scripts sync normally; settings.json references are node-managed. |
+| `SCAFFOLD_FRAMEWORK.md` | Research source material — identical everywhere, no node content. | Whole-file auto-update. |
+
+**Implementation approach:**
+1. Spec this as a formal feature (affects every markdown file in the scaffold)
+2. Add delimiter + empty node section to all hub markdown components
+3. Update `/init` to preserve empty node sections when copying
+4. Pull to fucina — all files auto-section-merge, existing content treated as node content where applicable
+5. Populate fucina node sections where project-specific content exists
+6. Add to GUIDE.md as a universal principle alongside deterministic-first
+7. Add creation-time guidance: new markdown components MUST include delimiter
 
 ### 2. Write tests for scaffold-sync.sh
+
 Identified bugs during the fucina sync that tests would have caught:
 
 **Test cases for `pull-plan`:**
@@ -63,20 +89,22 @@ Identified bugs during the fucina sync that tests would have caught:
 - File with no local delimiter: entire local content becomes node section
 - File with delimiter: hub section replaced, node section preserved
 - Non-markdown file with delimiter strings: should NOT be treated as section-merge
+- YAML frontmatter preserved correctly above delimiter
+- Empty node section handled gracefully
 
 **Test infrastructure:**
 - Create `tests/scaffold-sync.bats` using [bats-core](https://github.com/bats-core/bats-core) (bash test framework)
 - Each test creates a temp directory with mock hub + node repos
 - Tests are deterministic — no real git remotes, no real scaffold
 
-### 3. Add `.claude/hooks/*.sh` to TRACKED_PATTERNS
-- Hook scripts were manually copied during fucina sync — they should be tracked like other scaffold files
-- Add `".claude/hooks/*.sh"` to the TRACKED_PATTERNS array in `scaffold-sync.sh`
-
-### 4. Fix `accept-new` safety for existing files
+### 3. Fix `accept-new` safety for existing files
 - `pull-apply accept-new` should check if the file already exists locally before overwriting
 - If it exists, warn and suggest section-merge or conflict resolution instead of silent overwrite
 - This caused data loss during the fucina sync (had to `git checkout` to recover CLAUDE.md)
+
+### 4. Add `.claude/hooks/*.sh` to TRACKED_PATTERNS
+- Hook scripts were manually copied during fucina sync — they should be tracked like other scaffold files
+- Add `".claude/hooks/*.sh"` to the TRACKED_PATTERNS array in `scaffold-sync.sh`
 
 ### 5. Document bootstrap requirement for scaffold-sync.sh
 - During pull, the sync script itself is what runs the commands
@@ -84,11 +112,14 @@ Identified bugs during the fucina sync that tests would have caught:
 - Document this in GUIDE.md or make the pull command resilient to it
 
 ### 6. Pull remaining hub changes to fucina
-- Hub has commits since fucina's last sync (Phase 3 docs, gitignore fix, delimiter bug fix)
+- Hub has commits since fucina's last sync (Phase 3 docs, gitignore fix, delimiter bug fix, checkpoint)
 - Quick `pull-auto` should handle it
 
 ## Context Notes
 
-- TDD SKILL.md was incorrectly marked node-only during initial classification. Corrected — TDD is core methodology, only the test command is project-specific. This validates the need for section-merge on skills.
-- `settings.json` stays node-only because JSON can't support section delimiters. Hook *scripts* (.sh files) sync normally; only the settings.json *references* to them are project-managed.
+- TDD SKILL.md was incorrectly marked node-only during initial classification. Corrected — TDD is core methodology, only the test command is project-specific. This validates the need for universal delimiters.
+- `settings.json` stays node-only because JSON can't support section delimiters. Hook *scripts* (.sh files) sync normally; only the settings.json *references* to them are node-managed.
 - The scaffold hub itself doesn't follow TDD for its own development. This is a gap — scaffold-sync.sh has testable pure functions with deterministic I/O.
+- For hooks, the pattern is "stacking" not "splitting": hub hooks handle universal protections, nodes add additional hook entries in settings.json for project-specific checks. Both fire independently on the same event.
+- During fucina sync, we had to **bootstrap** the new `scaffold-sync.sh` by manually copying it before the pull (chicken-and-egg: need new script to run new commands).
+- The `accept-new` action for CLAUDE.md overwrote fucina's customized version with the scaffold template. Had to `git checkout` to restore and section-merge properly.

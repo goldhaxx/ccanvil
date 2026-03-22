@@ -4,7 +4,7 @@
 
 > Feature: sync-hardening
 > Last updated: 1774213893
-> Plan hash: pending
+> Plan hash: 170ec2dc
 > Session objective: Implement sync hardening — defensive guards + dry-run mode
 <!-- Reminder: if no plan exists yet, run /plan before checkpointing (plan before checkpoint). -->
 

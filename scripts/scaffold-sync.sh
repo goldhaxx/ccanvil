@@ -27,6 +27,7 @@ TRACKED_PATTERNS=(
   ".claude/commands/*.md"
   ".claude/agents/*.md"
   ".claude/skills/*/SKILL.md"
+  ".claude/hooks/*.sh"
   ".claude/settings.json"
   "docs/templates/*.md"
   "scripts/*.sh"

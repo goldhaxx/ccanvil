@@ -510,6 +510,33 @@ flowchart TD
     style USER fill:#e3f2fd,stroke:#333,stroke-width:2px
 ```
 
+### Sync Hardening: Guards and Dry-Run
+
+Every destructive operation in the sync system is self-validating. Guards verify preconditions immediately before execution; `--dry-run` previews changes without applying them.
+
+#### Guards (exit code 3)
+
+| Guard | Trigger | What it prevents |
+|-------|---------|-----------------|
+| **jq validation** | After every lockfile mutation | Corrupt JSON replacing valid lockfile |
+| **Hash re-check** | `pull-apply` with `PLAN_LOCAL_HASH` env var | File modified between plan and apply phases |
+| **Status re-check** | `pull-apply delete` with `PLAN_LOCAL_STATUS` env var | Deleting file whose status changed since plan |
+| **Commit verification** | `pull-finalize`, `push-finalize` | Silent commit failure (HEAD unchanged) |
+
+All guards produce: `GUARD_FAIL: <operation> on <file>: <reason>` on stderr, exit code 3.
+
+#### Dry-run mode
+
+| Command | Flag | What it shows |
+|---------|------|--------------|
+| `pull-auto --dry-run` | `--dry-run` | Files that would be copied |
+| `pull-apply <file> <action> --dry-run` | `--dry-run` | Action that would be applied |
+| `pull-finalize --dry-run` | `--dry-run` | Commit message and file list |
+| `push-apply <file> --dry-run` | `--dry-run` | File that would be pushed |
+| `push-finalize <msg> --dry-run` | `--dry-run` | Commit message |
+
+Dry-run output uses prefix: `DRY-RUN: would <verb> <file>`. Pre-check still runs (cleanness verification is not skipped).
+
 ### Promote and Demote
 
 Demote is fully deterministic. Promote has one judgment call: checking for project-specific content.

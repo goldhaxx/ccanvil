@@ -2,7 +2,7 @@
 
 > Feature: sync-hardening
 > Created: 1774213893
-> Status: Draft
+> Status: Complete
 
 ## Summary
 

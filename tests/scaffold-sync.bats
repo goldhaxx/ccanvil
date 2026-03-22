@@ -1152,6 +1152,43 @@ EOF
   [ "$head_before" = "$head_after" ]
 }
 
+@test "push-apply --dry-run: describes action without copying to scaffold" {
+  cd "$NODE"
+  # Modify a tracked file to make it pushable
+  echo "# Local improvement" > "$NODE/.claude/rules/tdd.md"
+  bash "$NODE/scripts/scaffold-sync.sh" lock-update ".claude/rules/tdd.md" "status" "modified"
+
+  local hub_hash_before
+  hub_hash_before=$(shasum -a 256 "$HUB/.claude/rules/tdd.md" | awk '{print $1}')
+
+  run bash "$NODE/scripts/scaffold-sync.sh" push-apply ".claude/rules/tdd.md" --dry-run
+  [ "$status" -eq 0 ]
+  echo "$output" | grep -q "DRY-RUN: would push .claude/rules/tdd.md"
+
+  # Hub file should NOT have changed
+  local hub_hash_after
+  hub_hash_after=$(shasum -a 256 "$HUB/.claude/rules/tdd.md" | awk '{print $1}')
+  [ "$hub_hash_before" = "$hub_hash_after" ]
+}
+
+@test "push-finalize --dry-run: shows commit info without committing in scaffold" {
+  cd "$NODE"
+  # Stage a change in scaffold to have something to commit
+  echo "# pushed content" > "$HUB/.claude/rules/tdd.md"
+
+  local hub_head_before
+  hub_head_before=$(git -C "$HUB" rev-parse HEAD)
+
+  run bash "$NODE/scripts/scaffold-sync.sh" push-finalize "test push" --dry-run
+  [ "$status" -eq 0 ]
+  echo "$output" | grep -q "DRY-RUN:"
+
+  # Hub HEAD should NOT have changed
+  local hub_head_after
+  hub_head_after=$(git -C "$HUB" rev-parse HEAD)
+  [ "$hub_head_before" = "$hub_head_after" ]
+}
+
 @test "all guards: exit code 3 and GUARD_FAIL prefix" {
   cd "$NODE"
   # Test 1: guard_fail directly

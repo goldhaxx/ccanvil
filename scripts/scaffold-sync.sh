@@ -1065,11 +1065,23 @@ cmd_push_candidates() {
 }
 
 # push-apply: Push a single file to the scaffold
-# Usage: push-apply <file> [description]
+# Usage: push-apply <file> [description] [--dry-run]
 cmd_push_apply() {
   require_lockfile
   local file="${1:?Usage: scaffold-sync.sh push-apply <file> [description]}"
-  local description="${2:-updated $file}"
+  local description=""
+  local dry_run=false
+
+  # Parse remaining args
+  shift
+  for arg in "$@"; do
+    if [[ "$arg" == "--dry-run" ]]; then
+      dry_run=true
+    elif [[ -z "$description" ]]; then
+      description="$arg"
+    fi
+  done
+  [[ -n "$description" ]] || description="updated $file"
 
   local scaffold_source
   scaffold_source=$(get_scaffold_source)
@@ -1077,6 +1089,11 @@ cmd_push_apply() {
   status=$(jq -r --arg f "$file" '.files[$f].status // "unknown"' "$LOCKFILE")
 
   [[ -f "$file" ]] || die "File not found: $file"
+
+  if $dry_run; then
+    echo "DRY-RUN: would push $file ($status)"
+    return 0
+  fi
 
   # Ensure target directory exists in scaffold
   mkdir -p "$(dirname "$scaffold_source/$file")"
@@ -1106,13 +1123,29 @@ cmd_push_apply() {
 }
 
 # push-finalize: Commit in scaffold repo, update version
-# Usage: push-finalize <commit-message>
+# Usage: push-finalize <commit-message> [--dry-run]
 cmd_push_finalize() {
   require_lockfile
-  local message="${1:?Usage: scaffold-sync.sh push-finalize <commit-message>}"
+  local message=""
+  local dry_run=false
+
+  for arg in "$@"; do
+    if [[ "$arg" == "--dry-run" ]]; then
+      dry_run=true
+    elif [[ -z "$message" ]]; then
+      message="$arg"
+    fi
+  done
+  [[ -n "$message" ]] || die "Usage: scaffold-sync.sh push-finalize <commit-message>"
 
   local scaffold_source
   scaffold_source=$(get_scaffold_source)
+
+  if $dry_run; then
+    echo "DRY-RUN: would commit in scaffold with message: $message"
+    echo "DRY-RUN: push-finalize complete. No changes applied."
+    return 0
+  fi
 
   # Stage and commit in scaffold
   local head_before

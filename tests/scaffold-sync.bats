@@ -923,3 +923,16 @@ EOF
   [ "$status" -eq 0 ]
   echo "$output" | grep -qi "already.*modified\|effectively demoted"
 }
+
+
+# =========================================================================
+# Sync hardening: guard infrastructure (AC-5)
+# =========================================================================
+
+@test "guard_fail: exits with code 3 and GUARD_FAIL prefix" {
+  cd "$NODE"
+  # Source the script to access guard_fail directly, then call it
+  run bash -c 'source "$1" --source-only 2>/dev/null; guard_fail "cp" ".claude/rules/tdd.md" "test reason"' _ "$NODE/scripts/scaffold-sync.sh"
+  [ "$status" -eq 3 ]
+  echo "$output" | grep -q "GUARD_FAIL: cp on .claude/rules/tdd.md: test reason"
+}

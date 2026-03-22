@@ -44,6 +44,14 @@ EXCLUDED_FILES=(
 
 die() { echo "ERROR: $*" >&2; exit 1; }
 
+guard_fail() {
+  local operation="${1:?}"
+  local file="${2:?}"
+  local reason="${3:?}"
+  echo "GUARD_FAIL: $operation on $file: $reason" >&2
+  exit 3
+}
+
 require_jq() {
   command -v jq >/dev/null 2>&1 || die "jq is required but not installed. Run: brew install jq"
 }
@@ -1124,6 +1132,11 @@ cmd_scan() {
 # ---------------------------------------------------------------------------
 
 require_jq
+
+# Allow sourcing for tests: `source scaffold-sync.sh --source-only`
+if [[ "${1:-}" == "--source-only" ]]; then
+  return 0 2>/dev/null || exit 0
+fi
 
 case "${1:-}" in
   # --- Atomic commands (building blocks) ---

@@ -315,6 +315,80 @@ cmd_validate() {
 }
 
 # ---------------------------------------------------------------------------
+# cmd_recommend — Suggest next action based on document state machine.
+#
+# State machine:
+#   no docs           → "Describe a feature"
+#   unlinked          → "Add lifecycle metadata"
+#   spec only         → "Run /plan"
+#   mismatched        → "Reconcile feature IDs"
+#   stale-plan        → "Re-run /plan"
+#   stale-checkpoint  → "Update checkpoint"
+#   aligned (no cp)   → "Ready to build"
+#   aligned (with cp) → "/clear and /catchup to resume"
+#
+# Output: JSON with next_action and reason.
+# ---------------------------------------------------------------------------
+cmd_recommend() {
+  local docs_dir="${1:-$DEFAULT_DOCS_DIR}"
+  local validate_json
+  validate_json=$(cmd_validate "$docs_dir")
+
+  local result
+  result=$(echo "$validate_json" | jq -r '.result')
+
+  local spec_exists plan_exists cp_exists
+  spec_exists=$(echo "$validate_json" | jq -r '.status.spec.exists')
+  plan_exists=$(echo "$validate_json" | jq -r '.status.plan.exists')
+  cp_exists=$(echo "$validate_json" | jq -r '.status.checkpoint.exists')
+
+  local next_action reason
+
+  # No docs at all
+  if [[ "$spec_exists" != "true" && "$plan_exists" != "true" && "$cp_exists" != "true" ]]; then
+    next_action="Describe a feature"
+    reason="No spec, plan, or checkpoint found. Start by describing what you want to build."
+
+  elif [[ "$result" == "unlinked" ]]; then
+    next_action="Add lifecycle metadata to docs"
+    reason="Documents exist but lack lifecycle metadata (Feature ID). Add metadata to enable validation."
+
+  elif [[ "$result" == "mismatched" ]]; then
+    next_action="Reconcile feature IDs"
+    reason="Documents reference different features. Ensure all docs share the same feature_id."
+
+  elif [[ "$result" == "stale-plan" ]]; then
+    next_action="Re-run /plan"
+    reason="Spec has changed since the plan was written. The plan is out of date."
+
+  elif [[ "$result" == "stale-checkpoint" ]]; then
+    next_action="Update checkpoint"
+    reason="Plan has changed since the checkpoint was written. The checkpoint is out of date."
+
+  elif [[ "$spec_exists" == "true" && "$plan_exists" != "true" ]]; then
+    next_action="Run /plan"
+    reason="Spec exists but no plan. Create an implementation plan from the spec."
+
+  elif [[ "$result" == "aligned" && "$cp_exists" == "true" ]]; then
+    next_action="/clear and /catchup to resume"
+    reason="All docs aligned with checkpoint. Ready to resume or start next feature."
+
+  elif [[ "$result" == "aligned" && "$cp_exists" != "true" ]]; then
+    next_action="Ready to build"
+    reason="Spec and plan are aligned. Start implementing via TDD."
+
+  else
+    next_action="Review docs state"
+    reason="Unexpected state. Run docs-check.sh validate for details."
+  fi
+
+  jq -n \
+    --arg next_action "$next_action" \
+    --arg reason "$reason" \
+    '{next_action: $next_action, reason: $reason}'
+}
+
+# ---------------------------------------------------------------------------
 # Dispatch
 # ---------------------------------------------------------------------------
 
@@ -324,6 +398,7 @@ shift || true
 case "$cmd" in
   status)    cmd_status "$@" ;;
   validate)  cmd_validate "$@" ;;
+  recommend) cmd_recommend "$@" ;;
   *)
     echo "Usage: docs-check.sh {status|validate|recommend} [docs-dir]" >&2
     exit 1

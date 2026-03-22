@@ -459,3 +459,89 @@ EOF
   # Result should be aligned (what we can check is aligned)
   [ "$result" = "aligned" ]
 }
+
+# ===========================================================================
+# Step 5: recommend — state machine
+# ===========================================================================
+
+@test "recommend: no docs → describe a feature" {
+  run bash "$SCRIPT" recommend "$DOCS"
+  [ "$status" -eq 0 ]
+
+  action=$(echo "$output" | jq -r '.next_action')
+  [[ "$action" == *"Describe a feature"* ]]
+}
+
+@test "recommend: spec only, no plan → run /plan" {
+  create_spec "my-feature" "1742860800" "In Progress"
+
+  run bash "$SCRIPT" recommend "$DOCS"
+  [ "$status" -eq 0 ]
+
+  action=$(echo "$output" | jq -r '.next_action')
+  [[ "$action" == *"/plan"* ]]
+}
+
+@test "recommend: spec + plan linked, no checkpoint → ready to build" {
+  create_spec "my-feature" "1742860800" "In Progress"
+  local spec_hash
+  spec_hash=$(bash "$SCRIPT" status "$DOCS" | jq -r '.spec.content_hash')
+  create_plan "my-feature" "1742860900" "$spec_hash"
+
+  run bash "$SCRIPT" recommend "$DOCS"
+  [ "$status" -eq 0 ]
+
+  action=$(echo "$output" | jq -r '.next_action')
+  [[ "$action" == *"build"* ]] || [[ "$action" == *"Build"* ]]
+}
+
+@test "recommend: stale-plan → re-run /plan" {
+  create_spec "my-feature" "1742860800" "In Progress"
+  local spec_hash
+  spec_hash=$(bash "$SCRIPT" status "$DOCS" | jq -r '.spec.content_hash')
+  create_plan "my-feature" "1742860900" "$spec_hash"
+
+  # Modify spec body to make plan stale
+  echo "## New requirement" >> "$DOCS/spec.md"
+
+  run bash "$SCRIPT" recommend "$DOCS"
+  [ "$status" -eq 0 ]
+
+  action=$(echo "$output" | jq -r '.next_action')
+  [[ "$action" == *"/plan"* ]]
+}
+
+@test "recommend: all aligned with checkpoint → /clear and /catchup" {
+  create_linked_docs
+
+  run bash "$SCRIPT" recommend "$DOCS"
+  [ "$status" -eq 0 ]
+
+  action=$(echo "$output" | jq -r '.next_action')
+  [[ "$action" == *"/clear"* ]] || [[ "$action" == *"/catchup"* ]] || [[ "$action" == *"Continue"* ]]
+}
+
+@test "recommend: mismatched → reconcile feature IDs" {
+  create_spec "feature-a" "1742860800" "In Progress"
+  create_plan "feature-b" "1742860900" "whatever"
+
+  run bash "$SCRIPT" recommend "$DOCS"
+  [ "$status" -eq 0 ]
+
+  action=$(echo "$output" | jq -r '.next_action')
+  reason=$(echo "$output" | jq -r '.reason')
+
+  # Should indicate a problem to fix
+  [[ "$reason" == *"mismatch"* ]] || [[ "$reason" == *"different"* ]]
+}
+
+@test "recommend: includes reason field" {
+  create_spec "my-feature" "1742860800" "In Progress"
+
+  run bash "$SCRIPT" recommend "$DOCS"
+  [ "$status" -eq 0 ]
+
+  reason=$(echo "$output" | jq -r '.reason')
+  [ "$reason" != "null" ]
+  [ -n "$reason" ]
+}

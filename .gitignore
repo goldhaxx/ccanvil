@@ -23,6 +23,5 @@ generated/
 .claude/settings.local.json
 .claude/local/
 
-# Scaffold sync state (machine-generated)
-.claude/scaffold.lock
-.claude/scaffold-sync.log
+# Scaffold sync state — tracked in git for provenance.
+# Listed in .claudeignore so Claude uses the script to access them, not raw reads.

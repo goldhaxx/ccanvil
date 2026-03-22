@@ -389,6 +389,11 @@ stateDiagram-v2
     [*] --> scaffold_only: New file added to scaffold hub
     scaffold_only --> clean: /scaffold-pull → Accept
 
+    clean --> node_only: /scaffold-ignore
+    modified --> node_only: /scaffold-ignore
+    local_only --> node_only: /scaffold-ignore
+    node_only --> clean: scaffold-sync.sh track
+
     state clean {
         [*]: Auto-updated on pull
     }
@@ -403,6 +408,9 @@ stateDiagram-v2
     }
     state scaffold_only {
         [*]: Not yet in project
+    }
+    state node_only {
+        [*]: Permanently excluded from sync
     }
 ```
 
@@ -604,6 +612,7 @@ flowchart LR
 | `/scaffold-push` | Project → Hub | Pushes generalizable changes upstream |
 | `/scaffold-promote <file>` | Project → Hub | Promotes a local file to the scaffold |
 | `/scaffold-demote <file>` | Local | Marks a scaffold file as local override |
+| `/scaffold-ignore <file>` | Local | Marks file as node-only (permanently excluded from sync) |
 
 ### Utility Commands
 
@@ -828,12 +837,14 @@ flowchart TD
     Q -->|"Created a useful<br/>new rule/command/agent"| PROMOTE["/scaffold-promote file<br/><i>Share with all projects</i>"]
     Q -->|"Want to check for<br/>scaffold updates"| STATUS["/scaffold-status<br/><i>then /scaffold-pull if updates exist</i>"]
     Q -->|"Customized a scaffold file<br/>and want to keep my version"| DEMOTE["/scaffold-demote file<br/><i>Prevents auto-update on pull</i>"]
+    Q -->|"File is permanently<br/>project-specific"| IGNORE["/scaffold-ignore file<br/><i>Excluded from all future sync</i>"]
     Q -->|"Made improvements to<br/>a modified scaffold file"| PUSH["/scaffold-push<br/><i>Claude extracts generalizable parts</i>"]
     Q -->|"Starting a new project"| PULL["Pull latest into current project first<br/>then /init in new project"]
 
     style PROMOTE fill:#c8e6c9
     style STATUS fill:#e3f2fd
     style DEMOTE fill:#fff3e0
+    style IGNORE fill:#ffcdd2
     style PUSH fill:#c8e6c9
     style PULL fill:#e3f2fd
 ```
@@ -849,6 +860,7 @@ Every scaffold feature traces back to transformer architecture research. This ta
 | Deterministic-first principle | Every token Claude spends on a deterministic operation (cp, diff, hash, lockfile update) is a token stolen from judgment calls that need a transformer. Computable operations must be scripts/hooks. |
 | Hooks over rules for binary checks | Hooks run outside the context window at zero cost. Rules consume instruction slots and can be forgotten under context pressure. Hooks enforce unconditionally. |
 | Compound script commands | One `pull-auto` call replaces 4-6 manual commands per file (cp + hash + lock-update ×3 + log). Reduces context burn by ~70% during sync operations. |
+| Node-only classification | Separates sync intent from sync state. Project-specific files (custom permissions, domain rules) are permanently excluded from pull/push — zero context burned evaluating files that will never move. |
 | CLAUDE.md under 80 lines | U-shaped attention: models attend to beginning/end, lose the middle. ~150-200 effective instruction slots. |
 | TDD verification loops | Without tests, 80% accuracy per decision × 20 decisions = 1.2% overall success. Tests provide external oracle. |
 | Spec before code | "Instruction loss" is the primary bottleneck — models lose track of earlier requirements when multiple features specified together. |

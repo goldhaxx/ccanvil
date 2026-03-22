@@ -786,13 +786,24 @@ cmd_pull_auto() {
 }
 
 # pull-apply: Apply a specific resolution for a single file
-# Usage: pull-apply <file> <action> [merged-content-file]
+# Usage: pull-apply <file> <action> [merged-content-file] [--dry-run]
 # Actions: take-scaffold, keep-local, section-merge, accept-new, adopt-conflict, delete, write-merged <path>
 cmd_pull_apply() {
   require_lockfile
   local file="${1:?Usage: scaffold-sync.sh pull-apply <file> <action> [merged-content-file]}"
   local action="${2:?}"
-  local merged_file="${3:-}"
+  local merged_file=""
+  local dry_run=false
+
+  # Parse remaining args — could be merged_file and/or --dry-run
+  shift 2
+  for arg in "$@"; do
+    if [[ "$arg" == "--dry-run" ]]; then
+      dry_run=true
+    else
+      merged_file="$arg"
+    fi
+  done
 
   local scaffold_source
   scaffold_source=$(get_scaffold_source)
@@ -805,6 +816,12 @@ cmd_pull_apply() {
     if [[ "$current_hash" != "$PLAN_LOCAL_HASH" ]]; then
       guard_fail "cp" "$file" "file changed after plan (expected $PLAN_LOCAL_HASH, got $current_hash)"
     fi
+  fi
+
+  # Dry-run: describe action without executing
+  if $dry_run; then
+    echo "DRY-RUN: would $action $file"
+    return 0
   fi
 
   case "$action" in
@@ -921,7 +938,13 @@ cmd_pull_apply() {
 }
 
 # pull-finalize: Update version, commit all changes, output summary
+# Usage: pull-finalize [--dry-run]
 cmd_pull_finalize() {
+  local dry_run=false
+  if [[ "${1:-}" == "--dry-run" ]]; then
+    dry_run=true
+  fi
+
   require_lockfile
   local scaffold_source
   scaffold_source=$(get_scaffold_source)
@@ -933,7 +956,9 @@ cmd_pull_finalize() {
     new_version="unknown"
   fi
 
-  cmd_lock_set_version "$new_version"
+  if ! $dry_run; then
+    cmd_lock_set_version "$new_version"
+  fi
 
   # Build commit message from changed files
   if git rev-parse HEAD >/dev/null 2>&1; then
@@ -952,32 +977,45 @@ cmd_pull_finalize() {
 
       local display_source
       display_source=$(get_scaffold_source_display)
-      local commit_body=""
-      commit_body+="Scaffold source: $display_source @ $new_version"$'\n'
-      commit_body+=""$'\n'
-      commit_body+="Files synced ($file_count):"$'\n'
-      while IFS= read -r f; do
-        commit_body+="  - $f"$'\n'
-      done <<< "$all_changes"
 
-      local head_before
-      head_before=$(git rev-parse HEAD)
-      git add -A
-      git commit -m "chore(scaffold): pull from hub @ $new_version" -m "$commit_body" \
-        || true
-      local head_after
-      head_after=$(git rev-parse HEAD)
-      if [[ "$head_before" != "$head_after" ]]; then
-        echo "Committed: $(git rev-parse --short HEAD)"
+      if $dry_run; then
+        echo "DRY-RUN: would commit $file_count files"
+        echo "DRY-RUN: commit message: chore(scaffold): pull from hub @ $new_version"
+        while IFS= read -r f; do
+          echo "DRY-RUN:   - $f"
+        done <<< "$all_changes"
       else
-        echo "WARNING: git commit produced no new commit despite $file_count changed files." >&2
+        local commit_body=""
+        commit_body+="Scaffold source: $display_source @ $new_version"$'\n'
+        commit_body+=""$'\n'
+        commit_body+="Files synced ($file_count):"$'\n'
+        while IFS= read -r f; do
+          commit_body+="  - $f"$'\n'
+        done <<< "$all_changes"
+
+        local head_before
+        head_before=$(git rev-parse HEAD)
+        git add -A
+        git commit -m "chore(scaffold): pull from hub @ $new_version" -m "$commit_body" \
+          || true
+        local head_after
+        head_after=$(git rev-parse HEAD)
+        if [[ "$head_before" != "$head_after" ]]; then
+          echo "Committed: $(git rev-parse --short HEAD)"
+        else
+          echo "WARNING: git commit produced no new commit despite $file_count changed files." >&2
+        fi
       fi
     else
       echo "No file changes to commit."
     fi
   fi
 
-  echo "Pull finalized. Scaffold version: $new_version"
+  if $dry_run; then
+    echo "DRY-RUN: pull-finalize complete. No changes applied."
+  else
+    echo "Pull finalized. Scaffold version: $new_version"
+  fi
 }
 
 # push-candidates: List files eligible for push with current state
@@ -1230,7 +1268,7 @@ case "${1:-}" in
   pull-plan)        cmd_pull_plan ;;
   pull-auto)        shift; cmd_pull_auto "${1:-}" ;;
   pull-apply)       shift; cmd_pull_apply "$@" ;;
-  pull-finalize)    cmd_pull_finalize ;;
+  pull-finalize)    shift; cmd_pull_finalize "${1:-}" ;;
   push-candidates)  shift; cmd_push_candidates "${1:-}" ;;
   push-apply)       shift; cmd_push_apply "$@" ;;
   push-finalize)    shift; cmd_push_finalize "$@" ;;

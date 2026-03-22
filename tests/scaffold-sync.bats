@@ -1110,6 +1110,48 @@ EOF
   rm -f "$NODE/dirty-file.txt"
 }
 
+@test "pull-apply --dry-run: describes action without executing" {
+  cd "$NODE"
+  # Modify hub
+  echo "# Hub v2" > "$HUB/.claude/rules/tdd.md"
+  git -C "$HUB" add -A && git -C "$HUB" commit -q -m "update"
+  # Demote to create conflict
+  bash "$NODE/scripts/scaffold-sync.sh" demote ".claude/rules/tdd.md"
+  git -C "$NODE" add -A && git -C "$NODE" commit -q -m "demote"
+
+  local hash_before
+  hash_before=$(shasum -a 256 "$NODE/.claude/rules/tdd.md" | awk '{print $1}')
+
+  run bash "$NODE/scripts/scaffold-sync.sh" pull-apply ".claude/rules/tdd.md" take-scaffold --dry-run
+  [ "$status" -eq 0 ]
+  echo "$output" | grep -q "DRY-RUN: would take-scaffold .claude/rules/tdd.md"
+
+  # File should NOT have changed
+  local hash_after
+  hash_after=$(shasum -a 256 "$NODE/.claude/rules/tdd.md" | awk '{print $1}')
+  [ "$hash_before" = "$hash_after" ]
+}
+
+@test "pull-finalize --dry-run: shows commit info without committing" {
+  cd "$NODE"
+  # Create a change to commit
+  echo "# Updated" > "$NODE/.claude/rules/tdd.md"
+  echo "# minor" >> "$HUB/GUIDE.md"
+  git -C "$HUB" add -A && git -C "$HUB" commit -q -m "tweak"
+
+  local head_before
+  head_before=$(git -C "$NODE" rev-parse HEAD)
+
+  run bash "$NODE/scripts/scaffold-sync.sh" pull-finalize --dry-run
+  [ "$status" -eq 0 ]
+  echo "$output" | grep -q "DRY-RUN:"
+
+  # HEAD should NOT have changed
+  local head_after
+  head_after=$(git -C "$NODE" rev-parse HEAD)
+  [ "$head_before" = "$head_after" ]
+}
+
 @test "all guards: exit code 3 and GUARD_FAIL prefix" {
   cd "$NODE"
   # Test 1: guard_fail directly

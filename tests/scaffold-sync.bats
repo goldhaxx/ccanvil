@@ -938,6 +938,30 @@ EOF
 }
 
 # =========================================================================
+# Sync hardening: delete guard (AC-2)
+# =========================================================================
+
+@test "pull-apply guard: delete refuses when lockfile status changed since plan" {
+  cd "$NODE"
+  # Create a file that we'll plan to delete
+  echo "# Extra rule" > "$NODE/.claude/rules/extra.md"
+  bash "$NODE/scripts/scaffold-sync.sh" lock-add ".claude/rules/extra.md" "scaffold" "abc123" "$(shasum -a 256 "$NODE/.claude/rules/extra.md" | awk '{print $1}')" "clean"
+  git -C "$NODE" add -A && git -C "$NODE" commit -q -m "add extra rule"
+
+  # Simulate: plan says file is "clean" at plan time, but between plan and apply
+  # someone demotes it to "modified"
+  bash "$NODE/scripts/scaffold-sync.sh" demote ".claude/rules/extra.md"
+
+  # Now try to delete — the status changed from clean to modified
+  run env PLAN_LOCAL_STATUS="clean" bash "$NODE/scripts/scaffold-sync.sh" pull-apply ".claude/rules/extra.md" delete
+  [ "$status" -eq 3 ]
+  echo "$output" | grep -q "GUARD_FAIL:"
+
+  # File should still exist
+  [ -f "$NODE/.claude/rules/extra.md" ]
+}
+
+# =========================================================================
 # Sync hardening: jq validation guard (AC-3, AC-13)
 # =========================================================================
 

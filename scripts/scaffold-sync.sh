@@ -861,6 +861,14 @@ cmd_pull_apply() {
       ;;
 
     delete)
+      # Guard: if PLAN_LOCAL_STATUS is set, verify lockfile status hasn't changed
+      if [[ -n "${PLAN_LOCAL_STATUS:-}" ]]; then
+        local current_status
+        current_status=$(jq -r --arg f "$file" '.files[$f].status // "unknown"' "$LOCKFILE")
+        if [[ "$current_status" != "$PLAN_LOCAL_STATUS" ]]; then
+          guard_fail "rm" "$file" "lockfile status changed after plan (expected $PLAN_LOCAL_STATUS, got $current_status)"
+        fi
+      fi
       if [[ -f "$file" ]]; then
         rm "$file"
       fi

@@ -99,6 +99,68 @@ cmd_parse() {
 }
 
 # ---------------------------------------------------------------------------
+# cmd_check_existence — Check which manifest paths exist on disk, find untracked files.
+#
+# Input: path to README
+# Output: JSON with { found: [...], missing_from_disk: [...], missing_from_manifest: [...] }
+# ---------------------------------------------------------------------------
+cmd_check_existence() {
+  local readme="${1:?Usage: manifest-check.sh check-existence <readme>}"
+
+  # Parse manifest entries
+  local entries
+  entries="$(cmd_parse "$readme")"
+
+  local found="[]"
+  local missing_from_disk="[]"
+  local manifest_paths=()
+
+  # Check each manifest path against disk
+  while IFS= read -r path; do
+    manifest_paths+=("$path")
+    if [[ -e "$path" ]]; then
+      found="$(echo "$found" | jq --arg p "$path" '. + [{path: $p}]')"
+    else
+      local desc
+      desc="$(echo "$entries" | jq -r --arg p "$path" '.[] | select(.path == $p) | .description')"
+      missing_from_disk="$(echo "$missing_from_disk" | jq --arg p "$path" --arg d "$desc" '. + [{path: $p, description: $d}]')"
+    fi
+  done < <(echo "$entries" | jq -r '.[].path')
+
+  # Discover untracked files in tracked directories
+  local missing_from_manifest="[]"
+
+  for dir in "${TRACKED_DIRS[@]}"; do
+    [[ -d "$dir" ]] || continue
+
+    # List files in the tracked directory
+    while IFS= read -r file; do
+      [[ -f "$file" ]] || continue
+
+      # Check if this file is in the manifest
+      local in_manifest=false
+      for mp in "${manifest_paths[@]}"; do
+        if [[ "$mp" == "$file" ]]; then
+          in_manifest=true
+          break
+        fi
+      done
+
+      if [[ "$in_manifest" == false ]]; then
+        missing_from_manifest="$(echo "$missing_from_manifest" | jq --arg p "$file" '. + [{path: $p}]')"
+      fi
+    done < <(find "$dir" -maxdepth 2 -type f | sort)
+  done
+
+  # Build output
+  jq -n \
+    --argjson found "$found" \
+    --argjson missing_disk "$missing_from_disk" \
+    --argjson missing_manifest "$missing_from_manifest" \
+    '{found: $found, missing_from_disk: $missing_disk, missing_from_manifest: $missing_manifest}'
+}
+
+# ---------------------------------------------------------------------------
 # Main dispatch
 # ---------------------------------------------------------------------------
 case "${1:-}" in
@@ -106,8 +168,12 @@ case "${1:-}" in
     shift
     cmd_parse "$@"
     ;;
+  check-existence)
+    shift
+    cmd_check_existence "$@"
+    ;;
   *)
-    echo "Usage: manifest-check.sh {parse|check|init|verify} [args...]" >&2
+    echo "Usage: manifest-check.sh {parse|check-existence|check|init|verify} [args...]" >&2
     exit 1
     ;;
 esac

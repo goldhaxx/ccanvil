@@ -118,3 +118,95 @@ EOF
   [ "$status" -ne 0 ]
   echo "$output" | grep -qi "not found\|no such file\|does not exist"
 }
+
+
+# =========================================================================
+# Step 2: File existence + untracked file discovery
+# =========================================================================
+
+@test "check-existence reports existing files as found" {
+  mkdir -p "$REPO/.claude/rules" "$REPO/scripts"
+  echo "# TDD" > "$REPO/.claude/rules/tdd.md"
+  echo "#!/bin/bash" > "$REPO/scripts/sync.sh"
+
+  # Create a manifest with these paths
+  cat > "$REPO/README.md" <<'EOF'
+| File | Copy to | What it does | Customize? |
+|---|---|---|---|
+| `.claude/rules/tdd.md` | `./.claude/rules/tdd.md` | TDD rules. | No. |
+| `scripts/sync.sh` | `./scripts/sync.sh` | Sync script. | No. |
+EOF
+
+  run bash "$SCRIPT" check-existence "$REPO/README.md"
+  [ "$status" -eq 0 ]
+  echo "$output" | jq -e '.found | length == 2'
+  echo "$output" | jq -e '.missing_from_disk | length == 0'
+}
+
+@test "check-existence reports missing files" {
+  # Create a manifest with paths that don't exist on disk
+  cat > "$REPO/README.md" <<'EOF'
+| File | Copy to | What it does | Customize? |
+|---|---|---|---|
+| `.claude/rules/tdd.md` | `./.claude/rules/tdd.md` | TDD rules. | No. |
+| `scripts/gone.sh` | `./scripts/gone.sh` | Missing script. | No. |
+EOF
+
+  mkdir -p "$REPO/.claude/rules"
+  echo "# TDD" > "$REPO/.claude/rules/tdd.md"
+
+  run bash "$SCRIPT" check-existence "$REPO/README.md"
+  [ "$status" -eq 0 ]
+  echo "$output" | jq -e '.found | length == 1'
+  echo "$output" | jq -e '.missing_from_disk | length == 1'
+  echo "$output" | jq -e '.missing_from_disk[0].path == "scripts/gone.sh"'
+}
+
+@test "check-existence discovers untracked files in tracked directories" {
+  mkdir -p "$REPO/.claude/rules" "$REPO/scripts"
+  echo "# TDD" > "$REPO/.claude/rules/tdd.md"
+  echo "# Extra" > "$REPO/.claude/rules/extra.md"
+  echo "#!/bin/bash" > "$REPO/scripts/sync.sh"
+
+  # Manifest only has tdd.md and sync.sh — extra.md is untracked
+  cat > "$REPO/README.md" <<'EOF'
+| File | Copy to | What it does | Customize? |
+|---|---|---|---|
+| `.claude/rules/tdd.md` | `./.claude/rules/tdd.md` | TDD rules. | No. |
+| `scripts/sync.sh` | `./scripts/sync.sh` | Sync script. | No. |
+EOF
+
+  run bash "$SCRIPT" check-existence "$REPO/README.md"
+  [ "$status" -eq 0 ]
+  echo "$output" | jq -e '.missing_from_manifest | length == 1'
+  echo "$output" | jq -e '.missing_from_manifest[0].path == ".claude/rules/extra.md"'
+}
+
+@test "check-existence ignores files outside tracked directories" {
+  mkdir -p "$REPO/.claude/rules"
+  echo "# TDD" > "$REPO/.claude/rules/tdd.md"
+  echo "random" > "$REPO/random.txt"
+
+  cat > "$REPO/README.md" <<'EOF'
+| File | Copy to | What it does | Customize? |
+|---|---|---|---|
+| `.claude/rules/tdd.md` | `./.claude/rules/tdd.md` | TDD rules. | No. |
+EOF
+
+  run bash "$SCRIPT" check-existence "$REPO/README.md"
+  [ "$status" -eq 0 ]
+  # random.txt is outside tracked dirs, should not appear
+  echo "$output" | jq -e '.missing_from_manifest | length == 0'
+}
+
+@test "check-existence works on real README against real repo" {
+  cd "$BATS_TEST_DIRNAME/.."
+  run bash "$SCRIPT" check-existence README.md
+  [ "$status" -eq 0 ]
+  # All found entries should be real files
+  found=$(echo "$output" | jq '.found | length')
+  [ "$found" -gt 0 ]
+  # Missing from disk should be zero or very few (reference files not in project)
+  missing=$(echo "$output" | jq '.missing_from_disk | length')
+  [ "$missing" -lt 10 ]
+}

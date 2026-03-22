@@ -956,3 +956,78 @@ SCRIPT
 
   rm -rf "$repo"
 }
+
+# ===========================================================================
+# Step 6: audit-session commit message scanning (AC-9)
+# ===========================================================================
+
+@test "audit-session: flags 'manually ran' in commit messages" {
+  local repo
+  repo=$(create_audit_repo)
+
+  echo 'echo clean' > "$repo/clean.sh"
+  git -C "$repo" add clean.sh
+  git -C "$repo" commit -q -m "manually ran the deploy script to fix prod"
+
+  run bash "$SCRIPT" audit-session --since HEAD~1 "$repo"
+  [ "$status" -eq 0 ]
+
+  total=$(echo "$output" | jq -r '.summary.total')
+  [ "$total" -ge 1 ]
+
+  pattern=$(echo "$output" | jq -r '[.patterns_found[] | select(.pattern == "commit-message")] | length')
+  [ "$pattern" -ge 1 ]
+
+  rm -rf "$repo"
+}
+
+@test "audit-session: flags 'workaround' in commit messages" {
+  local repo
+  repo=$(create_audit_repo)
+
+  echo 'echo ok' > "$repo/fix.sh"
+  git -C "$repo" add fix.sh
+  git -C "$repo" commit -q -m "workaround for missing script command"
+
+  run bash "$SCRIPT" audit-session --since HEAD~1 "$repo"
+  [ "$status" -eq 0 ]
+
+  total=$(echo "$output" | jq -r '.summary.total')
+  [ "$total" -ge 1 ]
+
+  rm -rf "$repo"
+}
+
+@test "audit-session: flags 'had to' in commit messages" {
+  local repo
+  repo=$(create_audit_repo)
+
+  echo 'echo fixed' > "$repo/patch.sh"
+  git -C "$repo" add patch.sh
+  git -C "$repo" commit -q -m "had to copy the file manually because sync broke"
+
+  run bash "$SCRIPT" audit-session --since HEAD~1 "$repo"
+  [ "$status" -eq 0 ]
+
+  total=$(echo "$output" | jq -r '.summary.total')
+  [ "$total" -ge 1 ]
+
+  rm -rf "$repo"
+}
+
+@test "audit-session: clean commit messages produce no findings" {
+  local repo
+  repo=$(create_audit_repo)
+
+  echo 'echo ok' > "$repo/feature.sh"
+  git -C "$repo" add feature.sh
+  git -C "$repo" commit -q -m "feat: add new feature implementation"
+
+  run bash "$SCRIPT" audit-session --since HEAD~1 "$repo"
+  [ "$status" -eq 0 ]
+
+  total=$(echo "$output" | jq -r '.summary.total')
+  [ "$total" -eq 0 ]
+
+  rm -rf "$repo"
+}

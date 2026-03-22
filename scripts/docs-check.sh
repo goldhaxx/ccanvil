@@ -520,6 +520,35 @@ cmd_audit_session() {
     fi
   done <<< "$diff_output"
 
+  # Scan commit messages for indicator phrases
+  local commit_phrases=("manually ran" "had to" "workaround")
+  local commit_messages
+  commit_messages=$(git -C "$repo_dir" log --format="%H %s" "${since_commit}..HEAD" 2>/dev/null || echo "")
+
+  while IFS= read -r msg_line || [[ -n "$msg_line" ]]; do
+    [[ -z "$msg_line" ]] && continue
+    local commit_hash="${msg_line%% *}"
+    local commit_msg="${msg_line#* }"
+
+    for phrase in "${commit_phrases[@]}"; do
+      if echo "$commit_msg" | grep -qi "$phrase"; then
+        local escaped_msg
+        escaped_msg=$(echo "$commit_msg" | sed 's/\\/\\\\/g; s/"/\\"/g; s/\t/\\t/g')
+
+        patterns_json=$(echo "$patterns_json" | jq \
+          --arg pattern "commit-message" \
+          --arg file "$commit_hash" \
+          --arg context "$escaped_msg" \
+          '. + [{pattern: $pattern, file: $file, line: 0, context: $context}]')
+
+        categories=$(echo "$categories" | jq \
+          --arg cat "commit-message" \
+          '.[$cat] = ((.[$cat] // 0) + 1)')
+        break  # One finding per commit, even if multiple phrases match
+      fi
+    done
+  done <<< "$commit_messages"
+
   local total
   total=$(echo "$patterns_json" | jq 'length')
 

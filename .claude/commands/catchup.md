@@ -9,12 +9,16 @@ Read the current state of the project to resume work after a context reset.
 4. Run `git diff --cached --stat` to see any staged changes.
 5. Read `docs/spec.md` if it exists — this is the current feature specification.
 
+6. If `docs/checkpoint.md` has a `## Determinism Review` section with candidates_found > 0, read it and prepare to surface those items.
+7. If `scripts/docs-check.sh` exists, run `scripts/docs-check.sh audit-session --since <last-checkpoint-commit>` (extract the commit from checkpoint metadata or use the last 10 commits) and note any new findings.
+
 Then provide a brief summary:
 - Lifecycle state (from steps 0a/0b — aligned/stale/mismatched + recommended action)
+- **Outstanding determinism improvements** — if the previous checkpoint's `## Determinism Review` had candidates, list them under this heading before the regular summary
+- **Post-checkpoint audit findings** — if `audit-session` found patterns since the last checkpoint, list them here
 - What was accomplished in previous sessions
 - Current state (clean/dirty, passing/failing tests)
 - What the next step should be based on checkpoint and spec
-- If `docs/checkpoint.md` has a "Determinism Notes" section, mention any outstanding items
 
 Do NOT start implementing anything. Just orient and report.
 

@@ -1063,6 +1063,24 @@ RULES="$BATS_TEST_DIRNAME/../.claude/rules"
   [ "$output" -ge 1 ]
 }
 
+# ===========================================================================
+# Step 9: /catchup integration (AC-10, AC-11)
+# ===========================================================================
+
+COMMANDS="$BATS_TEST_DIRNAME/../.claude/commands"
+
+@test "catchup: surfaces Determinism Review from checkpoint" {
+  run grep -c "Determinism Review" "$COMMANDS/catchup.md"
+  [ "$status" -eq 0 ]
+  [ "$output" -ge 1 ]
+}
+
+@test "catchup: runs audit-session" {
+  run grep -c "audit-session" "$COMMANDS/catchup.md"
+  [ "$status" -eq 0 ]
+  [ "$output" -ge 1 ]
+}
+
 @test "audit-session: clean commit messages produce no findings" {
   local repo
   repo=$(create_audit_repo)

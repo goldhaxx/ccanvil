@@ -1,78 +1,67 @@
-# Feature: Universal Delimiters for Markdown Scaffold Components
+# Feature: Docs Lifecycle Linking
 
-> Created: 2026-03-21
+> Created: 2026-03-22
 > Status: In Progress
 
 ## Summary
 
-Every markdown file synced by the scaffold system gets a `<!-- NODE-SPECIFIC-START -->` delimiter, enabling section-merge on pull instead of full-file conflicts. This means downstream projects can customize any rule, command, agent, skill, or template without losing those customizations when the hub updates.
+Add deterministic linking between spec.md, plan.md, and checkpoint.md so that staleness is machine-detectable. A `docs-check.sh` script validates the chain; `/catchup` runs it automatically and reports drift before reading content.
 
 ## Job To Be Done
 
-**When** a downstream project customizes a scaffold markdown file (e.g., adds project-specific test commands to TDD rules),
-**I want to** pull hub updates without losing my local additions,
-**So that** scaffold evolution and project customization coexist without manual conflict resolution.
+**When** I run `/catchup` after a `/clear`,
+**I want to** immediately know if my spec, plan, or checkpoint are stale or mismatched,
+**So that** I don't waste a session working from outdated context.
 
 ## Acceptance Criteria
 
-- [x] **AC-1:** All 23 markdown scaffold files (1 skill, 3 agents, 10 commands, 5 rules, 4 templates) have a `<!-- NODE-SPECIFIC-START -->` delimiter with an empty node section below it.
-- [x] **AC-2:** YAML frontmatter (in skills and agents) remains above the hub section, not split by the delimiter.
-- [x] **AC-3:** `scaffold-sync.sh pull-plan` classifies these files as `section-merge` (not `conflict`) when both hub and local have changes. (Already works — pull-plan checks for delimiter via `grep -qx` on the scaffold file.)
-- [x] **AC-4:** `scaffold-sync.sh section-merge` correctly merges a delimited hub file with a local file that has node-specific content below the delimiter. (Already works — existing section-merge logic handles this.)
-- [x] **AC-5:** `scaffold-sync.sh section-merge` correctly handles a local file that predates the delimiter (no delimiter yet) — treats entire local content as node content. (Already works — existing fallback logic.)
-- [x] **AC-6:** The delimiter line is exactly `<!-- NODE-SPECIFIC-START -->` (matches the `grep -qx` in pull-plan). Verified: no false matches in code-block examples (HTML-escaped).
-- [x] **AC-7:** GUIDE.md and CLAUDE.md are unchanged (they already have their own delimiters). GUIDE.md documentation updated to reflect universal delimiters.
+- [ ] **AC-1:** `docs-check.sh status` reads metadata from spec.md, plan.md, and checkpoint.md and outputs JSON with each document's feature_id, stored hashes, and computed current hashes.
+- [ ] **AC-2:** `docs-check.sh validate` reports `aligned` when all three docs share the same feature_id and stored hashes match current hashes.
+- [ ] **AC-3:** `docs-check.sh validate` reports `stale-plan` when spec.md's current content hash differs from the spec_hash stored in plan.md (spec evolved since plan was written).
+- [ ] **AC-4:** `docs-check.sh validate` reports `stale-checkpoint` when plan.md's current content hash differs from the plan_hash stored in checkpoint.md (plan evolved since checkpoint was written).
+- [ ] **AC-5:** `docs-check.sh validate` reports `mismatched` when feature_ids don't match across documents (different features).
+- [ ] **AC-6:** `docs-check.sh validate` handles missing documents gracefully — reports which are missing, doesn't error.
+- [ ] **AC-7:** Templates (spec.md, plan.md, checkpoint.md) include metadata fields: `feature_id`, `spec_hash` (plan only), `plan_hash` (checkpoint only).
+- [ ] **AC-8:** The spec-writer agent populates `feature_id` as a kebab-case slug derived from the feature name.
+- [ ] **AC-9:** The `/plan` command populates `feature_id` (from spec) and `spec_hash` (computed from current spec content).
+- [ ] **AC-10:** Checkpoint writing populates `feature_id` (from plan) and `plan_hash` (computed from current plan content).
+- [ ] **AC-11:** The `/catchup` command runs `docs-check.sh validate` first and reports any staleness/mismatches before reading document content.
+- [ ] **AC-12:** `docs-check.sh recommend` outputs a JSON recommendation (next_action + reason) based on a document state machine — e.g., spec exists but no plan → "Run /plan"; plan stale → "Re-run /plan"; all linked → "Ready to build".
+- [ ] **AC-13:** `/catchup` displays the recommendation from `docs-check.sh recommend` before document content, so the user sees the optimal next step immediately.
 
 ## Affected Files
 
 | File | Change |
 |------|--------|
-| `.claude/skills/tdd/SKILL.md` | Modified — add delimiter + empty node section |
-| `.claude/agents/spec-writer.md` | Modified — add delimiter + empty node section |
-| `.claude/agents/code-reviewer.md` | Modified — add delimiter + empty node section |
-| `.claude/agents/scaffold-differ.md` | Modified — add delimiter + empty node section |
-| `.claude/commands/plan.md` | Modified — add delimiter + empty node section |
-| `.claude/commands/review.md` | Modified — add delimiter + empty node section |
-| `.claude/commands/catchup.md` | Modified — add delimiter + empty node section |
-| `.claude/commands/scaffold-status.md` | Modified — add delimiter + empty node section |
-| `.claude/commands/fix-certs.md` | Modified — add delimiter + empty node section |
-| `.claude/commands/scaffold-pull.md` | Modified — add delimiter + empty node section |
-| `.claude/commands/scaffold-push.md` | Modified — add delimiter + empty node section |
-| `.claude/commands/scaffold-promote.md` | Modified — add delimiter + empty node section |
-| `.claude/commands/scaffold-demote.md` | Modified — add delimiter + empty node section |
-| `.claude/commands/scaffold-ignore.md` | Modified — add delimiter + empty node section |
-| `.claude/rules/tdd.md` | Modified — add delimiter + empty node section |
-| `.claude/rules/workflow.md` | Modified — add delimiter + empty node section |
-| `.claude/rules/code-quality.md` | Modified — add delimiter + empty node section |
-| `.claude/rules/deterministic-first.md` | Modified — add delimiter + empty node section |
-| `.claude/rules/tls-troubleshooting.md` | Modified — add delimiter + empty node section |
-| `docs/templates/spec.md` | Modified — add delimiter + empty node section |
-| `docs/templates/plan.md` | Modified — add delimiter + empty node section |
-| `docs/templates/checkpoint.md` | Modified — add delimiter + empty node section |
-| `docs/templates/hooks-reference.md` | Modified — add delimiter + empty node section |
-| `GUIDE.md` | Modified — document universal delimiter principle |
-| `docs/checkpoint.md` | Modified — update progress |
+| `scripts/docs-check.sh` | New — lifecycle validation script |
+| `tests/docs-check.bats` | New — tests for the script |
+| `docs/templates/spec.md` | Modified — add `feature_id` metadata field |
+| `docs/templates/plan.md` | Modified — add `feature_id` and `spec_hash` metadata fields |
+| `docs/templates/checkpoint.md` | Modified — add `feature_id` and `plan_hash` metadata fields |
+| `.claude/agents/spec-writer.md` | Modified — populate feature_id |
+| `.claude/commands/plan.md` | Modified — populate feature_id + spec_hash |
+| `.claude/commands/catchup.md` | Modified — run docs-check first |
+| `.claude/rules/workflow.md` | Modified — checkpoint writing populates feature_id + plan_hash; add "plan before checkpoint" convention |
+| `docs/templates/checkpoint.md` | Modified — add pre-checkpoint reminder comment |
+| `README.md` | Modified — add docs-check.sh to scripts manifest |
+| `GUIDE.md` | Modified — document lifecycle linking in command reference |
 
 ## Dependencies
 
-- **Requires:** Section-merge system in scaffold-sync.sh (complete)
+- **Requires:** Metadata format convention (blockquote `>` lines at top of each doc)
 - **Blocked by:** Nothing
 
 ## Out of Scope
 
-- Adding delimiters to non-markdown files (scripts, JSON, hooks) — can't splice those safely
-- Populating node sections with content (they start empty; downstream projects add their own)
-- Updating the `/init` command to handle delimiters (already works — section-merge handles missing delimiters gracefully)
-- Writing tests for scaffold-sync.sh (separate next step)
+- Auto-updating stale docs (the script reports, humans decide)
+- Version history of specs (git handles this)
+- Linking to git commits or branches (lifecycle is doc-to-doc only)
+- Hooks to enforce linking (script + command integration is sufficient)
 
 ## Implementation Notes
 
-- Delimiter block is exactly 4 lines appended to each file:
-  ```
-  <!-- NODE-SPECIFIC-START -->
-  <!-- Add project-specific content below this line. -->
-  <!-- Hub content above is updated via /scaffold-pull. -->
-  ```
-- For files with YAML frontmatter: delimiter goes after all hub content (at the very end), not between frontmatter and body.
-- The `grep -qx` in pull-plan requires the delimiter to be on its own line with no leading/trailing whitespace.
-- AC-3 through AC-5 are already satisfied by existing section-merge logic — this is purely about adding the delimiters to hub files.
+- **Metadata format:** Use the existing `>` blockquote header. Add fields like `> Feature: my-feature-slug` and `> Spec hash: abc123`. This keeps metadata human-readable and avoids introducing YAML frontmatter to working docs.
+- **Hash computation:** Hash the document content *below* the blockquote metadata section. This way, updating the `Status:` field in spec.md doesn't invalidate the plan's spec_hash — only substantive content changes do.
+- **Hash algorithm:** sha256, truncated to first 8 chars for readability in metadata lines.
+- **Missing metadata:** If a doc exists but has no lifecycle metadata, `docs-check.sh` reports it as `unlinked` (not an error — supports pre-existing docs and gradual adoption).
+- **Pattern:** Same as `manifest-check.sh` — bash script with subcommands, JSON output, tested with bats.

@@ -3,29 +3,22 @@
 # Checkpoint
 
 > Last updated: 2026-03-22
-> Session objective: Implement deterministic manifest verification (7-step TDD plan)
+> Session objective: Fix manifest issues, push repos, spec + plan docs lifecycle linking
 
 ## Accomplished
 
-- **Deterministic manifest verification complete** — all 7 steps of `docs/plan.md` implemented via TDD:
-  1. `parse` — extracts `(path, description)` from README markdown tables (3-col and 4-col)
-  2. `check-existence` — reports found/missing files, discovers untracked files in tracked directories
-  3. `init` — creates `.claude/manifest.lock` with sha256 hashes + git commit SHA
-  4. `hash-check` — compares current hashes vs lockfile, categorizes as verified/stale
-  5. Stale entries include `git diff` from verified-at commit (fallback for uncommitted changes)
-  6. `extract-identity` — shell comment headers, markdown frontmatter + heading, first 3 lines for other types
-  7. `check` — full JSON report combining all categories + summary counts; `verify` updates lockfile
-- **Integration** — added `manifest-check.sh` to README manifest, documented all subcommands in GUIDE.md, added appendix entry for research basis
-- **Lockfile initialized** — `.claude/manifest.lock` tracks 48 entries with hashes
-- **Backlog captured** — spec/plan/checkpoint lifecycle linking saved to memory (`project_docs_lifecycle.md`)
+- **Manifest issues fixed** — `docs/templates/github/` expanded from directory entry to 7 individual file entries; `.claude/lint.json` removed from hub manifest (downstream-only). Manifest now clean: 55/55 verified.
+- **Hub pushed** — 14 commits to GitHub (manifest-check feature + fix)
+- **Fucina synced** — pulled GUIDE.md update, fetch-license.sh, manifest-check.sh; pushed to GitHub
+- **Docs lifecycle linking specced** — 13 ACs covering docs-check.sh (status, validate, recommend), template metadata, agent/command/rule updates
+- **Plan written** — 9-step TDD plan ready for implementation
 
 ## Current State
 
-- **Branch:** main (7 new commits, not pushed)
-- **Tests:** 106/106 passing (41 scaffold-sync + 15 security-audit + 12 lint-hook + 9 format-hook + 29 manifest-check)
-- **Uncommitted changes:** None (clean)
+- **Branch:** main
+- **Tests:** 106/106 passing
+- **Uncommitted changes:** spec.md, plan.md, checkpoint.md (this commit)
 - **Build status:** Clean
-- **Unpushed commits:** 12 ahead of origin/main
 
 ## Blocked On
 
@@ -33,26 +26,23 @@
 
 ## Next Steps
 
-### 1. Spec/plan/checkpoint lifecycle linking (backlog)
-- Tighten the relationship between spec.md, plan.md, and checkpoint.md
-- Feature IDs + hash-chain validation + `docs-check` script
-- See memory `project_docs_lifecycle.md` for full analysis and proposed approach (Option C)
+### 1. Implement docs-check.sh via 9-step TDD plan
+- Follow `docs/plan.md` steps 1-9
+- Start with Step 1: metadata extraction + `status` subcommand
+- Pattern follows `manifest-check.sh` (bash script, subcommands, JSON output, bats tests)
 
-### 2. Sync fucina with new scaffold changes
-- Fucina needs: fetch-license.sh, CI template, format-hook, manifest-check.sh, updated /init
-- Run `/scaffold-pull` from fucina
-
-### 3. Push both repos to GitHub
-- Hub and fucina both have unpushed commits
+### 2. After implementation, self-test the lifecycle
+- The spec, plan, and checkpoint for *this feature* should be the first docs to carry lifecycle metadata
+- Run `docs-check.sh validate` against the feature's own docs as a real integration test
 
 ## Determinism Notes
 
-- **Manifest verification is now maximally deterministic**: Claude's judgment is only invoked for stale descriptions (with a constrained diff) and new entry descriptions (with identity metadata). Everything else — parsing, hashing, existence checks, diffing, identity extraction — is script-based.
-- **`check` without lockfile gracefully degrades**: First-run reports all entries as unverified, enabling bootstrap without errors.
-- **Real repo check found real issues**: `docs/templates/github/` parsed as a file path (it's a directory), `.claude/lint.json` listed as missing (hub-only, downstream-only file). These are actual manifest inaccuracies the tool correctly flagged.
+- **Manifest issues were fully deterministic fixes** — directory→files expansion and hub-only file removal. No judgment calls.
+- **The lifecycle linking feature is designed for maximum determinism** — hash comparison, metadata parsing, and state machine recommendations are all script-based. Claude's judgment is only needed for: populating metadata when writing docs (unavoidable — doc content is stochastic).
+- **"Plan before checkpoint" convention identified** — planning in warm context is cheaper than in cold context. Codified as: (1) `recommend` subcommand in docs-check.sh (deterministic state machine), (2) workflow rule (judgment-based convention), (3) checkpoint template comment (passive reminder).
 
 ## Context Notes
 
-- `manifest-check.sh check README.md` currently shows 1 stale (`docs/templates/github/` — directory, not file) and 1 missing from disk (`.claude/lint.json` — exists in downstream projects, not hub). These are known README manifest issues, not bugs in the tool.
-- The `check` subcommand combines all primitives but doesn't deduplicate shared logic with `check-existence` and `hash-check`. Could refactor if performance matters, but correctness is complete.
-- Fucina's lint.json uses `cppcheck` (not `platformio check`) because the lint hook appends file paths and PlatformIO's `--src-filter` flag expects a different argument format.
+- The `recommend` subcommand maps document state → next action. Key states: spec-only → "/plan", spec+plan → "build", stale-plan → "re-run /plan", all-linked-with-checkpoint → "/clear + /catchup", nothing → "describe a feature".
+- Metadata lives in blockquote `>` lines after the heading. Hash is sha256 (first 8 chars) of content below the metadata section, so metadata changes don't invalidate the chain.
+- Templates get placeholder fields; agents/commands/rules get instructions to populate them. The script validates; it never writes.

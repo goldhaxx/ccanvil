@@ -421,6 +421,116 @@ cmd_recommend() {
 }
 
 # ---------------------------------------------------------------------------
+# cmd_audit_session — Scan git diffs for stochastic operation patterns.
+#
+# Usage:
+#   docs-check.sh audit-session [--since <commit>] [repo-dir]
+#
+# Scans git diff for patterns indicating stochastic operations:
+#   cp, jq, shasum/sha256sum, git -C, curl, wget
+#
+# Output: JSON with patterns_found array and summary object.
+# ---------------------------------------------------------------------------
+
+# Stochastic pattern definitions: name|regex
+AUDIT_PATTERNS=(
+  "cp|^\\+([[:space:]]*)cp[[:space:]]"
+  "jq|^\\+([[:space:]]*)jq[[:space:]]"
+  "shasum|^\\+.*(shasum|sha256sum)"
+  "git-C|^\\+.*git[[:space:]]+-C[[:space:]]"
+  "curl|^\\+([[:space:]]*)curl[[:space:]]"
+  "wget|^\\+([[:space:]]*)wget[[:space:]]"
+)
+
+cmd_audit_session() {
+  local since_commit=""
+  local repo_dir="."
+
+  # Parse arguments
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --since)
+        since_commit="$2"
+        shift 2
+        ;;
+      *)
+        repo_dir="$1"
+        shift
+        ;;
+    esac
+  done
+
+  # Default: last 10 commits
+  if [[ -z "$since_commit" ]]; then
+    since_commit=$(git -C "$repo_dir" log --format=%H -10 | tail -1 2>/dev/null || echo "HEAD~10")
+  fi
+
+  # Get diff (unified=0 for changed lines only)
+  local diff_output
+  diff_output=$(git -C "$repo_dir" diff --unified=0 "${since_commit}..HEAD" 2>/dev/null || echo "")
+
+  local patterns_json="[]"
+  local categories="{}"
+  local current_file=""
+
+  # Process diff line by line
+  while IFS= read -r line || [[ -n "$line" ]]; do
+    # Track current file from diff headers
+    if [[ "$line" =~ ^diff\ --git\ a/(.+)\ b/ ]]; then
+      current_file="${BASH_REMATCH[1]}"
+      continue
+    fi
+    # Also capture from +++ header
+    if [[ "$line" =~ ^\+\+\+\ b/(.+) ]]; then
+      current_file="${BASH_REMATCH[1]}"
+      continue
+    fi
+
+    # Get line number from @@ hunk header
+    local line_num=""
+    if [[ "$line" =~ ^@@.*\+([0-9]+) ]]; then
+      line_num="${BASH_REMATCH[1]}"
+      continue
+    fi
+
+    # Check each pattern against added lines
+    if [[ "$line" =~ ^\+ ]]; then
+      for pattern_def in "${AUDIT_PATTERNS[@]}"; do
+        local pname="${pattern_def%%|*}"
+        local pregex="${pattern_def#*|}"
+
+        if echo "$line" | grep -qE "$pregex"; then
+          local context="${line#+}"
+          # Escape for JSON
+          context=$(echo "$context" | sed 's/\\/\\\\/g; s/"/\\"/g; s/\t/\\t/g')
+
+          patterns_json=$(echo "$patterns_json" | jq \
+            --arg pattern "$pname" \
+            --arg file "$current_file" \
+            --arg line_num "${line_num:-0}" \
+            --arg context "$context" \
+            '. + [{pattern: $pattern, file: $file, line: ($line_num | tonumber), context: $context}]')
+
+          # Update category count
+          categories=$(echo "$categories" | jq \
+            --arg cat "$pname" \
+            '.[$cat] = ((.[$cat] // 0) + 1)')
+        fi
+      done
+    fi
+  done <<< "$diff_output"
+
+  local total
+  total=$(echo "$patterns_json" | jq 'length')
+
+  jq -n \
+    --argjson patterns_found "$patterns_json" \
+    --argjson total "$total" \
+    --argjson by_category "$categories" \
+    '{patterns_found: $patterns_found, summary: {total: $total, by_category: $by_category}}'
+}
+
+# ---------------------------------------------------------------------------
 # Dispatch
 # ---------------------------------------------------------------------------
 
@@ -428,11 +538,12 @@ cmd="${1:-}"
 shift || true
 
 case "$cmd" in
-  status)    cmd_status "$@" ;;
-  validate)  cmd_validate "$@" ;;
-  recommend) cmd_recommend "$@" ;;
+  status)        cmd_status "$@" ;;
+  validate)      cmd_validate "$@" ;;
+  recommend)     cmd_recommend "$@" ;;
+  audit-session) cmd_audit_session "$@" ;;
   *)
-    echo "Usage: docs-check.sh {status|validate|recommend} [docs-dir]" >&2
+    echo "Usage: docs-check.sh {status|validate|recommend|audit-session} [args...]" >&2
     exit 1
     ;;
 esac

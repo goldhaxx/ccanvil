@@ -722,3 +722,130 @@ EOF
   details=$(echo "$output" | jq -r '.details | join(", ")')
   [[ "$details" == *"determinism review"* ]] || [[ "$details" == *"Determinism Review"* ]]
 }
+
+# ===========================================================================
+# Step 3: audit-session — basic pattern scanning (AC-5, AC-6)
+# ===========================================================================
+
+# Helper: create a git repo with commits containing stochastic patterns
+create_audit_repo() {
+  local repo
+  repo=$(mktemp -d)
+  git -C "$repo" init -q
+  git -C "$repo" config user.email "test@test.com"
+  git -C "$repo" config user.name "Test"
+
+  # Initial commit
+  echo "echo hello" > "$repo/setup.sh"
+  git -C "$repo" add setup.sh
+  git -C "$repo" commit -q -m "initial commit"
+
+  echo "$repo"
+}
+
+@test "audit-session: detects cp command in diff" {
+  local repo
+  repo=$(create_audit_repo)
+
+  # Add a file with a manual cp command
+  cat > "$repo/deploy.sh" <<'SCRIPT'
+#!/bin/bash
+cp src/config.json dist/config.json
+echo "deployed"
+SCRIPT
+  git -C "$repo" add deploy.sh
+  git -C "$repo" commit -q -m "add deploy script"
+
+  run bash "$SCRIPT" audit-session --since HEAD~1 "$repo"
+  [ "$status" -eq 0 ]
+
+  total=$(echo "$output" | jq -r '.summary.total')
+  [ "$total" -ge 1 ]
+
+  # Should find the cp pattern
+  pattern=$(echo "$output" | jq -r '.patterns_found[0].pattern')
+  [ "$pattern" = "cp" ]
+
+  rm -rf "$repo"
+}
+
+@test "audit-session: detects multiple pattern types" {
+  local repo
+  repo=$(create_audit_repo)
+
+  cat > "$repo/hack.sh" <<'SCRIPT'
+#!/bin/bash
+jq '.version' package.json
+shasum -a 256 file.txt
+git -C /other/repo status
+SCRIPT
+  git -C "$repo" add hack.sh
+  git -C "$repo" commit -q -m "add hack script"
+
+  run bash "$SCRIPT" audit-session --since HEAD~1 "$repo"
+  [ "$status" -eq 0 ]
+
+  total=$(echo "$output" | jq -r '.summary.total')
+  [ "$total" -ge 3 ]
+
+  rm -rf "$repo"
+}
+
+@test "audit-session: outputs valid JSON with patterns_found and summary" {
+  local repo
+  repo=$(create_audit_repo)
+
+  echo 'cp foo bar' > "$repo/task.sh"
+  git -C "$repo" add task.sh
+  git -C "$repo" commit -q -m "add task"
+
+  run bash "$SCRIPT" audit-session --since HEAD~1 "$repo"
+  [ "$status" -eq 0 ]
+
+  # Validate JSON structure
+  echo "$output" | jq -e '.patterns_found' > /dev/null
+  echo "$output" | jq -e '.summary.total' > /dev/null
+  echo "$output" | jq -e '.summary.by_category' > /dev/null
+
+  rm -rf "$repo"
+}
+
+@test "audit-session: clean diff produces zero findings" {
+  local repo
+  repo=$(create_audit_repo)
+
+  echo 'echo "no stochastic patterns here"' > "$repo/clean.sh"
+  git -C "$repo" add clean.sh
+  git -C "$repo" commit -q -m "add clean script"
+
+  run bash "$SCRIPT" audit-session --since HEAD~1 "$repo"
+  [ "$status" -eq 0 ]
+
+  total=$(echo "$output" | jq -r '.summary.total')
+  [ "$total" -eq 0 ]
+
+  patterns_count=$(echo "$output" | jq -r '.patterns_found | length')
+  [ "$patterns_count" -eq 0 ]
+
+  rm -rf "$repo"
+}
+
+@test "audit-session: each finding has pattern, file, line, context" {
+  local repo
+  repo=$(create_audit_repo)
+
+  echo 'cp src/a.txt dst/a.txt' > "$repo/move.sh"
+  git -C "$repo" add move.sh
+  git -C "$repo" commit -q -m "add move"
+
+  run bash "$SCRIPT" audit-session --since HEAD~1 "$repo"
+  [ "$status" -eq 0 ]
+
+  # Check fields on first finding
+  echo "$output" | jq -e '.patterns_found[0].pattern' > /dev/null
+  echo "$output" | jq -e '.patterns_found[0].file' > /dev/null
+  echo "$output" | jq -e '.patterns_found[0].line' > /dev/null
+  echo "$output" | jq -e '.patterns_found[0].context' > /dev/null
+
+  rm -rf "$repo"
+}

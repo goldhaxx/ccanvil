@@ -10,8 +10,9 @@
 - **Manifest issues fixed** — `docs/templates/github/` expanded from directory entry to 7 individual file entries; `.claude/lint.json` removed from hub manifest (downstream-only). Manifest now clean: 55/55 verified.
 - **Hub pushed** — 14 commits to GitHub (manifest-check feature + fix)
 - **Fucina synced** — pulled GUIDE.md update, fetch-license.sh, manifest-check.sh; pushed to GitHub
-- **Docs lifecycle linking specced** — 13 ACs covering docs-check.sh (status, validate, recommend), template metadata, agent/command/rule updates
+- **Docs lifecycle linking specced** — 14 ACs covering docs-check.sh (status, validate, recommend), template metadata, agent/command/rule updates, epoch timestamps
 - **Plan written** — 9-step TDD plan ready for implementation
+- **Epoch timestamps added to spec** — AC-14: all timestamp metadata uses Unix epoch instead of date strings for deterministic ordering and within-day granularity
 
 ## Current State
 

@@ -45,15 +45,15 @@ Add deterministic linking between spec.md, plan.md, and checkpoint.md via metada
 - **ACs:** AC-12
 
 ### Step 6: Update templates with metadata fields
-- **Test:** Verify templates contain the expected metadata field placeholders (grep for `Feature:`, `Spec hash:`, `Plan hash:` in template files).
-- **Implement:** Add `> Feature: [feature-id]` to all three templates. Add `> Spec hash: [hash]` to plan template. Add `> Plan hash: [hash]` to checkpoint template. Add pre-checkpoint reminder comment to checkpoint template.
+- **Test:** Verify templates contain the expected metadata field placeholders (grep for `Feature:`, `Spec hash:`, `Plan hash:`, `Created:` in template files). Verify `Created:` uses `[epoch]` placeholder, not a date string.
+- **Implement:** Add `> Feature: [feature-id]` to all three templates. Add `> Spec hash: [hash]` to plan template. Add `> Plan hash: [hash]` to checkpoint template. Change `> Created: [date]` to `> Created: [epoch]` and `> Last updated: [timestamp]` to `> Last updated: [epoch]` in all templates. Add pre-checkpoint reminder comment to checkpoint template.
 - **Files:** `docs/templates/spec.md`, `docs/templates/plan.md`, `docs/templates/checkpoint.md`
 - **Verify:** `bats tests/docs-check.bats` (template grep tests)
-- **ACs:** AC-7
+- **ACs:** AC-7, AC-14
 
 ### Step 7: Update spec-writer, /plan, and workflow rule
-- **Test:** Read modified files, verify they contain instructions to populate metadata fields.
-- **Implement:** (a) spec-writer.md: instruction to derive feature_id as kebab-case slug from feature name, write `> Feature: slug` in metadata. (b) plan.md command: instruction to read spec's feature_id and compute spec content hash, write both to plan metadata. (c) workflow.md: instruction for checkpoint writing to read plan's feature_id and compute plan content hash, write both to checkpoint metadata. Add "plan before checkpoint" convention.
+- **Test:** Read modified files, verify they contain instructions to populate metadata fields including epoch timestamps.
+- **Implement:** (a) spec-writer.md: instruction to derive feature_id as kebab-case slug from feature name, write `> Feature: slug` and `> Created: $(date +%s)` in metadata. (b) plan.md command: instruction to read spec's feature_id and compute spec content hash, write both to plan metadata with epoch timestamp. (c) workflow.md: instruction for checkpoint writing to read plan's feature_id and compute plan content hash, write both to checkpoint metadata with `> Last updated: $(date +%s)`. Add "plan before checkpoint" convention.
 - **Files:** `.claude/agents/spec-writer.md`, `.claude/commands/plan.md`, `.claude/rules/workflow.md`
 - **Verify:** Manual review — these are prompt changes, not code.
 - **ACs:** AC-8, AC-9, AC-10

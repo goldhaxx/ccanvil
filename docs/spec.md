@@ -28,6 +28,7 @@ Add deterministic linking between spec.md, plan.md, and checkpoint.md so that st
 - [ ] **AC-11:** The `/catchup` command runs `docs-check.sh validate` first and reports any staleness/mismatches before reading document content.
 - [ ] **AC-12:** `docs-check.sh recommend` outputs a JSON recommendation (next_action + reason) based on a document state machine — e.g., spec exists but no plan → "Run /plan"; plan stale → "Re-run /plan"; all linked → "Ready to build".
 - [ ] **AC-13:** `/catchup` displays the recommendation from `docs-check.sh recommend` before document content, so the user sees the optimal next step immediately.
+- [ ] **AC-14:** All timestamp metadata fields (`Created`, `Last updated`) use Unix epoch seconds instead of date strings. `docs-check.sh status` includes parsed timestamps. Display commands render epoch as human-readable (e.g., `date -r <epoch>`).
 
 ## Affected Files
 
@@ -64,4 +65,5 @@ Add deterministic linking between spec.md, plan.md, and checkpoint.md so that st
 - **Hash computation:** Hash the document content *below* the blockquote metadata section. This way, updating the `Status:` field in spec.md doesn't invalidate the plan's spec_hash — only substantive content changes do.
 - **Hash algorithm:** sha256, truncated to first 8 chars for readability in metadata lines.
 - **Missing metadata:** If a doc exists but has no lifecycle metadata, `docs-check.sh` reports it as `unlinked` (not an error — supports pre-existing docs and gradual adoption).
+- **Timestamps:** Unix epoch seconds (e.g., `> Created: 1742860800`) instead of date strings. Enables deterministic ordering (integer comparison), within-day granularity, and timezone immunity. The script renders human-readable output via `date -r`. Templates show `[epoch]` placeholder; agents/commands populate via `date +%s`.
 - **Pattern:** Same as `manifest-check.sh` — bash script with subcommands, JSON output, tested with bats.

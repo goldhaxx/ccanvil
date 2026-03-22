@@ -720,7 +720,13 @@ cmd_pull_plan() {
 
 # pull-auto: Execute all auto-updates in one pass
 # Processes only files with action "auto-update" from pull-plan
+# Usage: pull-auto [--dry-run]
 cmd_pull_auto() {
+  local dry_run=false
+  if [[ "${1:-}" == "--dry-run" ]]; then
+    dry_run=true
+  fi
+
   require_lockfile
   local scaffold_source
   scaffold_source=$(get_scaffold_source)
@@ -734,9 +740,20 @@ cmd_pull_auto() {
   # Bootstrap in pre-check handles sync script updates separately.
   echo "$plan" | jq -r '.[] | select(.action == "auto-update" or .action == "adopt-clean") | .file' | while IFS= read -r file; do
     if [[ "$file" == "scripts/scaffold-sync.sh" ]]; then
-      echo "SKIPPED: $file (updated via bootstrap in pre-check)"
+      if $dry_run; then
+        echo "DRY-RUN: would skip $file (updated via bootstrap)"
+      else
+        echo "SKIPPED: $file (updated via bootstrap in pre-check)"
+      fi
       continue
     fi
+
+    if $dry_run; then
+      echo "DRY-RUN: would copy $file"
+      count=$((count + 1))
+      continue
+    fi
+
     local scaffold_file="$scaffold_source/$file"
     local new_hash
     new_hash=$(file_hash "$scaffold_file")
@@ -761,7 +778,11 @@ cmd_pull_auto() {
   done
 
   echo "---"
-  echo "Auto-updated files complete."
+  if $dry_run; then
+    echo "Dry-run complete. No files were modified."
+  else
+    echo "Auto-updated files complete."
+  fi
 }
 
 # pull-apply: Apply a specific resolution for a single file
@@ -1207,7 +1228,7 @@ case "${1:-}" in
   # --- Compound commands (replace manual orchestration) ---
   pre-check)        cmd_pre_check ;;
   pull-plan)        cmd_pull_plan ;;
-  pull-auto)        cmd_pull_auto ;;
+  pull-auto)        shift; cmd_pull_auto "${1:-}" ;;
   pull-apply)       shift; cmd_pull_apply "$@" ;;
   pull-finalize)    cmd_pull_finalize ;;
   push-candidates)  shift; cmd_push_candidates "${1:-}" ;;

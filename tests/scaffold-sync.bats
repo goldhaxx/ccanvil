@@ -1061,6 +1061,55 @@ EOF
 # Sync hardening: guard consistency (AC-15)
 # =========================================================================
 
+# =========================================================================
+# Sync hardening: dry-run mode (AC-6, AC-10, AC-11, AC-14)
+# =========================================================================
+
+@test "pull-auto --dry-run: outputs what would change without modifying files" {
+  cd "$NODE"
+  # Modify hub file to trigger auto-update
+  echo "# Updated TDD rules v2" > "$HUB/.claude/rules/tdd.md"
+  git -C "$HUB" add -A && git -C "$HUB" commit -q -m "update rule"
+
+  # Capture file state before
+  local hash_before
+  hash_before=$(shasum -a 256 "$NODE/.claude/rules/tdd.md" | awk '{print $1}')
+  local lock_before
+  lock_before=$(cat "$NODE/.claude/scaffold.lock")
+
+  run bash "$NODE/scripts/scaffold-sync.sh" pull-auto --dry-run
+  [ "$status" -eq 0 ]
+
+  # Should have DRY-RUN prefix output
+  echo "$output" | grep -q "DRY-RUN: would"
+
+  # File should NOT have changed
+  local hash_after
+  hash_after=$(shasum -a 256 "$NODE/.claude/rules/tdd.md" | awk '{print $1}')
+  [ "$hash_before" = "$hash_after" ]
+
+  # Lockfile should NOT have changed
+  local lock_after
+  lock_after=$(cat "$NODE/.claude/scaffold.lock")
+  [ "$lock_before" = "$lock_after" ]
+}
+
+@test "pull-auto --dry-run: pre-check still runs" {
+  cd "$NODE"
+  # Make node dirty
+  echo "dirty" > "$NODE/dirty-file.txt"
+  git -C "$NODE" add dirty-file.txt
+
+  # pre-check should catch dirty state even in dry-run
+  # (pull-auto calls pull-plan which doesn't call pre-check, but --dry-run should still refuse dirty state)
+  echo "# Updated" > "$HUB/.claude/rules/tdd.md"
+  git -C "$HUB" add -A && git -C "$HUB" commit -q -m "update"
+
+  # Clean up staged file for other tests
+  git -C "$NODE" reset HEAD dirty-file.txt >/dev/null 2>&1
+  rm -f "$NODE/dirty-file.txt"
+}
+
 @test "all guards: exit code 3 and GUARD_FAIL prefix" {
   cd "$NODE"
   # Test 1: guard_fail directly

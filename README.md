@@ -134,6 +134,9 @@ Copy the whole directory with `cp -r .claude ./.claude`. Here's what's inside:
 | `.claude/rules/tdd.md` | `./.claude/rules/tdd.md` | TDD enforcement rules. Defines the red-green-refactor cycle, test naming conventions, and what to do when tests break. Loaded alongside CLAUDE.md at launch. | Rarely. These rules are tech-stack-agnostic. Modify only if your project has unusual testing requirements. |
 | `.claude/rules/workflow.md` | `./.claude/rules/workflow.md` | Session discipline and context management rules. Defines session objectives, context preservation via checkpoints, commit practices, when to use sub-agents, and error recovery (stop after 2 failed attempts). Loaded alongside CLAUDE.md at launch. | Rarely. These are general best practices. Modify if your team has specific workflow requirements. |
 | `.claude/rules/code-quality.md` | `./.claude/rules/code-quality.md` | Code standards rules. Covers pattern-following, error handling, dependency management, code organization, and naming conventions. Loaded alongside CLAUDE.md at launch. | Sometimes. Adjust naming conventions or error handling patterns to match your project's standards. |
+| `.claude/rules/deterministic-first.md` | `./.claude/rules/deterministic-first.md` | Deterministic-first principle. Hierarchy: hooks → scripts → commands → reasoning. Core architecture governance. | Rarely. Foundational design principle. |
+| `.claude/rules/tls-troubleshooting.md` | `./.claude/rules/tls-troubleshooting.md` | TLS certificate troubleshooting for Cloudflare WARP. Auto-remediation steps and cert bundle setup. | Rarely. Only if your environment uses a different VPN. |
+| `.claude/rules/self-review.md` | `./.claude/rules/self-review.md` | Continuous determinism analysis during checkpoints and reviews. Lightweight version of `/scaffold-audit`. | Rarely. Supports deterministic-first principle. |
 | `.claude/skills/tdd/SKILL.md` | `./.claude/skills/tdd/SKILL.md` | The full TDD workflow skill. When triggered (by saying "tdd" or "test first"), Claude follows a structured specification → red → green → refactor → commit procedure. Skills load on-demand, not at startup, so they don't consume context when unused. | Sometimes. Replace `$TEST_COMMAND` references if you want the skill to reference your exact test command. |
 | `.claude/agents/code-reviewer.md` | `./.claude/agents/code-reviewer.md` | A sub-agent that reviews uncommitted changes for correctness, test coverage, security issues, performance, and convention adherence. Runs in its own isolated context window. Invoked by the `/review` command. | Rarely. Modify if you want to add project-specific review criteria. |
 | `.claude/agents/spec-writer.md` | `./.claude/agents/spec-writer.md` | A sub-agent that analyzes feature requests and produces structured specifications with testable acceptance criteria. Runs in its own isolated context window. Writes output to `docs/spec.md`. | Rarely. Modify if your team uses a different specification format. |
@@ -151,6 +154,17 @@ Copy the whole directory with `cp -r .claude ./.claude`. Here's what's inside:
 | `.claude/commands/security-audit.md` | `./.claude/commands/security-audit.md` | `/security-audit` — scan for PII, secrets, sensitive information. | No. Security infrastructure. |
 | `.claude/commands/fix-certs.md` | `./.claude/commands/fix-certs.md` | `/fix-certs` — diagnose and fix Cloudflare WARP TLS issues. | No. TLS troubleshooting. |
 
+### The `scripts/` directory (copy entire directory to project root)
+
+Copy the whole directory with `cp -r scripts ./scripts`. Contains deterministic automation scripts:
+
+| File in zip | Copy to | What it does | Customize? |
+|---|---|---|---|
+| `scripts/scaffold-sync.sh` | `./scripts/scaffold-sync.sh` | Core scaffold sync engine. Provides all deterministic operations: init, pull-plan, pull-auto, section-merge, promote, demote, push-candidates, push-apply. Called by scaffold slash commands. | No. Updated automatically via bootstrap on pull. |
+| `scripts/security-audit.sh` | `./scripts/security-audit.sh` | Deterministic PII/secrets scanner. Checks files and git history for tokens, keys, credentials, and PII. Called by `/security-audit` and the pre-push hook. | Rarely. Add project-specific allowlist patterns. |
+| `scripts/fix-cloudflare-certs.sh` | `./scripts/fix-cloudflare-certs.sh` | Diagnoses and repairs Cloudflare WARP TLS certificate issues. Creates combined CA bundle. Called by `/fix-certs`. | No. Only relevant for Cloudflare WARP environments. |
+| `scripts/fetch-license.sh` | `./scripts/fetch-license.sh` | Fetches license templates from GitHub API. Called by `/init` during project setup. Supports MIT, Apache 2.0, GPL-3.0, BSD, Unlicense. | No. Deterministic license fetcher. |
+
 ### The `docs/` directory (copy entire directory to project root)
 
 Copy the whole directory with `cp -r docs ./docs`. Contains **templates** (persistent format guides) and **active docs** (overwritten during use):
@@ -162,7 +176,7 @@ Copy the whole directory with `cp -r docs ./docs`. Contains **templates** (persi
 | `docs/templates/plan.md` | `./docs/templates/plan.md` | Persistent format guide for implementation plans. Referenced by `/plan`. Never overwritten. | Rarely. Modify if you need different plan structure. |
 | `docs/templates/hooks-reference.md` | `./docs/templates/hooks-reference.md` | Complete hooks documentation — events, exit codes, JSON schemas, writing conventions. | Rarely. Reference when adding hooks. |
 | `docs/templates/lint.json` | `./.claude/lint.json` | Template for project-specific linter/formatter configuration. | Yes. Add entries for your stack. |
-| `docs/templates/github/` | Various (see /init) | README, CONTRIBUTING, issue/PR templates, git pre-push hook. Copied to project root and `.github/` by /init. | Yes. Customize for your project. |
+| `docs/templates/github/` | Various (see /init) | README, CONTRIBUTING, issue/PR templates, CI workflow, git pre-push hook. Copied to project root, `.github/`, and `.git/hooks/` by /init. | Yes. Customize for your project. |
 | `docs/spec.md` | `./docs/spec.md` | Active spec — overwritten each time you spec a new feature. Starts as a placeholder pointing to the template. | No. Claude fills this in. |
 | `docs/checkpoint.md` | `./docs/checkpoint.md` | Active checkpoint — overwritten when Claude checkpoints progress. | No. Claude fills this in. |
 | `docs/plan.md` | `./docs/plan.md` | Active plan — overwritten by `/plan`. | No. Claude fills this in. |

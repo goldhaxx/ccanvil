@@ -471,3 +471,135 @@ EOF
   [ "$status" -eq 0 ]
   echo "$output" | jq -e '.size_bytes > 0'
 }
+
+
+# =========================================================================
+# Step 6: Full JSON report (check) + verify subcommand
+# =========================================================================
+
+@test "check produces full JSON report with all categories" {
+  mkdir -p "$REPO/.claude/rules" "$REPO/scripts"
+  echo "# TDD" > "$REPO/.claude/rules/tdd.md"
+  echo "# Workflow" > "$REPO/.claude/rules/workflow.md"
+  echo "#!/bin/bash" > "$REPO/scripts/sync.sh"
+  git add -A && git commit -q -m "init"
+
+  cat > "$REPO/README.md" <<'EOF'
+| File | Copy to | What it does | Customize? |
+|---|---|---|---|
+| `.claude/rules/tdd.md` | `./.claude/rules/tdd.md` | TDD rules. | No. |
+| `.claude/rules/workflow.md` | `./.claude/rules/workflow.md` | Workflow rules. | No. |
+| `scripts/sync.sh` | `./scripts/sync.sh` | Sync script. | No. |
+| `scripts/gone.sh` | `./scripts/gone.sh` | Missing script. | No. |
+EOF
+
+  bash "$SCRIPT" init "$REPO/README.md"
+
+  # Modify one file, add an untracked file
+  echo "# TDD - updated" > "$REPO/.claude/rules/tdd.md"
+  echo "# Extra" > "$REPO/.claude/rules/extra.md"
+  git add -A && git commit -q -m "changes"
+
+  run bash "$SCRIPT" check "$REPO/README.md"
+  [ "$status" -eq 0 ]
+
+  # Should have all 4 categories
+  echo "$output" | jq -e '.verified | length > 0'
+  echo "$output" | jq -e '.stale | length > 0'
+  echo "$output" | jq -e '.missing_from_disk | length > 0'
+  echo "$output" | jq -e '.missing_from_manifest | length > 0'
+
+  # Stale entry should have diff
+  echo "$output" | jq -e '.stale[0].diff'
+
+  # Missing from manifest should have identity
+  echo "$output" | jq -e '.missing_from_manifest[0].identity'
+
+  # Summary should have counts
+  echo "$output" | jq -e '.summary.total > 0'
+  echo "$output" | jq -e '.summary.verified > 0'
+  echo "$output" | jq -e '.summary.stale > 0'
+}
+
+@test "check works without a lockfile (first run)" {
+  mkdir -p "$REPO/.claude/rules"
+  echo "# TDD" > "$REPO/.claude/rules/tdd.md"
+  git add -A && git commit -q -m "init"
+
+  cat > "$REPO/README.md" <<'EOF'
+| File | Copy to | What it does | Customize? |
+|---|---|---|---|
+| `.claude/rules/tdd.md` | `./.claude/rules/tdd.md` | TDD rules. | No. |
+EOF
+
+  # No init — no lockfile exists
+  run bash "$SCRIPT" check "$REPO/README.md"
+  [ "$status" -eq 0 ]
+  # Without lockfile, all existing entries are "unverified" (no hash baseline)
+  echo "$output" | jq -e '.summary'
+}
+
+@test "verify updates lockfile hashes for specified paths" {
+  mkdir -p "$REPO/.claude/rules"
+  echo "# TDD" > "$REPO/.claude/rules/tdd.md"
+  git add -A && git commit -q -m "init"
+
+  cat > "$REPO/README.md" <<'EOF'
+| File | Copy to | What it does | Customize? |
+|---|---|---|---|
+| `.claude/rules/tdd.md` | `./.claude/rules/tdd.md` | TDD rules. | No. |
+EOF
+
+  bash "$SCRIPT" init "$REPO/README.md"
+
+  # Modify the file
+  echo "# TDD - updated" > "$REPO/.claude/rules/tdd.md"
+  git add -A && git commit -q -m "update"
+
+  # Confirm it's stale
+  result=$(bash "$SCRIPT" hash-check)
+  echo "$result" | jq -e '.stale | length == 1'
+
+  # Verify it
+  run bash "$SCRIPT" verify .claude/rules/tdd.md
+  [ "$status" -eq 0 ]
+
+  # Now it should be verified
+  result=$(bash "$SCRIPT" hash-check)
+  echo "$result" | jq -e '.verified | length == 1'
+  echo "$result" | jq -e '.stale | length == 0'
+}
+
+@test "verify full cycle: init → modify → check → verify → check" {
+  mkdir -p "$REPO/.claude/rules" "$REPO/scripts"
+  echo "# TDD" > "$REPO/.claude/rules/tdd.md"
+  echo "#!/bin/bash" > "$REPO/scripts/sync.sh"
+  git add -A && git commit -q -m "init"
+
+  cat > "$REPO/README.md" <<'EOF'
+| File | Copy to | What it does | Customize? |
+|---|---|---|---|
+| `.claude/rules/tdd.md` | `./.claude/rules/tdd.md` | TDD rules. | No. |
+| `scripts/sync.sh` | `./scripts/sync.sh` | Sync script. | No. |
+EOF
+
+  # Init lockfile
+  bash "$SCRIPT" init "$REPO/README.md"
+
+  # Modify one file
+  echo "# TDD - changed" > "$REPO/.claude/rules/tdd.md"
+  git add -A && git commit -q -m "change"
+
+  # Check: 1 stale, 1 verified
+  result=$(bash "$SCRIPT" hash-check)
+  echo "$result" | jq -e '.stale | length == 1'
+  echo "$result" | jq -e '.verified | length == 1'
+
+  # Verify the stale file
+  bash "$SCRIPT" verify .claude/rules/tdd.md
+
+  # Check again: 2 verified, 0 stale
+  result=$(bash "$SCRIPT" hash-check)
+  echo "$result" | jq -e '.verified | length == 2'
+  echo "$result" | jq -e '.stale | length == 0'
+}

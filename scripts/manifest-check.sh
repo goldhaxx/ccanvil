@@ -355,6 +355,190 @@ cmd_extract_identity() {
 }
 
 # ---------------------------------------------------------------------------
+# cmd_check — Full manifest verification report.
+#
+# Combines parse, check-existence, hash-check, and extract-identity into
+# one JSON report with: verified, stale, missing_from_disk,
+# missing_from_manifest, summary.
+#
+# Input: path to README
+# Output: JSON report
+# ---------------------------------------------------------------------------
+cmd_check() {
+  local readme="${1:?Usage: manifest-check.sh check <readme>}"
+
+  local entries
+  entries="$(cmd_parse "$readme")"
+
+  local verified="[]"
+  local stale="[]"
+  local missing_from_disk="[]"
+  local missing_from_manifest="[]"
+  local manifest_paths=()
+  local has_lockfile=false
+
+  [[ -f "$LOCKFILE" ]] && has_lockfile=true
+
+  # Check each manifest entry
+  while IFS= read -r path; do
+    manifest_paths+=("$path")
+
+    if [[ ! -e "$path" ]]; then
+      local desc
+      desc="$(echo "$entries" | jq -r --arg p "$path" '.[] | select(.path == $p) | .description')"
+      missing_from_disk="$(echo "$missing_from_disk" | jq --arg p "$path" --arg d "$desc" '. + [{path: $p, description: $d}]')"
+      continue
+    fi
+
+    if [[ "$has_lockfile" == true ]]; then
+      local stored_hash
+      stored_hash="$(jq -r --arg p "$path" '.entries[$p].file_hash // empty' "$LOCKFILE")"
+
+      if [[ -n "$stored_hash" ]]; then
+        local current_hash
+        current_hash="$(file_hash "$path")"
+
+        if [[ "$stored_hash" == "$current_hash" ]]; then
+          verified="$(echo "$verified" | jq --arg p "$path" '. + [{path: $p, status: "unchanged"}]')"
+        else
+          # Generate diff
+          local diff_text=""
+          local verified_commit
+          verified_commit="$(jq -r --arg p "$path" '.entries[$p].verified_at_commit' "$LOCKFILE")"
+
+          if [[ "$verified_commit" != "null" ]] && [[ "$verified_commit" != "unknown" ]] && \
+             git cat-file -t "$verified_commit" &>/dev/null; then
+            diff_text="$(git diff "$verified_commit" -- "$path" 2>/dev/null || true)"
+          fi
+          if [[ -z "$diff_text" ]]; then
+            diff_text="$(git diff HEAD -- "$path" 2>/dev/null || true)"
+          fi
+          if [[ -z "$diff_text" ]]; then
+            diff_text="[hash changed, diff unavailable]"
+          fi
+
+          local desc
+          desc="$(echo "$entries" | jq -r --arg p "$path" '.[] | select(.path == $p) | .description')"
+          local json_diff
+          json_diff="$(printf '%s' "$diff_text" | jq -Rs '.')"
+          stale="$(echo "$stale" | jq --arg p "$path" --arg d "$desc" --argjson df "$json_diff" \
+            '. + [{path: $p, description: $d, diff: $df}]')"
+        fi
+      else
+        # In manifest but not in lockfile — treat as unverified (stale)
+        local desc
+        desc="$(echo "$entries" | jq -r --arg p "$path" '.[] | select(.path == $p) | .description')"
+        stale="$(echo "$stale" | jq --arg p "$path" --arg d "$desc" '. + [{path: $p, description: $d, diff: "[no lockfile entry]"}]')"
+      fi
+    else
+      # No lockfile — all entries are unverified
+      local desc
+      desc="$(echo "$entries" | jq -r --arg p "$path" '.[] | select(.path == $p) | .description')"
+      stale="$(echo "$stale" | jq --arg p "$path" --arg d "$desc" '. + [{path: $p, description: $d, diff: "[no lockfile]"}]')"
+    fi
+  done < <(echo "$entries" | jq -r '.[].path')
+
+  # Discover untracked files in tracked directories
+  for dir in "${TRACKED_DIRS[@]}"; do
+    [[ -d "$dir" ]] || continue
+    while IFS= read -r file; do
+      [[ -f "$file" ]] || continue
+      local in_manifest=false
+      for mp in "${manifest_paths[@]}"; do
+        if [[ "$mp" == "$file" ]]; then
+          in_manifest=true
+          break
+        fi
+      done
+      if [[ "$in_manifest" == false ]]; then
+        local id_json
+        id_json="$(cmd_extract_identity "$file")"
+        local identity size_bytes
+        identity="$(echo "$id_json" | jq -r '.identity')"
+        size_bytes="$(echo "$id_json" | jq '.size_bytes')"
+        local json_id
+        json_id="$(printf '%s' "$identity" | jq -Rs '.')"
+        missing_from_manifest="$(echo "$missing_from_manifest" | jq \
+          --arg p "$file" --argjson i "$json_id" --argjson s "$size_bytes" \
+          '. + [{path: $p, identity: $i, size_bytes: $s}]')"
+      fi
+    done < <(find "$dir" -maxdepth 2 -type f | sort)
+  done
+
+  # Build summary
+  local total verified_count stale_count missing_disk_count missing_manifest_count
+  verified_count="$(echo "$verified" | jq 'length')"
+  stale_count="$(echo "$stale" | jq 'length')"
+  missing_disk_count="$(echo "$missing_from_disk" | jq 'length')"
+  missing_manifest_count="$(echo "$missing_from_manifest" | jq 'length')"
+  total=$((verified_count + stale_count + missing_disk_count + missing_manifest_count))
+
+  jq -n \
+    --argjson verified "$verified" \
+    --argjson stale "$stale" \
+    --argjson missing_disk "$missing_from_disk" \
+    --argjson missing_manifest "$missing_from_manifest" \
+    --argjson total "$total" \
+    --argjson vc "$verified_count" \
+    --argjson sc "$stale_count" \
+    --argjson mdc "$missing_disk_count" \
+    --argjson mmc "$missing_manifest_count" \
+    '{
+      verified: $verified,
+      stale: $stale,
+      missing_from_disk: $missing_disk,
+      missing_from_manifest: $missing_manifest,
+      summary: {total: $total, verified: $vc, stale: $sc, missing_from_disk: $mdc, missing_from_manifest: $mmc}
+    }'
+}
+
+# ---------------------------------------------------------------------------
+# cmd_verify — Update lockfile entries for verified paths.
+#
+# Input: one or more file paths
+# Output: updates LOCKFILE
+# ---------------------------------------------------------------------------
+cmd_verify() {
+  if [[ $# -eq 0 ]]; then
+    echo "Usage: manifest-check.sh verify <path> [<path>...]" >&2
+    return 1
+  fi
+
+  if [[ ! -f "$LOCKFILE" ]]; then
+    echo "Error: $LOCKFILE not found. Run 'manifest-check.sh init <readme>' first." >&2
+    return 1
+  fi
+
+  local commit
+  commit="$(git rev-parse HEAD 2>/dev/null || echo "unknown")"
+  local today
+  today="$(date +%Y-%m-%d)"
+
+  for path in "$@"; do
+    if [[ ! -f "$path" ]]; then
+      echo "Warning: $path does not exist, skipping." >&2
+      continue
+    fi
+
+    local hash
+    hash="$(file_hash "$path")"
+
+    # Update the lockfile entry
+    local tmp
+    tmp="$(jq \
+      --arg p "$path" \
+      --arg h "$hash" \
+      --arg c "$commit" \
+      --arg d "$today" \
+      '.entries[$p] = {file_hash: $h, verified_at_commit: $c, verified: $d} | .meta.last_verified = $d | .meta.commit = $c' \
+      "$LOCKFILE")"
+    echo "$tmp" > "$LOCKFILE"
+
+    echo "Verified: $path"
+  done
+}
+
+# ---------------------------------------------------------------------------
 # Main dispatch
 # ---------------------------------------------------------------------------
 case "${1:-}" in
@@ -377,6 +561,14 @@ case "${1:-}" in
   extract-identity)
     shift
     cmd_extract_identity "$@"
+    ;;
+  check)
+    shift
+    cmd_check "$@"
+    ;;
+  verify)
+    shift
+    cmd_verify "$@"
     ;;
   *)
     echo "Usage: manifest-check.sh {parse|check-existence|init|hash-check|extract-identity|check|verify} [args...]" >&2

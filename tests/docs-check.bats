@@ -208,3 +208,91 @@ EOF
   [[ "$plan_h" =~ ^[0-9a-f]{8}$ ]]
   [[ "$cp_h" =~ ^[0-9a-f]{8}$ ]]
 }
+
+# ===========================================================================
+# Step 2: content hashing — metadata vs body isolation
+# ===========================================================================
+
+@test "hash: changing metadata does not change content_hash" {
+  create_spec "my-feature" "1742860800" "In Progress"
+  run bash "$SCRIPT" status "$DOCS"
+  hash_before=$(echo "$output" | jq -r '.spec.content_hash')
+
+  # Change metadata only (status field)
+  create_spec "my-feature" "1742860800" "Complete"
+  run bash "$SCRIPT" status "$DOCS"
+  hash_after=$(echo "$output" | jq -r '.spec.content_hash')
+
+  [ "$hash_before" = "$hash_after" ]
+}
+
+@test "hash: changing body content changes content_hash" {
+  create_spec "my-feature" "1742860800" "In Progress"
+  run bash "$SCRIPT" status "$DOCS"
+  hash_before=$(echo "$output" | jq -r '.spec.content_hash')
+
+  # Append to body
+  echo "## New Section" >> "$DOCS/spec.md"
+  echo "Extra content that changes the hash." >> "$DOCS/spec.md"
+
+  run bash "$SCRIPT" status "$DOCS"
+  hash_after=$(echo "$output" | jq -r '.spec.content_hash')
+
+  [ "$hash_before" != "$hash_after" ]
+}
+
+@test "hash: changing feature_id does not change content_hash" {
+  create_spec "feature-a" "1742860800" "In Progress"
+  run bash "$SCRIPT" status "$DOCS"
+  hash_a=$(echo "$output" | jq -r '.spec.content_hash')
+
+  create_spec "feature-b" "1742860800" "In Progress"
+  run bash "$SCRIPT" status "$DOCS"
+  hash_b=$(echo "$output" | jq -r '.spec.content_hash')
+
+  [ "$hash_a" = "$hash_b" ]
+}
+
+@test "hash: changing timestamp does not change content_hash" {
+  create_plan "my-feature" "1742860900" "abcd1234"
+  run bash "$SCRIPT" status "$DOCS"
+  hash_before=$(echo "$output" | jq -r '.plan.content_hash')
+
+  create_plan "my-feature" "9999999999" "abcd1234"
+  run bash "$SCRIPT" status "$DOCS"
+  hash_after=$(echo "$output" | jq -r '.plan.content_hash')
+
+  [ "$hash_before" = "$hash_after" ]
+}
+
+@test "hash: identical body across doc types produces same hash" {
+  # Create spec and plan with identical body content
+  cat > "$DOCS/spec.md" <<'EOF'
+# Feature A
+
+> Feature: test
+> Created: 100
+
+## Body
+
+Same content here.
+EOF
+
+  cat > "$DOCS/plan.md" <<'EOF'
+# Plan A
+
+> Feature: test
+> Created: 200
+> Spec hash: abc
+
+## Body
+
+Same content here.
+EOF
+
+  run bash "$SCRIPT" status "$DOCS"
+  spec_hash=$(echo "$output" | jq -r '.spec.content_hash')
+  plan_hash=$(echo "$output" | jq -r '.plan.content_hash')
+
+  [ "$spec_hash" = "$plan_hash" ]
+}

@@ -296,3 +296,101 @@ EOF
 
   [ "$spec_hash" = "$plan_hash" ]
 }
+
+# ===========================================================================
+# Step 3: validate — aligned, stale, mismatched
+# ===========================================================================
+
+# Helper: create a fully linked set of docs with correct hashes
+create_linked_docs() {
+  create_spec "my-feature" "1742860800" "In Progress"
+
+  # Compute spec's actual content hash for the plan
+  local spec_hash
+  spec_hash=$(bash "$SCRIPT" status "$DOCS" | jq -r '.spec.content_hash')
+
+  create_plan "my-feature" "1742860900" "$spec_hash"
+
+  # Compute plan's actual content hash for the checkpoint
+  local plan_hash
+  plan_hash=$(bash "$SCRIPT" status "$DOCS" | jq -r '.plan.content_hash')
+
+  create_checkpoint "my-feature" "1742861000" "$plan_hash"
+}
+
+@test "validate: aligned when all hashes and feature_ids match" {
+  create_linked_docs
+
+  run bash "$SCRIPT" validate "$DOCS"
+  [ "$status" -eq 0 ]
+
+  result=$(echo "$output" | jq -r '.result')
+  [ "$result" = "aligned" ]
+}
+
+@test "validate: stale-plan when spec body changed after plan was written" {
+  create_linked_docs
+
+  # Modify spec body (not metadata)
+  echo "## New requirement added" >> "$DOCS/spec.md"
+
+  run bash "$SCRIPT" validate "$DOCS"
+  [ "$status" -eq 0 ]
+
+  result=$(echo "$output" | jq -r '.result')
+  [ "$result" = "stale-plan" ]
+}
+
+@test "validate: stale-checkpoint when plan body changed after checkpoint" {
+  create_linked_docs
+
+  # Modify plan body (not metadata)
+  echo "### Step 99: New step" >> "$DOCS/plan.md"
+
+  run bash "$SCRIPT" validate "$DOCS"
+  [ "$status" -eq 0 ]
+
+  result=$(echo "$output" | jq -r '.result')
+  [ "$result" = "stale-checkpoint" ]
+}
+
+@test "validate: mismatched when feature_ids differ" {
+  create_spec "feature-a" "1742860800" "In Progress"
+  create_plan "feature-b" "1742860900" "whatever"
+  create_checkpoint "feature-c" "1742861000" "whatever"
+
+  run bash "$SCRIPT" validate "$DOCS"
+  [ "$status" -eq 0 ]
+
+  result=$(echo "$output" | jq -r '.result')
+  [ "$result" = "mismatched" ]
+}
+
+@test "validate: stale-plan takes priority over stale-checkpoint" {
+  create_linked_docs
+
+  # Modify both spec and plan bodies
+  echo "## Changed spec" >> "$DOCS/spec.md"
+  echo "### Changed plan" >> "$DOCS/plan.md"
+
+  run bash "$SCRIPT" validate "$DOCS"
+  [ "$status" -eq 0 ]
+
+  # stale-plan is more actionable (fix plan first, then checkpoint follows)
+  result=$(echo "$output" | jq -r '.result')
+  [ "$result" = "stale-plan" ]
+}
+
+@test "validate: mismatched takes priority over stale" {
+  create_spec "feature-a" "1742860800" "In Progress"
+
+  local spec_hash
+  spec_hash=$(bash "$SCRIPT" status "$DOCS" | jq -r '.spec.content_hash')
+  create_plan "feature-b" "1742860900" "$spec_hash"
+
+  run bash "$SCRIPT" validate "$DOCS"
+  [ "$status" -eq 0 ]
+
+  result=$(echo "$output" | jq -r '.result')
+  [ "$result" = "mismatched" ]
+}

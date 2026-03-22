@@ -205,6 +205,96 @@ cmd_status() {
 }
 
 # ---------------------------------------------------------------------------
+# cmd_validate — Check alignment between spec, plan, and checkpoint.
+#
+# Priority order: mismatched > stale-plan > stale-checkpoint > aligned
+#
+# Output: JSON with result, details array, and per-doc status.
+# ---------------------------------------------------------------------------
+cmd_validate() {
+  local docs_dir="${1:-$DEFAULT_DOCS_DIR}"
+  local status_json
+  status_json=$(cmd_status "$docs_dir")
+
+  local spec_exists plan_exists cp_exists
+  spec_exists=$(echo "$status_json" | jq -r '.spec.exists')
+  plan_exists=$(echo "$status_json" | jq -r '.plan.exists')
+  cp_exists=$(echo "$status_json" | jq -r '.checkpoint.exists')
+
+  local details="[]"
+  local result="aligned"
+
+  # Extract feature_ids
+  local spec_fid plan_fid cp_fid
+  spec_fid=$(echo "$status_json" | jq -r '.spec.feature_id // empty')
+  plan_fid=$(echo "$status_json" | jq -r '.plan.feature_id // empty')
+  cp_fid=$(echo "$status_json" | jq -r '.checkpoint.feature_id // empty')
+
+  # Collect present feature_ids for mismatch check
+  local fids=()
+  [[ -n "$spec_fid" ]] && fids+=("$spec_fid")
+  [[ -n "$plan_fid" ]] && fids+=("$plan_fid")
+  [[ -n "$cp_fid" ]] && fids+=("$cp_fid")
+
+  # Check for missing docs
+  if [[ "$spec_exists" != "true" ]]; then
+    details=$(echo "$details" | jq '. + ["spec.md missing"]')
+  fi
+  if [[ "$plan_exists" != "true" ]]; then
+    details=$(echo "$details" | jq '. + ["plan.md missing"]')
+  fi
+  if [[ "$cp_exists" != "true" ]]; then
+    details=$(echo "$details" | jq '. + ["checkpoint.md missing"]')
+  fi
+
+  # Check feature_id mismatch (only among docs that have feature_ids)
+  if [[ ${#fids[@]} -ge 2 ]]; then
+    local first="${fids[0]}"
+    local mismatch=false
+    for fid in "${fids[@]}"; do
+      if [[ "$fid" != "$first" ]]; then
+        mismatch=true
+        break
+      fi
+    done
+    if $mismatch; then
+      result="mismatched"
+      details=$(echo "$details" | jq '. + ["feature_ids do not match across documents"]')
+    fi
+  fi
+
+  # Check stale-plan: spec's current hash vs plan's stored spec_hash
+  if [[ "$result" != "mismatched" && "$spec_exists" == "true" && "$plan_exists" == "true" ]]; then
+    local spec_current_hash plan_stored_spec_hash
+    spec_current_hash=$(echo "$status_json" | jq -r '.spec.content_hash // empty')
+    plan_stored_spec_hash=$(echo "$status_json" | jq -r '.plan.spec_hash // empty')
+
+    if [[ -n "$plan_stored_spec_hash" && -n "$spec_current_hash" && "$spec_current_hash" != "$plan_stored_spec_hash" ]]; then
+      result="stale-plan"
+      details=$(echo "$details" | jq '. + ["spec content changed since plan was written"]')
+    fi
+  fi
+
+  # Check stale-checkpoint: plan's current hash vs checkpoint's stored plan_hash
+  if [[ "$result" != "mismatched" && "$result" != "stale-plan" && "$plan_exists" == "true" && "$cp_exists" == "true" ]]; then
+    local plan_current_hash cp_stored_plan_hash
+    plan_current_hash=$(echo "$status_json" | jq -r '.plan.content_hash // empty')
+    cp_stored_plan_hash=$(echo "$status_json" | jq -r '.checkpoint.plan_hash // empty')
+
+    if [[ -n "$cp_stored_plan_hash" && -n "$plan_current_hash" && "$plan_current_hash" != "$cp_stored_plan_hash" ]]; then
+      result="stale-checkpoint"
+      details=$(echo "$details" | jq '. + ["plan content changed since checkpoint was written"]')
+    fi
+  fi
+
+  jq -n \
+    --arg result "$result" \
+    --argjson details "$details" \
+    --argjson status "$status_json" \
+    '{result: $result, details: $details, status: $status}'
+}
+
+# ---------------------------------------------------------------------------
 # Dispatch
 # ---------------------------------------------------------------------------
 
@@ -213,6 +303,7 @@ shift || true
 
 case "$cmd" in
   status)    cmd_status "$@" ;;
+  validate)  cmd_validate "$@" ;;
   *)
     echo "Usage: docs-check.sh {status|validate|recommend} [docs-dir]" >&2
     exit 1

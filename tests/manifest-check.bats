@@ -603,3 +603,58 @@ EOF
   echo "$result" | jq -e '.verified | length == 2'
   echo "$result" | jq -e '.stale | length == 0'
 }
+
+# ===========================================================================
+# Epoch timestamp tests
+# ===========================================================================
+
+@test "init stores verified field as epoch integer" {
+  mkdir -p "$REPO/.claude/rules"
+  echo "# TDD" > "$REPO/.claude/rules/tdd.md"
+  git add -A && git commit -q -m "init"
+
+  cat > "$REPO/README.md" <<'EOF'
+| File | Copy to | What it does | Customize? |
+|---|---|---|---|
+| `.claude/rules/tdd.md` | `./.claude/rules/tdd.md` | TDD rules. | No. |
+EOF
+
+  run bash "$SCRIPT" init "$REPO/README.md"
+  [ "$status" -eq 0 ]
+
+  # verified field should be a numeric epoch, not a date string
+  verified=$(jq -r '.entries[".claude/rules/tdd.md"].verified' "$REPO/.claude/manifest.lock")
+  [[ "$verified" =~ ^[0-9]+$ ]]
+  # Should be a reasonable epoch (after 2020-01-01 = 1577836800)
+  [ "$verified" -gt 1577836800 ]
+
+  # meta.last_verified should also be epoch
+  last_v=$(jq -r '.meta.last_verified' "$REPO/.claude/manifest.lock")
+  [[ "$last_v" =~ ^[0-9]+$ ]]
+}
+
+@test "verify stores verified field as epoch integer" {
+  mkdir -p "$REPO/.claude/rules"
+  echo "# TDD" > "$REPO/.claude/rules/tdd.md"
+  git add -A && git commit -q -m "init"
+
+  cat > "$REPO/README.md" <<'EOF'
+| File | What it does |
+|---|---|
+| `.claude/rules/tdd.md` | TDD rules. |
+EOF
+
+  bash "$SCRIPT" init "$REPO/README.md"
+
+  # Modify and re-verify
+  echo "# TDD updated" > "$REPO/.claude/rules/tdd.md"
+  git add -A && git commit -q -m "update"
+
+  run bash "$SCRIPT" verify ".claude/rules/tdd.md"
+  [ "$status" -eq 0 ]
+
+  # verified field should be epoch
+  verified=$(jq -r '.entries[".claude/rules/tdd.md"].verified' "$REPO/.claude/manifest.lock")
+  [[ "$verified" =~ ^[0-9]+$ ]]
+  [ "$verified" -gt 1577836800 ]
+}

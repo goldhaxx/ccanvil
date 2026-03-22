@@ -181,8 +181,8 @@ cmd_init() {
 
   local commit
   commit="$(git rev-parse HEAD 2>/dev/null || echo "unknown")"
-  local today
-  today="$(date +%Y-%m-%d)"
+  local now
+  now="$(date +%s)"
 
   local lock_entries="{}"
 
@@ -196,14 +196,14 @@ cmd_init() {
       --arg p "$path" \
       --arg h "$hash" \
       --arg c "$commit" \
-      --arg d "$today" \
+      --argjson d "$now" \
       '. + {($p): {file_hash: $h, verified_at_commit: $c, verified: $d}}')"
   done < <(echo "$entries" | jq -r '.[].path')
 
   mkdir -p "$(dirname "$LOCKFILE")"
 
   jq -n \
-    --arg date "$today" \
+    --argjson date "$now" \
     --arg commit "$commit" \
     --argjson entries "$lock_entries" \
     '{meta: {last_verified: $date, commit: $commit}, entries: $entries}' \
@@ -511,8 +511,8 @@ cmd_verify() {
 
   local commit
   commit="$(git rev-parse HEAD 2>/dev/null || echo "unknown")"
-  local today
-  today="$(date +%Y-%m-%d)"
+  local now
+  now="$(date +%s)"
 
   for path in "$@"; do
     if [[ ! -f "$path" ]]; then
@@ -529,7 +529,7 @@ cmd_verify() {
       --arg p "$path" \
       --arg h "$hash" \
       --arg c "$commit" \
-      --arg d "$today" \
+      --argjson d "$now" \
       '.entries[$p] = {file_hash: $h, verified_at_commit: $c, verified: $d} | .meta.last_verified = $d | .meta.commit = $c' \
       "$LOCKFILE")"
     echo "$tmp" > "$LOCKFILE"

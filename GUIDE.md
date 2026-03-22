@@ -641,9 +641,21 @@ When adding a new rule, command, agent, skill, or template to the scaffold, **al
 
 | Command | What it does |
 |---------|-------------|
-| `/scaffold-audit` | Analyzes scaffold for stochastic-to-deterministic improvement opportunities |
+| `/scaffold-audit` | Analyzes scaffold for stochastic-to-deterministic improvement opportunities. Calls `manifest-check.sh check` for deterministic README verification. |
 | `/fix-certs` | Diagnoses and repairs Cloudflare WARP TLS certificate issues |
 | `/init` | Initializes a new project from the scaffold (global command) |
+
+### Manifest Verification Scripts
+
+| Command | What it does |
+|---------|-------------|
+| `manifest-check.sh parse <readme>` | Parse markdown tables → JSON `[{path, description}]` |
+| `manifest-check.sh check-existence <readme>` | Check which paths exist on disk, discover untracked files |
+| `manifest-check.sh init <readme>` | Create `.claude/manifest.lock` with file hashes + git commit |
+| `manifest-check.sh hash-check` | Compare current hashes against lockfile → verified/stale |
+| `manifest-check.sh extract-identity <file>` | Extract identity metadata (comment headers, frontmatter, headings) |
+| `manifest-check.sh check <readme>` | Full report: verified + stale (with diffs) + missing + untracked (with identity) |
+| `manifest-check.sh verify <paths...>` | Update lockfile entries for confirmed paths |
 
 ---
 
@@ -900,6 +912,7 @@ Every scaffold feature traces back to transformer architecture research. This ta
 | Scaffold sync with lockfile | Configuration inheritance with provenance tracking. Enables knowledge reuse across projects while respecting local customization. |
 | Universal delimiters for all markdown | Every synced markdown file has a section delimiter. Hub updates flow via section-merge without overwriting node customizations. Eliminates manual conflict resolution for the most common sync case: hub improves a rule/command while node has project-specific additions. |
 | SCAFFOLD_FRAMEWORK.md protection | Research source material is foundational — changes only under paradigm shifts, preserving the reasoning behind every design decision. |
+| Manifest verification with lockfile | Hash comparison auto-verifies unchanged files (zero Claude involvement). Changed files get a diff (not full content) — Claude judges "does this diff affect the description?" rather than re-reading 200-line files. Untracked files get identity extraction (headers/frontmatter), not full reads. Converts N full-file reads into N hash comparisons + K diffs where K << N. |
 
 <!-- NODE-SPECIFIC-START -->
 <!-- Everything above is managed by the scaffold hub and updated via /scaffold-pull. -->

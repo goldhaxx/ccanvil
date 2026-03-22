@@ -1,0 +1,15 @@
+#!/usr/bin/env bash
+# Git pre-push hook — runs security audit before allowing push.
+# Install: cp docs/templates/github/pre-push .git/hooks/pre-push && chmod +x .git/hooks/pre-push
+
+set -euo pipefail
+
+if [[ -f "scripts/security-audit.sh" ]]; then
+  echo "Running security audit before push..."
+  if ! bash scripts/security-audit.sh --files-only 2>/dev/null; then
+    echo ""
+    echo "PUSH BLOCKED: Security audit found issues."
+    echo "Run 'bash scripts/security-audit.sh' for details."
+    exit 1
+  fi
+fi

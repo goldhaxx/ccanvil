@@ -1,5 +1,7 @@
 {
-  "_comment": "Project-specific linters for the lint-on-write hook. Add entries for your stack.",
-  "_docs": "Each key is a glob pattern (pipe-separated for multiple). 'check' is the command (file path appended). 'name' is the display name for error messages.",
-  "linters": {}
+  "_comment": "Project-specific linters and formatters for Claude Code hooks.",
+  "_docs_linters": "Each key is a glob pattern. 'check' is the command (file path appended). 'name' is for error messages. Linters block writes on failure (exit 2).",
+  "_docs_formatters": "Each key is a glob pattern. 'format' is the command (file path appended). 'name' is for logging. Formatters never block writes.",
+  "linters": {},
+  "formatters": {}
 }

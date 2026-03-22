@@ -849,3 +849,52 @@ SCRIPT
 
   rm -rf "$repo"
 }
+
+# ===========================================================================
+# Step 4: audit-session --since flag (AC-7)
+# ===========================================================================
+
+@test "audit-session: --since flag limits scan range" {
+  local repo
+  repo=$(create_audit_repo)
+
+  # Old commit with cp pattern
+  echo 'cp old/a.txt old/b.txt' > "$repo/old.sh"
+  git -C "$repo" add old.sh
+  git -C "$repo" commit -q -m "old commit with cp"
+
+  local midpoint
+  midpoint=$(git -C "$repo" rev-parse HEAD)
+
+  # New commit without patterns
+  echo 'echo clean' > "$repo/new.sh"
+  git -C "$repo" add new.sh
+  git -C "$repo" commit -q -m "clean commit"
+
+  # Scan only from midpoint — should NOT find the old cp
+  run bash "$SCRIPT" audit-session --since "$midpoint" "$repo"
+  [ "$status" -eq 0 ]
+
+  total=$(echo "$output" | jq -r '.summary.total')
+  [ "$total" -eq 0 ]
+
+  rm -rf "$repo"
+}
+
+@test "audit-session: without --since defaults to last 10 commits" {
+  local repo
+  repo=$(create_audit_repo)
+
+  echo 'cp a b' > "$repo/task.sh"
+  git -C "$repo" add task.sh
+  git -C "$repo" commit -q -m "add task"
+
+  # No --since flag
+  run bash "$SCRIPT" audit-session "$repo"
+  [ "$status" -eq 0 ]
+
+  total=$(echo "$output" | jq -r '.summary.total')
+  [ "$total" -ge 1 ]
+
+  rm -rf "$repo"
+}

@@ -270,6 +270,91 @@ cmd_hash_check() {
 }
 
 # ---------------------------------------------------------------------------
+# cmd_extract_identity — Extract identity metadata from a file.
+#
+# Shell scripts: leading comment block (lines starting with #)
+# Markdown: YAML frontmatter + first heading
+# Other: first 3 lines
+#
+# Output: JSON { path, type, identity, size_bytes }
+# ---------------------------------------------------------------------------
+cmd_extract_identity() {
+  local filepath="${1:?Usage: manifest-check.sh extract-identity <file>}"
+
+  if [[ ! -f "$filepath" ]]; then
+    echo "Error: File does not exist: $filepath" >&2
+    return 1
+  fi
+
+  local size_bytes type identity
+
+  # File size (portable: wc -c)
+  size_bytes="$(wc -c < "$filepath" | tr -d ' ')"
+
+  case "$filepath" in
+    *.sh)
+      type="shell"
+      # Extract leading comment block (shebang + # lines)
+      identity=""
+      while IFS= read -r line; do
+        if [[ "$line" =~ ^#.* ]] || [[ "$line" =~ ^$ && -z "$identity" ]]; then
+          identity+="$line"$'\n'
+        else
+          break
+        fi
+      done < "$filepath"
+      # Trim trailing newlines
+      identity="$(printf '%s' "$identity")"
+      ;;
+    *.md)
+      type="markdown"
+      identity=""
+      local in_frontmatter=false
+      local frontmatter_done=false
+      local found_heading=false
+      while IFS= read -r line; do
+        # YAML frontmatter
+        if [[ "$line" == "---" ]] && [[ "$frontmatter_done" == false ]]; then
+          if [[ "$in_frontmatter" == false ]]; then
+            in_frontmatter=true
+            continue
+          else
+            in_frontmatter=false
+            frontmatter_done=true
+            continue
+          fi
+        fi
+        if [[ "$in_frontmatter" == true ]]; then
+          identity+="$line"$'\n'
+          continue
+        fi
+        # First heading
+        if [[ "$line" =~ ^#\  ]] && [[ "$found_heading" == false ]]; then
+          identity+="$line"$'\n'
+          found_heading=true
+          break
+        fi
+      done < "$filepath"
+      identity="$(printf '%s' "$identity")"
+      ;;
+    *)
+      type="other"
+      identity="$(head -3 "$filepath")"
+      ;;
+  esac
+
+  local json_identity
+  json_identity="$(printf '%s' "$identity" | jq -Rs '.')"
+
+  jq -n \
+    --arg p "$filepath" \
+    --arg t "$type" \
+    --argjson i "$json_identity" \
+    --argjson s "$size_bytes" \
+    '{path: $p, type: $t, identity: $i, size_bytes: $s}'
+}
+
+# ---------------------------------------------------------------------------
 # Main dispatch
 # ---------------------------------------------------------------------------
 case "${1:-}" in
@@ -289,8 +374,12 @@ case "${1:-}" in
     shift
     cmd_hash_check "$@"
     ;;
+  extract-identity)
+    shift
+    cmd_extract_identity "$@"
+    ;;
   *)
-    echo "Usage: manifest-check.sh {parse|check-existence|init|hash-check|check|verify} [args...]" >&2
+    echo "Usage: manifest-check.sh {parse|check-existence|init|hash-check|extract-identity|check|verify} [args...]" >&2
     exit 1
     ;;
 esac

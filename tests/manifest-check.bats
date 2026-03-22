@@ -391,3 +391,83 @@ EOF
   # Verified entries don't need a diff field
   echo "$output" | jq -e '.verified[0].path == ".claude/rules/tdd.md"'
 }
+
+
+# =========================================================================
+# Step 5: Identity extraction for untracked files
+# =========================================================================
+
+@test "extract-identity gets comment header from shell scripts" {
+  mkdir -p "$REPO/scripts"
+  cat > "$REPO/scripts/example.sh" <<'EOF'
+#!/usr/bin/env bash
+# example.sh — Does something useful.
+# Usage: example.sh [args]
+
+set -euo pipefail
+echo "hello"
+EOF
+
+  run bash "$SCRIPT" extract-identity "$REPO/scripts/example.sh"
+  [ "$status" -eq 0 ]
+  echo "$output" | jq -e '.type == "shell"'
+  # Identity should contain the comment header
+  echo "$output" | jq -r '.identity' | grep -q "Does something useful"
+}
+
+@test "extract-identity gets heading + frontmatter from markdown" {
+  mkdir -p "$REPO/.claude/rules"
+  cat > "$REPO/.claude/rules/example.md" <<'EOF'
+---
+name: example-rule
+description: "An example"
+---
+
+# Example Rule
+
+Follow these guidelines.
+EOF
+
+  run bash "$SCRIPT" extract-identity "$REPO/.claude/rules/example.md"
+  [ "$status" -eq 0 ]
+  echo "$output" | jq -e '.type == "markdown"'
+  echo "$output" | jq -r '.identity' | grep -q "example-rule"
+  echo "$output" | jq -r '.identity' | grep -q "Example Rule"
+}
+
+@test "extract-identity gets first heading from markdown without frontmatter" {
+  mkdir -p "$REPO/.claude/rules"
+  cat > "$REPO/.claude/rules/simple.md" <<'EOF'
+# Simple Rule
+
+Just do the thing.
+EOF
+
+  run bash "$SCRIPT" extract-identity "$REPO/.claude/rules/simple.md"
+  [ "$status" -eq 0 ]
+  echo "$output" | jq -r '.identity' | grep -q "Simple Rule"
+}
+
+@test "extract-identity falls back to first 3 lines for other file types" {
+  mkdir -p "$REPO/scripts"
+  cat > "$REPO/scripts/config.json" <<'EOF'
+{
+  "name": "test-config",
+  "version": "1.0"
+}
+EOF
+
+  run bash "$SCRIPT" extract-identity "$REPO/scripts/config.json"
+  [ "$status" -eq 0 ]
+  echo "$output" | jq -e '.type == "other"'
+  echo "$output" | jq -r '.identity' | grep -q "test-config"
+}
+
+@test "extract-identity includes file size" {
+  mkdir -p "$REPO/scripts"
+  echo "hello world" > "$REPO/scripts/tiny.sh"
+
+  run bash "$SCRIPT" extract-identity "$REPO/scripts/tiny.sh"
+  [ "$status" -eq 0 ]
+  echo "$output" | jq -e '.size_bytes > 0'
+}

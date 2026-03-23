@@ -125,3 +125,35 @@ teardown() {
   run bash "$SCRIPT" resolve pr.create --project-dir "$PROJECT"
   echo "$output" | jq -e '.invocation.command | test("gh pr create")'
 }
+
+# =========================================================================
+# Step 4: MCP resolve for backlog.list (AC-2)
+# =========================================================================
+
+@test "backlog.list with linear routing returns MCP adapter" {
+  mkdir -p "$PROJECT/.claude"
+  cat > "$PROJECT/.claude/scaffold.json" <<'JSON'
+{
+  "integrations": {
+    "providers": {
+      "linear": {
+        "mechanism": "mcp",
+        "project": "Test Project",
+        "team": "Test Team"
+      }
+    },
+    "routing": {
+      "backlog": "linear"
+    }
+  }
+}
+JSON
+  run bash "$SCRIPT" resolve backlog.list --project-dir "$PROJECT"
+  [ "$status" -eq 0 ]
+  echo "$output" | jq -e '.provider == "linear"'
+  echo "$output" | jq -e '.mechanism == "mcp"'
+  echo "$output" | jq -e '.invocation.tool == "mcp__claude_ai_Linear__list_issues"'
+  echo "$output" | jq -e '.invocation.params.project == "Test Project"'
+  echo "$output" | jq -e '.invocation.params.team == "Test Team"'
+  echo "$output" | jq -e '.contract.output | length > 0'
+}

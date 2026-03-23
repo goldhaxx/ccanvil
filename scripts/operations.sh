@@ -210,6 +210,58 @@ local_adapter() {
 }
 
 # ---------------------------------------------------------------------------
+# MCP adapter definitions (Linear)
+# ---------------------------------------------------------------------------
+
+linear_mcp_adapter() {
+  local op="$1" provider_config="$2"
+  local tool="" params="" output_contract=""
+  local project team
+  project=$(echo "$provider_config" | jq -r '.project // ""')
+  team=$(echo "$provider_config" | jq -r '.team // ""')
+
+  case "$op" in
+    backlog.list)
+      tool="mcp__claude_ai_Linear__list_issues"
+      params=$(printf '{"project":"%s","team":"%s"}' "$project" "$team")
+      output_contract='["id","title","status","priority"]'
+      ;;
+    backlog.get)
+      tool="mcp__claude_ai_Linear__get_issue"
+      params='{"id":"ARG_ID"}'
+      output_contract='["id","title","status","priority","description"]'
+      ;;
+    *)
+      # Unsupported operation for this provider — fall back to local
+      local_adapter "$op"
+      return 0
+      ;;
+  esac
+
+  printf '{"provider":"linear","mechanism":"mcp","invocation":{"tool":"%s","params":%s},"contract":{"output":%s}}' \
+    "$tool" "$params" "$output_contract"
+}
+
+# ---------------------------------------------------------------------------
+# External provider adapter dispatch
+# ---------------------------------------------------------------------------
+
+external_adapter() {
+  local op="$1" provider_name="$2" mechanism="$3" provider_config="$4"
+
+  case "$provider_name" in
+    linear)
+      linear_mcp_adapter "$op" "$provider_config"
+      ;;
+    *)
+      # Generic passthrough for unknown providers
+      printf '{"provider":"%s","mechanism":"%s","invocation":{"config":%s},"contract":{"output":[]}}' \
+        "$provider_name" "$mechanism" "$provider_config"
+      ;;
+  esac
+}
+
+# ---------------------------------------------------------------------------
 # Subcommands
 # ---------------------------------------------------------------------------
 
@@ -241,6 +293,20 @@ cmd_resolve() {
     local_adapter "$op"
     return 0
   fi
+
+  # Look up the provider config
+  local provider_config
+  provider_config=$(jq -c ".integrations.providers.${routed_provider} // null" "$CONFIG_FILE")
+
+  if [[ "$provider_config" == "null" ]]; then
+    echo "ERROR: provider \"$routed_provider\" is configured for $group but has no entry in integrations.providers" >&2
+    exit 1
+  fi
+
+  local mechanism
+  mechanism=$(echo "$provider_config" | jq -r '.mechanism // "bash"')
+
+  external_adapter "$op" "$routed_provider" "$mechanism" "$provider_config"
 }
 
 # ---------------------------------------------------------------------------

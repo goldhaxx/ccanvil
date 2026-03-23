@@ -89,6 +89,7 @@ parse_settings_file() {
 
 cmd_check() {
   local settings_file="$SETTINGS_DIR/settings.json"
+  local settings_local_file="$SETTINGS_DIR/settings.local.json"
 
   # settings.json must exist
   if [[ ! -f "$settings_file" ]]; then
@@ -96,15 +97,25 @@ cmd_check() {
     exit 2
   fi
 
-  # Parse settings.json
-  local entries
-  entries=$(parse_settings_file "$settings_file" "settings.json")
+  # Parse both files
+  local entries_main entries_local all_entries
+  entries_main=$(parse_settings_file "$settings_file" "settings.json")
+  entries_local=$(parse_settings_file "$settings_local_file" "settings.local.json")
 
-  # Build JSON output — all entries default to UNREVIEWED for now
+  # Merge and deduplicate: group by permission, collect sources into arrays
+  all_entries=$(jq -n --argjson a "$entries_main" --argjson b "$entries_local" '
+    ($a + $b) | group_by(.permission) | map({
+      permission: .[0].permission,
+      source: [.[].source] | unique,
+      status: "UNREVIEWED"
+    })
+  ')
+
+  # Build JSON output
   local result
-  result=$(echo "$entries" | jq '
+  result=$(echo "$all_entries" | jq '
     {
-      entries: [.[] | {permission: .permission, source: .source, status: "UNREVIEWED"}],
+      entries: .,
       danger: 0,
       unreviewed: length,
       reviewed: 0

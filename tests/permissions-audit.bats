@@ -84,3 +84,76 @@ EOF
   run bash "$SCRIPT" check --settings-dir "$FIXTURE"
   [ "$status" -eq 2 ]
 }
+
+
+# =========================================================================
+# Step 2: Dual-file parsing + deduplication (AC-1 complete, AC-10)
+# =========================================================================
+
+@test "parses entries from both settings files" {
+  cat > "$FIXTURE/settings.json" <<'EOF'
+{
+  "permissions": {
+    "allow": ["Bash(git status:*)"]
+  }
+}
+EOF
+  cat > "$FIXTURE/settings.local.json" <<'EOF'
+{
+  "permissions": {
+    "allow": ["Bash(echo:*)"]
+  }
+}
+EOF
+
+  run bash "$SCRIPT" check --settings-dir "$FIXTURE"
+  echo "$output" | jq -e '.entries | length == 2'
+}
+
+@test "duplicate entry in both files reports single entry with array source" {
+  cat > "$FIXTURE/settings.json" <<'EOF'
+{
+  "permissions": {
+    "allow": ["Bash(bats:*)"]
+  }
+}
+EOF
+  cat > "$FIXTURE/settings.local.json" <<'EOF'
+{
+  "permissions": {
+    "allow": ["Bash(bats:*)"]
+  }
+}
+EOF
+
+  run bash "$SCRIPT" check --settings-dir "$FIXTURE"
+  echo "$output" | jq -e '.entries | length == 1'
+  echo "$output" | jq -e '.entries[0].source == ["settings.json", "settings.local.json"]'
+}
+
+@test "unique entries report single source as array" {
+  cat > "$FIXTURE/settings.json" <<'EOF'
+{
+  "permissions": {
+    "allow": ["Bash(git status:*)"]
+  }
+}
+EOF
+
+  run bash "$SCRIPT" check --settings-dir "$FIXTURE"
+  echo "$output" | jq -e '.entries[0].source == ["settings.json"]'
+}
+
+@test "missing settings.local.json is not an error" {
+  cat > "$FIXTURE/settings.json" <<'EOF'
+{
+  "permissions": {
+    "allow": ["Bash(ls:*)"]
+  }
+}
+EOF
+
+  run bash "$SCRIPT" check --settings-dir "$FIXTURE"
+  [ "$status" -eq 0 ] || [ "$status" -eq 1 ]
+  echo "$output" | jq -e '.entries | length == 1'
+}

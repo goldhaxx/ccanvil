@@ -11,6 +11,18 @@ Review recent work for stochastic interventions — moments where Claude exercis
 3. Run `git diff HEAD~5..HEAD --stat` to see recent changes.
 4. Read `.claude/rules/deterministic-first.md` for the principle and anti-patterns.
 
+## Step 1b: Permissions check
+
+Run `scripts/permissions-audit.sh check --settings-dir .claude` and check the exit code:
+
+- **Exit 0:** All entries REVIEWED, no DANGER. Report "Permissions: PASS" and move on.
+- **Exit 1 or 2:** Include a "Permissions" section in the audit report with:
+  - Danger count and unreviewed count from the JSON output
+  - List all DANGER permission strings with their matched pattern
+  - Recommendation: run `permissions-audit.sh check --text` for details, or `permissions-audit.sh init` to create the decision log
+
+If `permissions-audit.sh` does not exist, skip this step.
+
 ## Step 2: Identify violations
 
 For each recent operation, classify it:

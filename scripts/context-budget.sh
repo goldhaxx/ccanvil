@@ -102,6 +102,14 @@ cmd_check() {
     local entry
     entry=$(measure_file "$PROJECT_DIR/CLAUDE.md")
     files_json=$(echo "$files_json" | jq --argjson e "$entry" '. + [$e]')
+
+    # Check line count threshold (AC-10)
+    local claude_lines
+    claude_lines=$(wc -l < "$PROJECT_DIR/CLAUDE.md" | tr -d ' ')
+    if [[ "$claude_lines" -gt 80 ]]; then
+      warnings_json=$(echo "$warnings_json" | jq --arg p "$PROJECT_DIR/CLAUDE.md" --argjson l "$claude_lines" \
+        '. + [{type: "line_count", path: $p, lines: $l, message: "CLAUDE.md exceeds 80-line recommended maximum"}]')
+    fi
   else
     warnings_json=$(echo "$warnings_json" | jq --arg p "$PROJECT_DIR/CLAUDE.md" \
       '. + [{type: "missing_file", path: $p, message: "Project CLAUDE.md not found"}]')

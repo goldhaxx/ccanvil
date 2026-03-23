@@ -338,3 +338,35 @@ teardown() {
   ignore_warnings=$(echo "$output" | jq '[.warnings // [] | .[] | select(.path | contains("claudeignore"))] | length')
   [ "$ignore_warnings" -eq 0 ]
 }
+
+
+# =========================================================================
+# Step 6: CLAUDE.md line count warning (AC-10)
+# =========================================================================
+
+@test "CLAUDE.md under 80 lines produces no line count warning" {
+  # Default fixture CLAUDE.md is 0 lines (no newline) — under 80
+  run bash "$SCRIPT" check --project-dir "$FIXTURE" $NO_GLOBAL
+  [ "$status" -eq 0 ]
+  local line_warnings
+  line_warnings=$(echo "$output" | jq '[.warnings[] | select(.type == "line_count")] | length')
+  [ "$line_warnings" -eq 0 ]
+}
+
+@test "CLAUDE.md over 80 lines produces line count warning" {
+  # Create a CLAUDE.md with 85 lines
+  for i in $(seq 1 85); do echo "line $i"; done > "$FIXTURE/CLAUDE.md"
+  run bash "$SCRIPT" check --project-dir "$FIXTURE" $NO_GLOBAL
+  [ "$status" -eq 0 ]
+  echo "$output" | jq -e '[.warnings[] | select(.type == "line_count")] | length > 0'
+  echo "$output" | jq -e '[.warnings[] | select(.type == "line_count")][0].lines == 85'
+}
+
+@test "CLAUDE.md exactly 80 lines produces no warning" {
+  for i in $(seq 1 80); do echo "line $i"; done > "$FIXTURE/CLAUDE.md"
+  run bash "$SCRIPT" check --project-dir "$FIXTURE" $NO_GLOBAL
+  [ "$status" -eq 0 ]
+  local line_warnings
+  line_warnings=$(echo "$output" | jq '[.warnings[] | select(.type == "line_count")] | length')
+  [ "$line_warnings" -eq 0 ]
+}

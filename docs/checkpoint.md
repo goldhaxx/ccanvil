@@ -1,68 +1,67 @@
 # Checkpoint
 
 > Feature: tool-integration
-> Last updated: 1774299317
+> Last updated: 1774309949
 > Plan hash: 2fce56f9
-> Session objective: Research, spec, and plan BTS-19 (Modular Tool Integration Layer)
+> Session objective: Implement BTS-19 (Modular Tool Integration Layer) — all 11 plan steps
 
 ## Accomplished
 
-### BTS-19 research and design
-- Conducted deep research on tool integration mechanisms: MCP, Agent SDK, plugins, CLIs, APIs, webhooks, gh-aw, A2A protocol.
-- Research report saved to `docs/research/tool-integration-landscape.md` and as a Linear project document.
-- Key finding: abstraction must be mechanism-agnostic, not MCP-specific. 12 integration mechanisms identified, falling into 3 determinism tiers.
+### BTS-19 implementation complete (all 12 ACs pass)
+- **Steps 1-11** of TDD plan executed in strict red-green-refactor order
+- `scripts/operations.sh` — 17 operations, local bash adapters, Linear MCP adapters, config-aware routing
+- `tests/operations.bats` — 31 tests covering all 12 acceptance criteria
+- `/catchup` step 0c wired to `operations.sh resolve backlog.list`
+- `scaffold.json` gets `integrations` schema key, tracked in `scaffold-sync.sh` TRACKED_PATTERNS
+- CLAUDE.md and GUIDE.md updated with operations.sh documentation
 
-### BTS-19 spec written and activated
-- Spec at `docs/specs/tool-integration.md` with 12 ACs covering: routing layer, local adapter, Linear MCP adapter, error handling, extensible mechanisms, config schema, /catchup wiring.
-- Design consideration added for multi-destination routing (spec in Linear AND local simultaneously).
-- Phased roadmap: 5 phases from bash+mcp through plugin distribution and gh-aw integration.
-- Spec activated on branch `claude/feat/tool-integration`.
+### Code review + fixes
+- Code-reviewer agent found 2 blockers: printf-based JSON injection (B-1), hyphenated provider names crash (B-2)
+- Fixed: all JSON construction now uses `jq -n --arg`, all jq queries use bracket notation with `--arg`
+- Also fixed: `backlog.get` local adapter substitutes real ID, `review.run` stub returns valid JSON
 
-### BTS-19 plan written
-- 11-step TDD plan at `docs/plan.md`. Steps build from skeleton through full taxonomy, MCP routing, schema compat, and documentation.
+### Functional verification
+- Ran all three modes live: local (no config), Linear MCP (with routing), error paths
+- All produce correct JSON output
 
-### README augmented
-- New "What This Is" section: defines scaffold purpose (bootstrap for any repo), target persona (Claude Code developers), progressive unlock model (local → MCP → CLI → SDK → plugin).
-
-### Housekeeping
-- Cleaned up stale checkpoint and spec from completed features (permissions-audit, context-budget).
-- Updated all memory files: ZWR → BTS, Zwright → Blocktech Solutions (Linear team rename).
-- Updated Linear: BTS-19 labeled `has-spec`, research doc linked.
+### PR and backlog
+- Draft PR: https://github.com/goldhaxx/claude-code-scaffold/pull/3
+- BTS-24 created: scaffold.json node-override strategy — blocks adding Linear config to hub
 
 ## Current State
 
 - **Branch:** `claude/feat/tool-integration`
-- **Tests:** 301/301 passing
+- **Tests:** 332/332 passing
 - **Uncommitted changes:** This checkpoint
 - **Build status:** Clean
+- **PR:** Draft #3 open
 
 ## Blocked On
 
-- Nothing
+- Nothing (implementation complete, PR open for review)
 
 ## Next Steps
 
-1. Start Step 1 of the plan: script skeleton + unknown operation error (AC-10)
-2. Continue through Steps 2-11 in TDD order
-3. After all steps pass, `/review` then `/pr`
+1. Review and merge PR #3
+2. Mark BTS-19 complete (`scripts/docs-check.sh complete tool-integration`)
+3. Pick next backlog item — candidates:
+   - BTS-24: scaffold.json node-override strategy (Medium, needs-research) — unblocks adding Linear routing to hub
+   - BTS-23: CLAUDE.md content review — trim to 80-line budget (Medium, needs-spec)
+   - BTS-22: Docs directory strategy (Medium, needs-research)
 
 ## Context Notes
 
-- The spec's design consideration on multi-destination routing is critical: Phase 1 resolve output must not preclude returning arrays in future phases.
-- macOS ships bash 3 — no associative arrays. Use case statements for operation registry.
-- Linear MCP tool names must match `settings.local.json` allowlist entries exactly.
-- The `integrations` config in scaffold.json starts empty (no routing, no providers) — everything defaults to local.
+- `operations.sh resolve` returns informational JSON — it describes what to call but doesn't execute. An `exec` subcommand is a natural Phase 2 addition (flagged as C-4 in review).
+- `scaffold.json` has no section-merge support (JSON can't have delimiters). BTS-24 addresses this.
+- macOS bash 3 constraint respected: no associative arrays, case statements for registry.
+- The audit-session finding (jq in tests) is a false positive — `jq empty` in a test file is intentional validation, not stochastic improvisation.
 
 ## Determinism Review
 
-- **operations_reviewed:** 8
-- **candidates_found:** 0
-- Research conducted via sub-agents (isolated context, deterministic delegation).
-- Spec written by spec-writer sub-agent (isolated context).
-- Linear updates via MCP tools (deterministic API calls).
-- All file operations used dedicated tools (Read, Write, Edit — not manual cat/sed).
-- No manual cp, jq, shasum, or git -C commands improvised outside scripts.
-- No candidates this session.
+- **operations_reviewed:** 12
+- **candidates_found:** 1
+- **`/catchup` dispatch logic (C-4):** Claude now reads `operations.sh resolve` output and conditionally dispatches (bash → execute, mcp → call tool). This conditional logic could be a deterministic `operations.sh exec backlog.list` subcommand that resolves AND executes in one call. Impact: medium. Deferred to Phase 2.
+- All JSON construction uses `jq -n` (deterministic). No manual cp, shasum, or git -C improvised. All file operations used dedicated tools.
 
 <!-- NODE-SPECIFIC-START -->
 <!-- Add project-specific content below this line. -->

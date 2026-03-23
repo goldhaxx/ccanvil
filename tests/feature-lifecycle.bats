@@ -178,6 +178,8 @@ EOF
   "$PROJECT/scripts/docs-check.sh" activate auth-system "$PROJECT/docs"
   [ -f "$PROJECT/docs/spec.md" ]
   grep -q "auth-system" "$PROJECT/docs/spec.md"
+  # docs/spec.md should have the updated status, not the original
+  grep -q "Status: In Progress" "$PROJECT/docs/spec.md"
 }
 
 @test "activate: updates spec status to In Progress" {

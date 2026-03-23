@@ -703,12 +703,12 @@ cmd_activate() {
     exit 1
   }
 
-  # Copy spec to docs/spec.md
-  cp "$spec_file" "$docs_dir/spec.md"
-
   # Update status in specs/ to "In Progress"
   sed -i '' "s/^> Status: .*/> Status: In Progress/" "$spec_file" 2>/dev/null || \
     sed -i "s/^> Status: .*/> Status: In Progress/" "$spec_file"
+
+  # Copy spec to docs/spec.md (after status update so it gets the new status)
+  cp "$spec_file" "$docs_dir/spec.md"
 
   echo "Activated spec '$feature_id' on branch '$branch_name'"
 }

@@ -7,6 +7,10 @@ SCRIPT="$BATS_TEST_DIRNAME/../scripts/permissions-audit.sh"
 
 setup() {
   FIXTURE=$(mktemp -d)
+  # Create a default empty log to avoid NOTE messages on stderr
+  # (tests that specifically test missing/invalid log override this)
+  echo '{"entries":{}}' > "$FIXTURE/permissions-log.json"
+  DEFAULT_LOG="$FIXTURE/permissions-log.json"
 }
 
 teardown() {
@@ -444,4 +448,48 @@ EOF
   echo "$output" | jq -e '.reviewed == 1'
   echo "$output" | jq -e '.unreviewed == 1'
   echo "$output" | jq -e '.danger == 1'
+}
+
+
+# =========================================================================
+# Step 5: Exit codes (AC-2) — already covered by steps 3+4 tests
+# =========================================================================
+# Exit 0 tested in "fully reviewed entry in log → REVIEWED status"
+# Exit 1 tested in "entry not in log → UNREVIEWED"
+# Exit 2 tested in "broad wildcard flagged as DANGER"
+
+
+# =========================================================================
+# Step 6: Error handling (AC-8, AC-9)
+# =========================================================================
+
+@test "missing log file → UNREVIEWED with stderr note" {
+  cat > "$FIXTURE/settings.json" <<'EOF'
+{
+  "permissions": {
+    "allow": ["Bash(git status:*)"]
+  }
+}
+EOF
+
+  run bash "$SCRIPT" check --settings-dir "$FIXTURE" --log "$FIXTURE/nonexistent.json"
+  [ "$status" -eq 1 ]
+  echo "$output" | grep -q "NOTE: .*not found.*run permissions-audit.sh init"
+  # The JSON output should still be valid
+  echo "$output" | grep -v "^NOTE:" | jq -e '.unreviewed == 1'
+}
+
+@test "invalid JSON log → exit 2 with error on stderr" {
+  cat > "$FIXTURE/settings.json" <<'EOF'
+{
+  "permissions": {
+    "allow": ["Bash(git status:*)"]
+  }
+}
+EOF
+  echo "not json {{{" > "$FIXTURE/bad-log.json"
+
+  run bash "$SCRIPT" check --settings-dir "$FIXTURE" --log "$FIXTURE/bad-log.json"
+  [ "$status" -eq 2 ]
+  echo "$output" | grep -q "ERROR: .*not valid JSON"
 }

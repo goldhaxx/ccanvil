@@ -171,7 +171,14 @@ cmd_check() {
 
   # Load permissions log if available
   local log_data="{}"
-  if [[ -f "$LOG_FILE" ]]; then
+  local log_missing=false
+  if [[ ! -f "$LOG_FILE" ]]; then
+    log_missing=true
+    echo "NOTE: $LOG_FILE not found — run permissions-audit.sh init" >&2
+  elif ! jq empty "$LOG_FILE" 2>/dev/null; then
+    echo "ERROR: $LOG_FILE is not valid JSON" >&2
+    exit 2
+  else
     log_data=$(jq '.entries // {}' "$LOG_FILE")
   fi
 

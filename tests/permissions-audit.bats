@@ -157,3 +157,150 @@ EOF
   [ "$status" -eq 0 ] || [ "$status" -eq 1 ]
   echo "$output" | jq -e '.entries | length == 1'
 }
+
+
+# =========================================================================
+# Step 3: Dangerous pattern detection (AC-3)
+# =========================================================================
+
+@test "broad wildcard flagged as DANGER" {
+  cat > "$FIXTURE/settings.json" <<'EOF'
+{
+  "permissions": {
+    "allow": ["Bash(echo:*)", "Bash(cat:*)", "Bash(find:*)", "Bash(bash:*)"]
+  }
+}
+EOF
+
+  run bash "$SCRIPT" check --settings-dir "$FIXTURE"
+  [ "$status" -eq 2 ]
+  echo "$output" | jq -e '.danger == 4'
+  echo "$output" | jq -e '[.entries[] | select(.status == "DANGER")] | length == 4'
+}
+
+@test "compound operators flagged as DANGER" {
+  cat > "$FIXTURE/settings.json" <<'EOF'
+{
+  "permissions": {
+    "allow": [
+      "Bash(bash -n scripts/foo.sh && echo \"ok\")",
+      "Bash(cmd1; cmd2)"
+    ]
+  }
+}
+EOF
+
+  run bash "$SCRIPT" check --settings-dir "$FIXTURE"
+  [ "$status" -eq 2 ]
+  echo "$output" | jq -e '.danger == 2'
+}
+
+@test "env-prefix command flagged as DANGER" {
+  cat > "$FIXTURE/settings.json" <<'EOF'
+{
+  "permissions": {
+    "allow": ["Bash(FILTER_BRANCH_SQUELCH_WARNING=1 git filter-branch)"]
+  }
+}
+EOF
+
+  run bash "$SCRIPT" check --settings-dir "$FIXTURE"
+  [ "$status" -eq 2 ]
+  echo "$output" | jq -e '.entries[0].status == "DANGER"'
+}
+
+@test "redirect operators flagged as DANGER" {
+  cat > "$FIXTURE/settings.json" <<'EOF'
+{
+  "permissions": {
+    "allow": ["Bash(echo foo > file.txt)", "Bash(echo bar >> file.txt)"]
+  }
+}
+EOF
+
+  run bash "$SCRIPT" check --settings-dir "$FIXTURE"
+  [ "$status" -eq 2 ]
+  echo "$output" | jq -e '.danger == 2'
+}
+
+@test "find -exec and find -delete flagged as DANGER" {
+  cat > "$FIXTURE/settings.json" <<'EOF'
+{
+  "permissions": {
+    "allow": ["Bash(find . -exec rm {} \\;)", "Bash(find . -delete)"]
+  }
+}
+EOF
+
+  run bash "$SCRIPT" check --settings-dir "$FIXTURE"
+  [ "$status" -eq 2 ]
+  echo "$output" | jq -e '.danger == 2'
+}
+
+@test "loop primitives flagged as DANGER" {
+  cat > "$FIXTURE/settings.json" <<'EOF'
+{
+  "permissions": {
+    "allow": ["Bash(for f:*)", "Bash(do echo:*)", "Bash(done)"]
+  }
+}
+EOF
+
+  run bash "$SCRIPT" check --settings-dir "$FIXTURE"
+  [ "$status" -eq 2 ]
+  echo "$output" | jq -e '.danger == 3'
+}
+
+@test "file mutation commands flagged as DANGER" {
+  cat > "$FIXTURE/settings.json" <<'EOF'
+{
+  "permissions": {
+    "allow": ["Bash(sort -o file.txt)", "Bash(git branch -D main)", "Bash(git tag -d v1)"]
+  }
+}
+EOF
+
+  run bash "$SCRIPT" check --settings-dir "$FIXTURE"
+  [ "$status" -eq 2 ]
+  echo "$output" | jq -e '.danger == 3'
+}
+
+@test "arbitrary execution flagged as DANGER" {
+  cat > "$FIXTURE/settings.json" <<'EOF'
+{
+  "permissions": {
+    "allow": ["Bash(xargs -I {} cat {})", "Bash(env PATH=/tmp cmd)"]
+  }
+}
+EOF
+
+  run bash "$SCRIPT" check --settings-dir "$FIXTURE"
+  [ "$status" -eq 2 ]
+  echo "$output" | jq -e '.danger == 2'
+}
+
+@test "safe entries not flagged as DANGER" {
+  cat > "$FIXTURE/settings.json" <<'EOF'
+{
+  "permissions": {
+    "allow": ["Bash(git status:*)", "Bash(ls:*)", "Bash(bats:*)", "Bash(bash -n scripts/foo.sh)"]
+  }
+}
+EOF
+
+  run bash "$SCRIPT" check --settings-dir "$FIXTURE"
+  echo "$output" | jq -e '.danger == 0'
+}
+
+@test "DANGER entry includes matched pattern name" {
+  cat > "$FIXTURE/settings.json" <<'EOF'
+{
+  "permissions": {
+    "allow": ["Bash(echo:*)"]
+  }
+}
+EOF
+
+  run bash "$SCRIPT" check --settings-dir "$FIXTURE"
+  echo "$output" | jq -e '.entries[0].matched_pattern'
+}

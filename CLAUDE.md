@@ -14,6 +14,8 @@ bats tests/scaffold-sync.bats        # Run scaffold sync tests only
 bats tests/security-audit.bats       # Run security audit tests only
 bats tests/feature-lifecycle.bats    # Run feature lifecycle tests only
 bash scripts/security-audit.sh       # Run PII/secrets scan
+bash scripts/permissions-audit.sh check --settings-dir .claude  # Audit permissions
+bash scripts/permissions-audit.sh init --settings-dir .claude   # Init decision log
 bash scripts/docs-check.sh list-specs    # List specs in backlog
 bash scripts/docs-check.sh activate <id> # Activate a spec → create branch
 bash scripts/docs-check.sh complete <id> # Mark spec complete

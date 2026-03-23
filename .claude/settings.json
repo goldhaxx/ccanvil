@@ -41,6 +41,7 @@
       "Bash(bash -n:*)",
       "Bash(scripts/docs-check.sh:*)",
       "Bash(scripts/security-audit.sh:*)",
+      "Bash(scripts/permissions-audit.sh:*)",
       "Bash(scripts/manifest-check.sh:*)",
       "Bash(./scripts/scaffold-sync.sh:*)"
     ],

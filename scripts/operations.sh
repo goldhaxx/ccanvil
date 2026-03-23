@@ -89,6 +89,56 @@ done
 [[ "$CMD" == "resolve" && -z "$OPERATION" ]] && usage
 
 # ---------------------------------------------------------------------------
+# Config reading
+# ---------------------------------------------------------------------------
+
+CONFIG_FILE=""
+
+read_config() {
+  CONFIG_FILE="$PROJECT_DIR/.claude/scaffold.json"
+
+  # No config file → all local (not an error)
+  if [[ ! -f "$CONFIG_FILE" ]]; then
+    CONFIG_FILE=""
+    return 0
+  fi
+
+  # Validate JSON
+  if ! jq empty "$CONFIG_FILE" 2>/dev/null; then
+    echo "ERROR: .claude/scaffold.json is not valid JSON" >&2
+    exit 1
+  fi
+}
+
+# Extract the routing group from an operation name (e.g., "backlog.list" → "backlog")
+operation_group() {
+  echo "${1%%.*}"
+}
+
+# ---------------------------------------------------------------------------
+# Local adapter definitions
+# ---------------------------------------------------------------------------
+
+local_adapter() {
+  local op="$1"
+  local cmd="" output_contract=""
+
+  case "$op" in
+    backlog.list)
+      cmd="scripts/docs-check.sh list-specs"
+      output_contract='["feature_id","status","created"]'
+      ;;
+    *)
+      cmd="echo '{}'"
+      output_contract='[]'
+      ;;
+  esac
+
+  printf '{"provider":"local","mechanism":"bash","invocation":{"command":"%s"},"contract":{"output":%s}}' \
+    "$cmd" "$output_contract"
+}
+
+# ---------------------------------------------------------------------------
 # Subcommands
 # ---------------------------------------------------------------------------
 
@@ -99,6 +149,26 @@ cmd_resolve() {
   if ! is_valid_operation "$op"; then
     echo "ERROR: unknown operation \"$op\"" >&2
     exit 1
+  fi
+
+  # Read config (sets CONFIG_FILE or leaves empty)
+  read_config
+
+  # No config or no integrations key → local adapter
+  if [[ -z "$CONFIG_FILE" ]]; then
+    local_adapter "$op"
+    return 0
+  fi
+
+  # Check for integrations.routing.<group>
+  local group
+  group=$(operation_group "$op")
+  local routed_provider
+  routed_provider=$(jq -r ".integrations.routing.${group} // \"local\"" "$CONFIG_FILE")
+
+  if [[ "$routed_provider" == "local" ]]; then
+    local_adapter "$op"
+    return 0
   fi
 }
 

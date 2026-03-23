@@ -295,11 +295,70 @@ print_text_report() {
 }
 
 # ---------------------------------------------------------------------------
+# Init command
+# ---------------------------------------------------------------------------
+
+cmd_init() {
+  local settings_file="$SETTINGS_DIR/settings.json"
+  local settings_local_file="$SETTINGS_DIR/settings.local.json"
+
+  # settings.json must exist
+  if [[ ! -f "$settings_file" ]]; then
+    echo "ERROR: $settings_file not found" >&2
+    exit 2
+  fi
+
+  # Parse both files to get all permission strings
+  local entries_main entries_local all_perms
+  entries_main=$(parse_settings_file "$settings_file" "settings.json")
+  entries_local=$(parse_settings_file "$settings_local_file" "settings.local.json")
+
+  # Get unique permission strings
+  all_perms=$(jq -n --argjson a "$entries_main" --argjson b "$entries_local" '
+    ($a + $b) | [.[].permission] | unique
+  ')
+
+  # Load existing log or start fresh
+  local existing="{}"
+  if [[ -f "$LOG_FILE" ]]; then
+    if ! jq empty "$LOG_FILE" 2>/dev/null; then
+      echo "ERROR: $LOG_FILE is not valid JSON" >&2
+      exit 2
+    fi
+    existing=$(jq '.entries // {}' "$LOG_FILE")
+  fi
+
+  # Merge: keep existing reviewed entries, add stubs for new ones
+  local stub='{"risk":"","rationale":"TODO","efficiency_justification":"","reviewer":"","reviewed_epoch":0}'
+  local merged
+  merged=$(jq -n --argjson perms "$all_perms" --argjson existing "$existing" --argjson stub "$stub" '
+    reduce $perms[] as $p (
+      {};
+      . + {($p): ($existing[$p] // $stub)}
+    )
+  ')
+
+  # Write the log file
+  jq -n --argjson entries "$merged" '{entries: $entries}' > "$LOG_FILE"
+
+  local total
+  total=$(echo "$all_perms" | jq 'length')
+  local existing_count
+  existing_count=$(echo "$existing" | jq 'length')
+  local new_count=$((total - existing_count))
+  if [[ "$new_count" -lt 0 ]]; then
+    new_count=0
+  fi
+
+  echo "Initialized $LOG_FILE: $total entries ($new_count new stubs, rest preserved)"
+}
+
+# ---------------------------------------------------------------------------
 # Dispatch
 # ---------------------------------------------------------------------------
 
 case "$CMD" in
   check) cmd_check ;;
-  init)  echo "TODO: init not implemented" >&2; exit 2 ;;
+  init)  cmd_init ;;
   *)     usage ;;
 esac

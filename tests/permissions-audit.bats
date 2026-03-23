@@ -583,3 +583,99 @@ EOF
   echo "$output" | grep -q "REVIEWED"
   echo "$output" | grep -q "Bash(git status:\*)"
 }
+
+
+# =========================================================================
+# Step 8: Init command (AC-7)
+# =========================================================================
+
+@test "init creates log with stubs for all entries" {
+  rm -f "$FIXTURE/permissions-log.json"
+  cat > "$FIXTURE/settings.json" <<'EOF'
+{
+  "permissions": {
+    "allow": ["Bash(git status:*)", "Bash(ls:*)"]
+  }
+}
+EOF
+
+  run bash "$SCRIPT" init --settings-dir "$FIXTURE" --log "$FIXTURE/permissions-log.json"
+  [ "$status" -eq 0 ]
+  [ -f "$FIXTURE/permissions-log.json" ]
+  jq -e '.entries["Bash(git status:*)"].rationale == "TODO"' "$FIXTURE/permissions-log.json"
+  jq -e '.entries["Bash(ls:*)"].risk == ""' "$FIXTURE/permissions-log.json"
+}
+
+@test "init preserves existing reviewed entries" {
+  cat > "$FIXTURE/settings.json" <<'EOF'
+{
+  "permissions": {
+    "allow": ["Bash(git status:*)", "Bash(ls:*)"]
+  }
+}
+EOF
+  cat > "$FIXTURE/permissions-log.json" <<'EOF'
+{
+  "entries": {
+    "Bash(git status:*)": {
+      "risk": "LOW",
+      "rationale": "Read-only",
+      "efficiency_justification": "Constant use",
+      "reviewer": "zach",
+      "reviewed_epoch": 1774200000
+    }
+  }
+}
+EOF
+
+  run bash "$SCRIPT" init --settings-dir "$FIXTURE" --log "$FIXTURE/permissions-log.json"
+  [ "$status" -eq 0 ]
+  # Existing reviewed entry preserved
+  jq -e '.entries["Bash(git status:*)"].rationale == "Read-only"' "$FIXTURE/permissions-log.json"
+  # New entry gets stub
+  jq -e '.entries["Bash(ls:*)"].rationale == "TODO"' "$FIXTURE/permissions-log.json"
+}
+
+@test "init is idempotent — running twice preserves reviewed data" {
+  cat > "$FIXTURE/settings.json" <<'EOF'
+{
+  "permissions": {
+    "allow": ["Bash(git status:*)"]
+  }
+}
+EOF
+  cat > "$FIXTURE/permissions-log.json" <<'EOF'
+{
+  "entries": {
+    "Bash(git status:*)": {
+      "risk": "LOW",
+      "rationale": "Read-only",
+      "efficiency_justification": "Constant use",
+      "reviewer": "zach",
+      "reviewed_epoch": 1774200000
+    }
+  }
+}
+EOF
+
+  bash "$SCRIPT" init --settings-dir "$FIXTURE" --log "$FIXTURE/permissions-log.json"
+  bash "$SCRIPT" init --settings-dir "$FIXTURE" --log "$FIXTURE/permissions-log.json"
+
+  jq -e '.entries["Bash(git status:*)"].rationale == "Read-only"' "$FIXTURE/permissions-log.json"
+  jq -e '.entries["Bash(git status:*)"].reviewer == "zach"' "$FIXTURE/permissions-log.json"
+}
+
+@test "init with no existing log creates new file" {
+  rm -f "$FIXTURE/permissions-log.json"
+  cat > "$FIXTURE/settings.json" <<'EOF'
+{
+  "permissions": {
+    "allow": ["Bash(ls:*)"]
+  }
+}
+EOF
+
+  run bash "$SCRIPT" init --settings-dir "$FIXTURE" --log "$FIXTURE/permissions-log.json"
+  [ "$status" -eq 0 ]
+  jq -e '.entries | length == 1' "$FIXTURE/permissions-log.json"
+}

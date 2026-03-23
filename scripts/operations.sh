@@ -124,13 +124,84 @@ local_adapter() {
   local cmd="" output_contract=""
 
   case "$op" in
+    # --- backlog ---
     backlog.list)
       cmd="scripts/docs-check.sh list-specs"
       output_contract='["feature_id","status","created"]'
       ;;
-    *)
-      cmd="echo '{}'"
-      output_contract='[]'
+    backlog.create)
+      cmd="scripts/docs-check.sh create-spec"
+      output_contract='["feature_id","status"]'
+      ;;
+    backlog.prioritize)
+      cmd="scripts/docs-check.sh list-specs"
+      output_contract='["feature_id","status","priority"]'
+      ;;
+    backlog.get)
+      cmd="cat docs/specs/SPEC_ID.md"
+      output_contract='["feature_id","status","created","body"]'
+      ;;
+    # --- spec ---
+    spec.read)
+      cmd="cat docs/spec.md"
+      output_contract='["feature_id","status","body"]'
+      ;;
+    spec.write)
+      cmd="cp docs/templates/spec.md docs/spec.md"
+      output_contract='["feature_id"]'
+      ;;
+    spec.list)
+      cmd="scripts/docs-check.sh list-specs"
+      output_contract='["feature_id","status","created"]'
+      ;;
+    spec.activate)
+      cmd="scripts/docs-check.sh activate"
+      output_contract='["feature_id","branch"]'
+      ;;
+    spec.complete)
+      cmd="scripts/docs-check.sh complete"
+      output_contract='["feature_id","status"]'
+      ;;
+    # --- plan ---
+    plan.read)
+      cmd="cat docs/plan.md"
+      output_contract='["feature_id","spec_hash","body"]'
+      ;;
+    plan.write)
+      cmd="cp docs/templates/plan.md docs/plan.md"
+      output_contract='["feature_id"]'
+      ;;
+    # --- checkpoint ---
+    checkpoint.read)
+      cmd="cat docs/checkpoint.md"
+      output_contract='["feature_id","plan_hash","body"]'
+      ;;
+    checkpoint.write)
+      cmd="cp docs/templates/checkpoint.md docs/checkpoint.md"
+      output_contract='["feature_id"]'
+      ;;
+    # --- status ---
+    status.get)
+      cmd="scripts/docs-check.sh status"
+      output_contract='["spec","plan","checkpoint"]'
+      ;;
+    status.update)
+      cmd="scripts/docs-check.sh validate"
+      output_contract='["result","details"]'
+      ;;
+    # --- pr ---
+    pr.create)
+      cmd="gh pr create --draft"
+      output_contract='["url","number"]'
+      ;;
+    pr.list)
+      cmd="gh pr list --json number,title,state"
+      output_contract='["number","title","state"]'
+      ;;
+    # --- review ---
+    review.run)
+      cmd="echo review"
+      output_contract='["status","concerns"]'
       ;;
   esac
 

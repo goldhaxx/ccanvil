@@ -57,3 +57,71 @@ teardown() {
   [ "$status" -eq 2 ]
   [[ "$output" == *"Usage:"* ]]
 }
+
+
+# =========================================================================
+# Step 2: File discovery and per-file measurement (AC-1, AC-2)
+# =========================================================================
+
+@test "check outputs files array with per-file entries" {
+  run bash "$SCRIPT" check --project-dir "$FIXTURE"
+  [ "$status" -eq 0 ]
+  echo "$output" | jq -e '.files | type == "array"'
+  echo "$output" | jq -e '.files | length > 0'
+}
+
+@test "each file entry has path, lines, chars, estimated_tokens" {
+  run bash "$SCRIPT" check --project-dir "$FIXTURE"
+  [ "$status" -eq 0 ]
+  echo "$output" | jq -e '.files[0] | has("path", "lines", "chars", "estimated_tokens")'
+}
+
+@test "project CLAUDE.md is measured" {
+  run bash "$SCRIPT" check --project-dir "$FIXTURE"
+  [ "$status" -eq 0 ]
+  echo "$output" | jq -e '[.files[] | select(.path | endswith("CLAUDE.md"))] | length > 0'
+}
+
+@test "rules files are measured" {
+  run bash "$SCRIPT" check --project-dir "$FIXTURE"
+  [ "$status" -eq 0 ]
+  echo "$output" | jq -e '[.files[] | select(.path | contains("rules/"))] | length > 0'
+}
+
+@test "settings.json is measured" {
+  run bash "$SCRIPT" check --project-dir "$FIXTURE"
+  [ "$status" -eq 0 ]
+  echo "$output" | jq -e '[.files[] | select(.path | endswith("settings.json"))] | length > 0'
+}
+
+@test ".claudeignore is measured" {
+  run bash "$SCRIPT" check --project-dir "$FIXTURE"
+  [ "$status" -eq 0 ]
+  echo "$output" | jq -e '[.files[] | select(.path | endswith(".claudeignore"))] | length > 0'
+}
+
+@test "token estimation uses ceil(chars/4)" {
+  # CLAUDE.md has 20 chars → ceil(20/4) = 5 tokens
+  run bash "$SCRIPT" check --project-dir "$FIXTURE"
+  [ "$status" -eq 0 ]
+  local tokens
+  tokens=$(echo "$output" | jq '[.files[] | select(.path | endswith("CLAUDE.md"))][0].estimated_tokens')
+  [ "$tokens" -eq 5 ]
+}
+
+@test "totals object has aggregate lines, chars, estimated_tokens" {
+  run bash "$SCRIPT" check --project-dir "$FIXTURE"
+  [ "$status" -eq 0 ]
+  echo "$output" | jq -e '.totals | has("lines", "chars", "estimated_tokens")'
+}
+
+@test "totals are sum of individual files" {
+  run bash "$SCRIPT" check --project-dir "$FIXTURE"
+  [ "$status" -eq 0 ]
+  # 20 + 8 + 12 + 4 = 44 chars total
+  local total_chars
+  total_chars=$(echo "$output" | jq '.totals.chars')
+  local sum_chars
+  sum_chars=$(echo "$output" | jq '[.files[].chars] | add')
+  [ "$total_chars" -eq "$sum_chars" ]
+}

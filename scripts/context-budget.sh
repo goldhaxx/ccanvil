@@ -63,11 +63,67 @@ done
 [[ -z "$CMD" ]] && usage
 
 # ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+
+# Measure a single file. Outputs JSON object: {path, lines, chars, estimated_tokens}
+measure_file() {
+  local filepath="$1"
+
+  local chars lines tokens
+  chars=$(wc -c < "$filepath" | tr -d ' ')
+  lines=$(wc -l < "$filepath" | tr -d ' ')
+  tokens=$(( (chars + 3) / 4 ))
+
+  jq -n --arg p "$filepath" --argjson l "$lines" --argjson c "$chars" --argjson t "$tokens" \
+    '{path: $p, lines: $l, chars: $c, estimated_tokens: $t}'
+}
+
+# ---------------------------------------------------------------------------
 # Commands
 # ---------------------------------------------------------------------------
 
 cmd_check() {
-  echo '{}'
+  local files_json="[]"
+
+  # Project CLAUDE.md
+  if [[ -f "$PROJECT_DIR/CLAUDE.md" ]]; then
+    local entry
+    entry=$(measure_file "$PROJECT_DIR/CLAUDE.md")
+    files_json=$(echo "$files_json" | jq --argjson e "$entry" '. + [$e]')
+  fi
+
+  # Rules files
+  for rule in "$PROJECT_DIR"/.claude/rules/*.md; do
+    [[ -f "$rule" ]] || continue
+    local entry
+    entry=$(measure_file "$rule")
+    files_json=$(echo "$files_json" | jq --argjson e "$entry" '. + [$e]')
+  done
+
+  # Settings file
+  if [[ -f "$PROJECT_DIR/.claude/settings.json" ]]; then
+    local entry
+    entry=$(measure_file "$PROJECT_DIR/.claude/settings.json")
+    files_json=$(echo "$files_json" | jq --argjson e "$entry" '. + [$e]')
+  fi
+
+  # .claudeignore
+  if [[ -f "$PROJECT_DIR/.claudeignore" ]]; then
+    local entry
+    entry=$(measure_file "$PROJECT_DIR/.claudeignore")
+    files_json=$(echo "$files_json" | jq --argjson e "$entry" '. + [$e]')
+  fi
+
+  # Compute totals
+  local total_lines total_chars total_tokens
+  total_lines=$(echo "$files_json" | jq '[.[].lines] | add // 0')
+  total_chars=$(echo "$files_json" | jq '[.[].chars] | add // 0')
+  total_tokens=$(echo "$files_json" | jq '[.[].estimated_tokens] | add // 0')
+
+  jq -n --argjson files "$files_json" \
+    --argjson tl "$total_lines" --argjson tc "$total_chars" --argjson tt "$total_tokens" \
+    '{files: $files, totals: {lines: $tl, chars: $tc, estimated_tokens: $tt}}'
 }
 
 # ---------------------------------------------------------------------------

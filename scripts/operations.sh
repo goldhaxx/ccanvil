@@ -64,6 +64,7 @@ EOF
 
 CMD=""
 OPERATION=""
+OP_ARGS=""
 
 [[ $# -eq 0 ]] && usage
 
@@ -75,6 +76,10 @@ while [[ $# -gt 0 ]]; do
       if [[ $# -gt 0 && "$1" != --* ]]; then
         OPERATION="$1"; shift
       fi
+      # Remaining positional args before flags are operation arguments
+      while [[ $# -gt 0 && "$1" != --* ]]; do
+        OP_ARGS="$1"; shift
+      done
       ;;
     --project-dir)
       PROJECT_DIR="$2"; shift 2 ;;
@@ -214,8 +219,8 @@ local_adapter() {
 # ---------------------------------------------------------------------------
 
 linear_mcp_adapter() {
-  local op="$1" provider_config="$2"
-  local tool="" params="" output_contract=""
+  local op="$1" provider_config="$2" op_args="$3"
+  local tool="" params="" output_contract="" field_map=""
   local project team
   project=$(echo "$provider_config" | jq -r '.project // ""')
   team=$(echo "$provider_config" | jq -r '.team // ""')
@@ -225,11 +230,13 @@ linear_mcp_adapter() {
       tool="mcp__claude_ai_Linear__list_issues"
       params=$(printf '{"project":"%s","team":"%s"}' "$project" "$team")
       output_contract='["id","title","status","priority"]'
+      field_map='{"identifier":"id","title":"title","state.name":"status","priority":"priority"}'
       ;;
     backlog.get)
       tool="mcp__claude_ai_Linear__get_issue"
-      params='{"id":"ARG_ID"}'
+      params=$(printf '{"id":"%s"}' "$op_args")
       output_contract='["id","title","status","priority","description"]'
+      field_map='{"identifier":"id","title":"title","state.name":"status","priority":"priority"}'
       ;;
     *)
       # Unsupported operation for this provider — fall back to local
@@ -238,8 +245,8 @@ linear_mcp_adapter() {
       ;;
   esac
 
-  printf '{"provider":"linear","mechanism":"mcp","invocation":{"tool":"%s","params":%s},"contract":{"output":%s}}' \
-    "$tool" "$params" "$output_contract"
+  printf '{"provider":"linear","mechanism":"mcp","invocation":{"tool":"%s","params":%s},"contract":{"output":%s,"field_map":%s}}' \
+    "$tool" "$params" "$output_contract" "$field_map"
 }
 
 # ---------------------------------------------------------------------------
@@ -247,11 +254,11 @@ linear_mcp_adapter() {
 # ---------------------------------------------------------------------------
 
 external_adapter() {
-  local op="$1" provider_name="$2" mechanism="$3" provider_config="$4"
+  local op="$1" provider_name="$2" mechanism="$3" provider_config="$4" op_args="$5"
 
   case "$provider_name" in
     linear)
-      linear_mcp_adapter "$op" "$provider_config"
+      linear_mcp_adapter "$op" "$provider_config" "$op_args"
       ;;
     *)
       # Generic passthrough for unknown providers
@@ -306,7 +313,7 @@ cmd_resolve() {
   local mechanism
   mechanism=$(echo "$provider_config" | jq -r '.mechanism // "bash"')
 
-  external_adapter "$op" "$routed_provider" "$mechanism" "$provider_config"
+  external_adapter "$op" "$routed_provider" "$mechanism" "$provider_config" "$OP_ARGS"
 }
 
 # ---------------------------------------------------------------------------

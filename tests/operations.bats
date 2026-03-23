@@ -259,3 +259,33 @@ SPEC
 
   rm -rf "$FIXTURE_DIR"
 }
+
+# =========================================================================
+# Step 7: backlog.get with Linear MCP routing + contract mapping (AC-6)
+# =========================================================================
+
+@test "backlog.get with linear routing returns MCP adapter with id param" {
+  mkdir -p "$PROJECT/.claude"
+  cat > "$PROJECT/.claude/scaffold.json" <<'JSON'
+{
+  "integrations": {
+    "providers": {
+      "linear": { "mechanism": "mcp", "project": "P", "team": "T" }
+    },
+    "routing": {
+      "backlog": "linear"
+    }
+  }
+}
+JSON
+  run bash "$SCRIPT" resolve backlog.get BTS-19 --project-dir "$PROJECT"
+  [ "$status" -eq 0 ]
+  echo "$output" | jq -e '.mechanism == "mcp"'
+  echo "$output" | jq -e '.tool == "mcp__claude_ai_Linear__get_issue" or .invocation.tool == "mcp__claude_ai_Linear__get_issue"'
+  echo "$output" | jq -e '.invocation.params.id == "BTS-19"'
+  echo "$output" | jq -e '.contract.field_map'
+  echo "$output" | jq -e '.contract.field_map.identifier == "id"'
+  echo "$output" | jq -e '.contract.field_map.title == "title"'
+  echo "$output" | jq -e '.contract.field_map["state.name"] == "status"'
+  echo "$output" | jq -e '.contract.field_map.priority == "priority"'
+}

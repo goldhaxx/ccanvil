@@ -121,9 +121,55 @@ cmd_check() {
   total_chars=$(echo "$files_json" | jq '[.[].chars] | add // 0')
   total_tokens=$(echo "$files_json" | jq '[.[].estimated_tokens] | add // 0')
 
+  # Determine budget ceiling
+  local context_window budget_ceiling source model
+  context_window=$DEFAULT_CONTEXT_WINDOW
+  source="default"
+  model="null"
+
+  if [[ -n "$BUDGET_FLAG" ]]; then
+    budget_ceiling=$BUDGET_FLAG
+    source="flag"
+  else
+    budget_ceiling=$(( context_window * BUDGET_PERCENT / 100 ))
+  fi
+
+  # Compute budget percentage
+  local budget_percent
+  if [[ "$budget_ceiling" -gt 0 ]]; then
+    # Integer math: multiply by 100 first for precision, then by 10 for one decimal
+    budget_percent=$(awk "BEGIN {printf \"%.1f\", ($total_tokens / $budget_ceiling) * 100}")
+  else
+    budget_percent="0.0"
+  fi
+
+  # Determine status and exit code
+  local status_label exit_code
+  local threshold_warning=$(( budget_ceiling * 70 / 100 ))
+  local threshold_critical=$(( budget_ceiling * 90 / 100 ))
+
+  if [[ "$total_tokens" -ge "$threshold_critical" ]]; then
+    status_label="CRITICAL"
+    exit_code=2
+  elif [[ "$total_tokens" -ge "$threshold_warning" ]]; then
+    status_label="WARNING"
+    exit_code=1
+  else
+    status_label="HEALTHY"
+    exit_code=0
+  fi
+
   jq -n --argjson files "$files_json" \
     --argjson tl "$total_lines" --argjson tc "$total_chars" --argjson tt "$total_tokens" \
-    '{files: $files, totals: {lines: $tl, chars: $tc, estimated_tokens: $tt}}'
+    --arg bp "$budget_percent" --arg st "$status_label" \
+    --arg model "$model" --argjson cw "$context_window" --argjson bc "$budget_ceiling" --arg src "$source" \
+    '{
+      files: $files,
+      totals: {lines: $tl, chars: $tc, estimated_tokens: $tt, budget_percent: ($bp | tonumber), status: $st},
+      context: {model: (if $model == "null" then null else $model end), context_window: $cw, budget_ceiling: $bc, source: $src}
+    }'
+
+  return "$exit_code"
 }
 
 # ---------------------------------------------------------------------------

@@ -125,3 +125,70 @@ teardown() {
   sum_chars=$(echo "$output" | jq '[.files[].chars] | add')
   [ "$total_chars" -eq "$sum_chars" ]
 }
+
+
+# =========================================================================
+# Step 3: Budget computation and exit codes (AC-3, AC-5, AC-12)
+# =========================================================================
+
+@test "default budget ceiling is 200000 * 0.04 = 8000" {
+  run bash "$SCRIPT" check --project-dir "$FIXTURE"
+  [ "$status" -eq 0 ]
+  local ceiling
+  ceiling=$(echo "$output" | jq '.context.budget_ceiling')
+  [ "$ceiling" -eq 8000 ]
+}
+
+@test "totals includes budget_percent" {
+  run bash "$SCRIPT" check --project-dir "$FIXTURE"
+  [ "$status" -eq 0 ]
+  echo "$output" | jq -e '.totals | has("budget_percent")'
+}
+
+@test "context object has model, context_window, budget_ceiling, source" {
+  run bash "$SCRIPT" check --project-dir "$FIXTURE"
+  [ "$status" -eq 0 ]
+  echo "$output" | jq -e '.context | has("model", "context_window", "budget_ceiling", "source")'
+}
+
+@test "default source is 'default'" {
+  run bash "$SCRIPT" check --project-dir "$FIXTURE"
+  [ "$status" -eq 0 ]
+  local source
+  source=$(echo "$output" | jq -r '.context.source')
+  [ "$source" = "default" ]
+}
+
+@test "default context_window is 200000" {
+  run bash "$SCRIPT" check --project-dir "$FIXTURE"
+  [ "$status" -eq 0 ]
+  local window
+  window=$(echo "$output" | jq '.context.context_window')
+  [ "$window" -eq 200000 ]
+}
+
+@test "exit 0 (HEALTHY) when under 70% of budget" {
+  # Fixture total: 11 tokens, budget 8000 → 0.1% → HEALTHY
+  run bash "$SCRIPT" check --project-dir "$FIXTURE"
+  [ "$status" -eq 0 ]
+}
+
+@test "exit 1 (WARNING) when 70-90% of budget" {
+  # 11 tokens total in fixture. Set budget to 15 → 11/15 = 73% → WARNING
+  run bash "$SCRIPT" check --project-dir "$FIXTURE" --budget 15
+  [ "$status" -eq 1 ]
+}
+
+@test "exit 2 (CRITICAL) when over 90% of budget" {
+  # 11 tokens total in fixture. Set budget to 11 → 100% → CRITICAL
+  run bash "$SCRIPT" check --project-dir "$FIXTURE" --budget 11
+  [ "$status" -eq 2 ]
+}
+
+@test "totals includes status field" {
+  run bash "$SCRIPT" check --project-dir "$FIXTURE"
+  [ "$status" -eq 0 ]
+  local status_val
+  status_val=$(echo "$output" | jq -r '.totals.status')
+  [ "$status_val" = "HEALTHY" ]
+}

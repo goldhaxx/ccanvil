@@ -264,7 +264,7 @@ print_text_report() {
     if [[ "$path" == *"/.claude/CLAUDE.md" ]] || [[ "$path" == "$HOME/.claude/CLAUDE.md" ]] || [[ "$path" == *"/global-claude"* ]]; then
       display_path="~/.claude/CLAUDE.md (global)"
     else
-      display_path=$(echo "$path" | sed "s|.*\(/\.claude/\)|.claude/|; s|.*/\([^/]*\)$|\1|" | head -c 50)
+      display_path=$(echo "$path" | sed "s|.*/\(\.claude/[^/]*/[^/]*\)$|\1|; s|.*/\([^/]*\)$|\1|" | head -c 50)
     fi
     local pct
     pct=$(awk "BEGIN {printf \"%.1f\", ($tokens / $budget_ceiling) * 100}")

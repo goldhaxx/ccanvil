@@ -1,7 +1,7 @@
 {
   "meta": {
-    "last_verified": 1774213098,
-    "commit": "e53ed22dba1a6e983c8049c0939a3c0b0a8043f1"
+    "last_verified": 1774216724,
+    "commit": "31526492ca8be67fd40178c1a4b8efda94470024"
   },
   "entries": {
     "GLOBAL_CLAUDE.md": {
@@ -160,9 +160,9 @@
       "verified": 1774210892
     },
     "scripts/scaffold-sync.sh": {
-      "file_hash": "d4c8cf05640e2b05e969e79a4062eea11cd20664df49fb4aef0c5322501f7d3f",
-      "verified_at_commit": "1d8809373b7ae78ded095def50f5227becd53db5",
-      "verified": 1774210892
+      "file_hash": "6764d7b99bee997a354526ea80de88b169ce4e5baaf6e46c5ef7e7d1e5ad0ab9",
+      "verified_at_commit": "31526492ca8be67fd40178c1a4b8efda94470024",
+      "verified": 1774216724
     },
     "scripts/security-audit.sh": {
       "file_hash": "b52128c6c7aa0eafed9f246b0b772a9554aa219e09a9ca0d0aff0b871ccd7c15",
@@ -250,9 +250,9 @@
       "verified": 1774210892
     },
     "docs/spec.md": {
-      "file_hash": "c01c6d9829f3b13efaf2171c9ca7be2e30ac6a2e570edc57cef0b740387cf823",
-      "verified_at_commit": "e53ed22dba1a6e983c8049c0939a3c0b0a8043f1",
-      "verified": 1774213098
+      "file_hash": "255358f40756c953e385d63e98e5eac8fb8e5e6e6a2f195566a0fa4b58f921a1",
+      "verified_at_commit": "31526492ca8be67fd40178c1a4b8efda94470024",
+      "verified": 1774216724
     },
     "docs/checkpoint.md": {
       "file_hash": "044ba4f84a914b47e2e18443323ead61a1cb213b52135f3110a55479b7301095",
@@ -265,9 +265,9 @@
       "verified": 1774213098
     },
     "README.md": {
-      "file_hash": "809b3fc5acf9f511d4005740223e94d562c15f8ca9880bcc8a61b8727cc8e95f",
-      "verified_at_commit": "e53ed22dba1a6e983c8049c0939a3c0b0a8043f1",
-      "verified": 1774213098
+      "file_hash": "54ef067736e1ddc2a709bc40c64a8c2feea262be82dc68d4785c7daf16557df6",
+      "verified_at_commit": "31526492ca8be67fd40178c1a4b8efda94470024",
+      "verified": 1774216724
     },
     "HOW_TO_USE.md": {
       "file_hash": "7930fd2133910655c87335127194b5ed01e59edb89f7a50d396161c22ade3bfb",
@@ -283,6 +283,16 @@
       "file_hash": "125a38e7fc041b112f95cb2713764126df9faff039614dc580f3fd68a5a37497",
       "verified_at_commit": "1d8809373b7ae78ded095def50f5227becd53db5",
       "verified": 1774210892
+    },
+    "tests/scaffold-sync.bats": {
+      "file_hash": "53e1cd2a69483946a4216d3c1c1f57362169f14ef1fc1eae42114d849f08fc79",
+      "verified_at_commit": "31526492ca8be67fd40178c1a4b8efda94470024",
+      "verified": 1774216724
+    },
+    "GUIDE.md": {
+      "file_hash": "fddfa96f36f8bd2eb679e2a10a4a37b01a2e382dc82ee934dcbb9e6cd6cc26e0",
+      "verified_at_commit": "31526492ca8be67fd40178c1a4b8efda94470024",
+      "verified": 1774216724
     }
   }
 }

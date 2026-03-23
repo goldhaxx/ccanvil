@@ -2,34 +2,49 @@
 
 # Checkpoint
 
-> Feature: determinism-enforcement
-> Last updated: 1774213177
-> Plan hash: 9e736a8c
-> Session objective: Implement determinism enforcement — all 11 ACs across 3 parts
-<!-- Reminder: if no plan exists yet, run /plan before checkpointing (plan before checkpoint). -->
+> Feature: feature-lifecycle
+> Last updated: 1774229091
+> Plan hash: e3381a95
+> Session objective: Build branch-based feature lifecycle (ZWR-10) + establish Linear tracking + research agentic git workflows
 
 ## Accomplished
 
-- **All 11 ACs implemented** across 10 TDD steps, 12 commits.
-- **AC-1:** Checkpoint template now has mandatory `## Determinism Review` section with `operations_reviewed`, `candidates_found` fields.
-- **AC-4:** `docs-check.sh validate` reports `missing-determinism-review` when section is missing or empty.
-- **AC-5, AC-6:** `audit-session` subcommand scans git diffs for stochastic patterns, outputs JSON.
-- **AC-7:** `--since <commit>` flag limits scan range; defaults to last 10 commits.
-- **AC-8:** Allowlists `scripts/*.sh` — zero false positives on scaffold scripts.
-- **AC-9:** Scans commit messages for "manually ran", "had to", "workaround".
-- **AC-2, AC-3:** Workflow rule has checkpoint flow order + 4-item determinism checklist.
-- **Self-review.md** updated to reference mandatory section.
-- **AC-10, AC-11:** `/catchup` surfaces Determinism Review + runs `audit-session`.
-- **README + GUIDE** updated with `audit-session` documentation.
-- **Pushed** to GitHub (all commits).
+### Feature lifecycle (ZWR-10, complete)
+- **All 24 ACs implemented** across 12 TDD steps, 34 new tests (222 total), all passing.
+- `docs-check.sh` extended: `list-specs`, `activate`, `complete`, `config-get` commands; `validate`/`recommend` adapted for multi-spec.
+- Hooks: `branch-name-lint.sh` (warn on non-convention branches), `commit-msg-lint.sh` (warn on non-conventional commits). Both PostToolUse, exit 0 always.
+- Commands: `/commit` (test → stage → conventional message → co-authored-by), `/pr` (evaluation gates → optional critic review → draft PR).
+- Scaffold config: `.claude/scaffold.json` with feature toggles (`pr_review`), node-only, defaults template.
+- Assumptions tracking: `docs/assumptions.md` template, included in PR body, cleared on `complete`.
+- Worktree compatibility: `.gitignore`/`.claudeignore` entries, GUIDE.md parallel sessions docs, path resolution tested.
+- GUIDE.md + CLAUDE.md updated with new commands, architecture, tables.
+
+### Settings.json hardening (ZWR-13, complete)
+- Established read-only permission principle: auto-allow reads, require approval for mutations.
+- Removed 7 dangerous entries (cat, find, env, echo, sort, git branch, git tag).
+- Split `Bash(git:*)` into individual read-only git commands.
+- Identified compound command issue (`;`/`&&` bypass allow-list matching).
+
+### Permissions audit spec (ZWR-11, backlogged)
+- Spec written at `docs/specs/permissions-audit.md` with 11 ACs.
+- Blocked by ZWR-10 (now complete — ready to plan).
+
+### Research
+- Deep research on agentic git workflows: `docs/research/agentic-git-workflows.md` — 25+ sources, 12 teams.
+- Key findings: worktrees universal, agent-prefixed branches, draft PRs mandatory, deterministic/stochastic separation validates our approach.
+
+### Linear setup
+- Project "Claude Code Scaffold" created at https://linear.app/zwright/project/claude-code-scaffold-a2b015bd5fb5
+- 10 issues created (ZWR-10 through ZWR-21), labels (scaffold, has-spec, needs-research).
+- Completed features backfilled (ZWR-13 through ZWR-18).
 
 ## Current State
 
 - **Branch:** main
-- **Tests:** 174/174 passing (30 new)
+- **Tests:** 222/222 passing
 - **Uncommitted changes:** This checkpoint only
 - **Build status:** Clean
-- **Manifest:** 56/56 verified
+- **Docs lifecycle:** feature-lifecycle spec Complete
 
 ## Blocked On
 
@@ -37,24 +52,35 @@
 
 ## Next Steps
 
-### 1. Sync to downstream (fucina)
-- New: `audit-session` subcommand. Updated: `docs-check.sh`, `workflow.md`, `self-review.md`, `catchup.md`, `checkpoint.md` template, README, GUIDE.
+### Next session: Backlog review + Linear integration planning
+Zach requested a dedicated planning session to:
+1. **Review full backlog** — prioritize across all ZWR issues with Linear as source of truth
+2. **Resolve Linear's role in the lifecycle** — how does Linear fit with `docs/specs/`, `activate`, `/pr`? Does modular tool integration (ZWR-19) need to come before other backlog items?
+3. **Adjust to the new lifecycle** — first real use of `activate` → branch → `/commit` → `/pr` flow
+4. **Deep discussion** — not implementation. Planning and alignment only.
 
-### 2. Backlog (in priority order)
-- **Sync hardening** — defensive guards on destructive ops + --dry-run mode for pull
-- **Doc archival lifecycle** — unique doc identity + lifespan + archive on completion (needs deep research)
+### Backlog (in Linear, priority order)
+- **ZWR-11** Permissions security audit (has-spec, was blocked by ZWR-10)
+- **ZWR-12** Context budget measurement
+- **ZWR-19** Modular tool integration layer (Linear, GitHub, etc.)
+- **ZWR-20** Workflow engine / deterministic state machine
+- **ZWR-21** GitHub Agentic Workflows integration
+
+### Open question
+How should Linear integrate with the lifecycle? Today: specs live in `docs/specs/`, Linear tracks the backlog separately. Risk of drift. Options:
+- Linear is source of truth for backlog priority; specs remain in git for deterministic validation
+- Linear issues link to spec files; `/activate` updates Linear status
+- Full integration waits for ZWR-19 (modular tool layer)
 
 ## Determinism Review
 
-- **operations_reviewed:** 6
+- **operations_reviewed:** 12
 - **candidates_found:** 0
-- All implementation was done via TDD (write test → implement → verify → commit). No manual `cp`, `jq`, `shasum`, or `git -C` commands were improvised.
-- No multi-step sequences were improvised — all deterministic operations went through `docs-check.sh` and `manifest-check.sh`.
-- No workarounds for missing script features.
-- No repeated manual operations.
+- All implementation followed TDD (red → green → refactor → commit pattern).
+- Script commands are deterministic (list-specs, activate, complete, config-get).
+- Hooks are deterministic (regex matching on command strings).
+- Research was delegated to sub-agent (isolated context).
+- Settings.json edits were direct targeted changes.
+- Linear operations used MCP tools (deterministic API calls).
+- No manual `cp`, `jq`, `shasum`, or `git -C` improvised outside scripts.
 - No candidates this session.
-
-## Context Notes
-
-- The `create_checkpoint` helper in tests was updated to include the Determinism Review section, which is now mandatory for aligned validation.
-- The spec status should be updated to "Complete" since all ACs pass.

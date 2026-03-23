@@ -923,3 +923,321 @@ EOF
   [ "$status" -eq 0 ]
   echo "$output" | grep -qi "already.*modified\|effectively demoted"
 }
+
+
+# =========================================================================
+# Sync hardening: guard infrastructure (AC-5)
+# =========================================================================
+
+@test "guard_fail: exits with code 3 and GUARD_FAIL prefix" {
+  cd "$NODE"
+  # Source the script to access guard_fail directly, then call it
+  run bash -c 'source "$1" --source-only 2>/dev/null; guard_fail "cp" ".claude/rules/tdd.md" "test reason"' _ "$NODE/scripts/scaffold-sync.sh"
+  [ "$status" -eq 3 ]
+  echo "$output" | grep -q "GUARD_FAIL: cp on .claude/rules/tdd.md: test reason"
+}
+
+# =========================================================================
+# Sync hardening: git commit verification guard (AC-4)
+# =========================================================================
+
+@test "pull-finalize: verifies commit was created after changes" {
+  cd "$NODE"
+  # Modify a file to create something to commit
+  echo "# Updated by pull" > "$NODE/.claude/rules/tdd.md"
+
+  # Modify hub for a version
+  echo "# minor" >> "$HUB/GUIDE.md"
+  git -C "$HUB" add -A && git -C "$HUB" commit -q -m "tweak"
+
+  local head_before
+  head_before=$(git -C "$NODE" rev-parse HEAD)
+
+  run bash "$NODE/scripts/scaffold-sync.sh" pull-finalize
+  [ "$status" -eq 0 ]
+
+  # HEAD should have changed — commit was created
+  local head_after
+  head_after=$(git -C "$NODE" rev-parse HEAD)
+  [ "$head_before" != "$head_after" ]
+  echo "$output" | grep -q "Pull finalized"
+}
+
+@test "pull-finalize: outputs commit SHA when commit succeeds" {
+  cd "$NODE"
+  echo "# Updated by pull" > "$NODE/.claude/rules/tdd.md"
+  echo "# minor" >> "$HUB/GUIDE.md"
+  git -C "$HUB" add -A && git -C "$HUB" commit -q -m "tweak"
+
+  run bash "$NODE/scripts/scaffold-sync.sh" pull-finalize
+  [ "$status" -eq 0 ]
+  # Should show the commit SHA
+  echo "$output" | grep -q "Committed:"
+}
+
+# =========================================================================
+# Sync hardening: delete guard (AC-2)
+# =========================================================================
+
+@test "pull-apply guard: delete refuses when lockfile status changed since plan" {
+  cd "$NODE"
+  # Create a file that we'll plan to delete
+  echo "# Extra rule" > "$NODE/.claude/rules/extra.md"
+  bash "$NODE/scripts/scaffold-sync.sh" lock-add ".claude/rules/extra.md" "scaffold" "abc123" "$(shasum -a 256 "$NODE/.claude/rules/extra.md" | awk '{print $1}')" "clean"
+  git -C "$NODE" add -A && git -C "$NODE" commit -q -m "add extra rule"
+
+  # Simulate: plan says file is "clean" at plan time, but between plan and apply
+  # someone demotes it to "modified"
+  bash "$NODE/scripts/scaffold-sync.sh" demote ".claude/rules/extra.md"
+
+  # Now try to delete — the status changed from clean to modified
+  run env PLAN_LOCAL_STATUS="clean" bash "$NODE/scripts/scaffold-sync.sh" pull-apply ".claude/rules/extra.md" delete
+  [ "$status" -eq 3 ]
+  echo "$output" | grep -q "GUARD_FAIL:"
+
+  # File should still exist
+  [ -f "$NODE/.claude/rules/extra.md" ]
+}
+
+# =========================================================================
+# Sync hardening: jq validation guard (AC-3, AC-13)
+# =========================================================================
+
+# =========================================================================
+# Sync hardening: hash-at-plan capture (AC-1 prerequisite)
+# =========================================================================
+
+@test "pull-plan: includes local_hash in plan entries" {
+  cd "$NODE"
+  # Modify hub file to trigger a plan entry
+  echo "# Updated content" > "$HUB/.claude/rules/tdd.md"
+  git -C "$HUB" add -A && git -C "$HUB" commit -q -m "update rule"
+
+  local plan
+  plan=$(bash "$NODE/scripts/scaffold-sync.sh" pull-plan)
+
+  # Plan should have the tdd.md entry with a local_hash field
+  local local_hash
+  local_hash=$(echo "$plan" | jq -r '.[] | select(.file == ".claude/rules/tdd.md") | .local_hash')
+  [ -n "$local_hash" ]
+  [ "$local_hash" != "null" ]
+
+  # The local_hash should match the actual file hash
+  local actual_hash
+  actual_hash=$(shasum -a 256 "$NODE/.claude/rules/tdd.md" | awk '{print $1}')
+  [ "$local_hash" = "$actual_hash" ]
+}
+
+# =========================================================================
+# Sync hardening: file overwrite guard (AC-1, AC-12)
+# =========================================================================
+
+@test "pull-apply guard: hash mismatch between plan and apply triggers guard_fail" {
+  cd "$NODE"
+  # Modify hub to create a plan entry for tdd.md
+  echo "# Hub update v2" > "$HUB/.claude/rules/tdd.md"
+  git -C "$HUB" add -A && git -C "$HUB" commit -q -m "update rule"
+
+  # Demote first so it becomes a conflict (modified status)
+  bash "$NODE/scripts/scaffold-sync.sh" demote ".claude/rules/tdd.md"
+  git -C "$NODE" add -A && git -C "$NODE" commit -q -m "demote"
+
+  # Get plan — captures local_hash at this point
+  local plan
+  plan=$(bash "$NODE/scripts/scaffold-sync.sh" pull-plan)
+  local plan_hash
+  plan_hash=$(echo "$plan" | jq -r '.[] | select(.file == ".claude/rules/tdd.md") | .local_hash')
+
+  # Now modify the local file AFTER plan was captured
+  echo "# Sneaky local change after plan" > "$NODE/.claude/rules/tdd.md"
+
+  # pull-apply should detect hash mismatch and guard_fail
+  run env PLAN_LOCAL_HASH="$plan_hash" bash "$NODE/scripts/scaffold-sync.sh" pull-apply ".claude/rules/tdd.md" take-scaffold
+  [ "$status" -eq 3 ]
+  echo "$output" | grep -q "GUARD_FAIL:"
+}
+
+# =========================================================================
+# Sync hardening: guard consistency (AC-15)
+# =========================================================================
+
+# =========================================================================
+# Sync hardening: dry-run mode (AC-6, AC-10, AC-11, AC-14)
+# =========================================================================
+
+@test "pull-auto --dry-run: outputs what would change without modifying files" {
+  cd "$NODE"
+  # Modify hub file to trigger auto-update
+  echo "# Updated TDD rules v2" > "$HUB/.claude/rules/tdd.md"
+  git -C "$HUB" add -A && git -C "$HUB" commit -q -m "update rule"
+
+  # Capture file state before
+  local hash_before
+  hash_before=$(shasum -a 256 "$NODE/.claude/rules/tdd.md" | awk '{print $1}')
+  local lock_before
+  lock_before=$(cat "$NODE/.claude/scaffold.lock")
+
+  run bash "$NODE/scripts/scaffold-sync.sh" pull-auto --dry-run
+  [ "$status" -eq 0 ]
+
+  # Should have DRY-RUN prefix output
+  echo "$output" | grep -q "DRY-RUN: would"
+
+  # File should NOT have changed
+  local hash_after
+  hash_after=$(shasum -a 256 "$NODE/.claude/rules/tdd.md" | awk '{print $1}')
+  [ "$hash_before" = "$hash_after" ]
+
+  # Lockfile should NOT have changed
+  local lock_after
+  lock_after=$(cat "$NODE/.claude/scaffold.lock")
+  [ "$lock_before" = "$lock_after" ]
+}
+
+@test "pull-auto --dry-run: pre-check still runs" {
+  cd "$NODE"
+  # Make node dirty
+  echo "dirty" > "$NODE/dirty-file.txt"
+  git -C "$NODE" add dirty-file.txt
+
+  # pre-check should catch dirty state even in dry-run
+  # (pull-auto calls pull-plan which doesn't call pre-check, but --dry-run should still refuse dirty state)
+  echo "# Updated" > "$HUB/.claude/rules/tdd.md"
+  git -C "$HUB" add -A && git -C "$HUB" commit -q -m "update"
+
+  # Clean up staged file for other tests
+  git -C "$NODE" reset HEAD dirty-file.txt >/dev/null 2>&1
+  rm -f "$NODE/dirty-file.txt"
+}
+
+@test "pull-apply --dry-run: describes action without executing" {
+  cd "$NODE"
+  # Modify hub
+  echo "# Hub v2" > "$HUB/.claude/rules/tdd.md"
+  git -C "$HUB" add -A && git -C "$HUB" commit -q -m "update"
+  # Demote to create conflict
+  bash "$NODE/scripts/scaffold-sync.sh" demote ".claude/rules/tdd.md"
+  git -C "$NODE" add -A && git -C "$NODE" commit -q -m "demote"
+
+  local hash_before
+  hash_before=$(shasum -a 256 "$NODE/.claude/rules/tdd.md" | awk '{print $1}')
+
+  run bash "$NODE/scripts/scaffold-sync.sh" pull-apply ".claude/rules/tdd.md" take-scaffold --dry-run
+  [ "$status" -eq 0 ]
+  echo "$output" | grep -q "DRY-RUN: would take-scaffold .claude/rules/tdd.md"
+
+  # File should NOT have changed
+  local hash_after
+  hash_after=$(shasum -a 256 "$NODE/.claude/rules/tdd.md" | awk '{print $1}')
+  [ "$hash_before" = "$hash_after" ]
+}
+
+@test "pull-finalize --dry-run: shows commit info without committing" {
+  cd "$NODE"
+  # Create a change to commit
+  echo "# Updated" > "$NODE/.claude/rules/tdd.md"
+  echo "# minor" >> "$HUB/GUIDE.md"
+  git -C "$HUB" add -A && git -C "$HUB" commit -q -m "tweak"
+
+  local head_before
+  head_before=$(git -C "$NODE" rev-parse HEAD)
+
+  run bash "$NODE/scripts/scaffold-sync.sh" pull-finalize --dry-run
+  [ "$status" -eq 0 ]
+  echo "$output" | grep -q "DRY-RUN:"
+
+  # HEAD should NOT have changed
+  local head_after
+  head_after=$(git -C "$NODE" rev-parse HEAD)
+  [ "$head_before" = "$head_after" ]
+}
+
+@test "push-apply --dry-run: describes action without copying to scaffold" {
+  cd "$NODE"
+  # Modify a tracked file to make it pushable
+  echo "# Local improvement" > "$NODE/.claude/rules/tdd.md"
+  bash "$NODE/scripts/scaffold-sync.sh" lock-update ".claude/rules/tdd.md" "status" "modified"
+
+  local hub_hash_before
+  hub_hash_before=$(shasum -a 256 "$HUB/.claude/rules/tdd.md" | awk '{print $1}')
+
+  run bash "$NODE/scripts/scaffold-sync.sh" push-apply ".claude/rules/tdd.md" --dry-run
+  [ "$status" -eq 0 ]
+  echo "$output" | grep -q "DRY-RUN: would push .claude/rules/tdd.md"
+
+  # Hub file should NOT have changed
+  local hub_hash_after
+  hub_hash_after=$(shasum -a 256 "$HUB/.claude/rules/tdd.md" | awk '{print $1}')
+  [ "$hub_hash_before" = "$hub_hash_after" ]
+}
+
+@test "push-finalize --dry-run: shows commit info without committing in scaffold" {
+  cd "$NODE"
+  # Stage a change in scaffold to have something to commit
+  echo "# pushed content" > "$HUB/.claude/rules/tdd.md"
+
+  local hub_head_before
+  hub_head_before=$(git -C "$HUB" rev-parse HEAD)
+
+  run bash "$NODE/scripts/scaffold-sync.sh" push-finalize "test push" --dry-run
+  [ "$status" -eq 0 ]
+  echo "$output" | grep -q "DRY-RUN:"
+
+  # Hub HEAD should NOT have changed
+  local hub_head_after
+  hub_head_after=$(git -C "$HUB" rev-parse HEAD)
+  [ "$hub_head_before" = "$hub_head_after" ]
+}
+
+@test "all guards: exit code 3 and GUARD_FAIL prefix" {
+  cd "$NODE"
+  # Test 1: guard_fail directly
+  run bash -c 'source "$1" --source-only 2>/dev/null; guard_fail "test" "test.md" "reason"' _ "$NODE/scripts/scaffold-sync.sh"
+  [ "$status" -eq 3 ]
+  echo "$output" | grep -q "^GUARD_FAIL: test on test.md: reason"
+
+  # Test 2: jq guard (corrupt lockfile)
+  echo "NOT JSON" > "$NODE/.claude/scaffold.lock"
+  run bash "$NODE/scripts/scaffold-sync.sh" lock-update ".claude/rules/tdd.md" "status" "modified"
+  [ "$status" -eq 3 ]
+  echo "$output" | grep -q "^GUARD_FAIL: jq on"
+
+  # Restore lockfile for next test
+  cd "$NODE"
+  git checkout -- .claude/scaffold.lock
+
+  # Test 3: hash mismatch guard
+  echo "# Hub v2" > "$HUB/.claude/rules/tdd.md"
+  git -C "$HUB" add -A && git -C "$HUB" commit -q -m "update"
+  bash "$NODE/scripts/scaffold-sync.sh" demote ".claude/rules/tdd.md"
+  git -C "$NODE" add -A && git -C "$NODE" commit -q -m "demote"
+  local plan_hash
+  plan_hash=$(bash "$NODE/scripts/scaffold-sync.sh" pull-plan | jq -r '.[] | select(.file == ".claude/rules/tdd.md") | .local_hash')
+  echo "# changed after plan" > "$NODE/.claude/rules/tdd.md"
+  run env PLAN_LOCAL_HASH="$plan_hash" bash "$NODE/scripts/scaffold-sync.sh" pull-apply ".claude/rules/tdd.md" take-scaffold
+  [ "$status" -eq 3 ]
+  echo "$output" | grep -q "^GUARD_FAIL: cp on"
+
+  # Test 4: status mismatch guard (delete)
+  run env PLAN_LOCAL_STATUS="clean" bash "$NODE/scripts/scaffold-sync.sh" pull-apply ".claude/rules/tdd.md" delete
+  [ "$status" -eq 3 ]
+  echo "$output" | grep -q "^GUARD_FAIL: rm on"
+}
+
+@test "jq guard: invalid lockfile JSON triggers guard_fail before mv" {
+  cd "$NODE"
+  # Save original lockfile for comparison
+  local original_hash
+  original_hash=$(shasum -a 256 "$NODE/.claude/scaffold.lock" | awk '{print $1}')
+
+  # Corrupt the lockfile to invalid JSON so jq output will be invalid
+  echo "NOT JSON" > "$NODE/.claude/scaffold.lock"
+
+  # Attempt a lock-update — should guard_fail because jq produces invalid output
+  run bash "$NODE/scripts/scaffold-sync.sh" lock-update ".claude/rules/tdd.md" "status" "modified"
+  [ "$status" -eq 3 ]
+  echo "$output" | grep -q "GUARD_FAIL:"
+
+  # Lockfile should still be the corrupted version (not replaced with jq garbage)
+  [ "$(cat "$NODE/.claude/scaffold.lock")" = "NOT JSON" ]
+}

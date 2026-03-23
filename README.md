@@ -159,7 +159,7 @@ Copy the whole directory with `cp -r scripts ./scripts`. Contains deterministic 
 
 | File in zip | Copy to | What it does | Customize? |
 |---|---|---|---|
-| `scripts/scaffold-sync.sh` | `./scripts/scaffold-sync.sh` | Core scaffold sync engine. Provides all deterministic operations: init, pull-plan, pull-auto, section-merge, promote, demote, push-candidates, push-apply. Called by scaffold slash commands. | No. Updated automatically via bootstrap on pull. |
+| `scripts/scaffold-sync.sh` | `./scripts/scaffold-sync.sh` | Core scaffold sync engine. Provides all deterministic operations: init, pull-plan, pull-auto, section-merge, promote, demote, push-candidates, push-apply. Includes defensive guards (exit 3 on precondition failure) and `--dry-run` mode for pull/push commands. Called by scaffold slash commands. | No. Updated automatically via bootstrap on pull. |
 | `scripts/security-audit.sh` | `./scripts/security-audit.sh` | Deterministic PII/secrets scanner. Checks files and git history for tokens, keys, credentials, and PII. Called by `/security-audit` and the pre-push hook. | Rarely. Add project-specific allowlist patterns. |
 | `scripts/fix-cloudflare-certs.sh` | `./scripts/fix-cloudflare-certs.sh` | Diagnoses and repairs Cloudflare WARP TLS certificate issues. Creates combined CA bundle. Called by `/fix-certs`. | No. Only relevant for Cloudflare WARP environments. |
 | `scripts/fetch-license.sh` | `./scripts/fetch-license.sh` | Fetches license templates from GitHub API. Called by `/init` during project setup. Supports MIT, Apache 2.0, GPL-3.0, BSD, Unlicense. | No. Deterministic license fetcher. |

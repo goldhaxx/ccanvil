@@ -1,86 +1,88 @@
-# Implementation Plan: Determinism Enforcement
+# Implementation Plan: Permissions Security Audit
 
-> Feature: determinism-enforcement
-> Created: 1774212158
-> Spec hash: 4b20797e
+> Feature: permissions-audit
+> Created: 1774230545
+> Spec hash: 36e70665
 > Based on: docs/spec.md
 
 ## Objective
 
-Make end-of-session determinism review mandatory via checkpoint template, validate enforcement in docs-check.sh, add a safety-net `audit-session` script for post-hoc detection, and wire it all into `/catchup` for cross-session continuity.
+Build a deterministic permissions audit script that classifies every Bash permission entry as DANGER/UNREVIEWED/REVIEWED, with a tracked decision log for rationale.
 
 ## Sequence
 
-### Step 1: Checkpoint template — required Determinism Review section (AC-1)
-- **Test:** Template has `## Determinism Review` section with `operations_reviewed`, `candidates_found` fields and bulleted list format
-- **Implement:** Add the required section to `docs/templates/checkpoint.md` above the NODE-SPECIFIC delimiter
-- **Files:** `docs/templates/checkpoint.md`, `tests/docs-check.bats`
-- **Verify:** `bats tests/docs-check.bats` — new template test passes, existing template tests still pass
+### Step 1: Script skeleton + entry parsing (AC-1 partial)
+- **Test:** `permissions-audit.sh check` with a fixture `settings.json` containing 3 allow entries outputs valid JSON with `entries` array, each having `permission`, `source`, `status` fields, plus `danger`, `unreviewed`, `reviewed` counts.
+- **Implement:** Create `scripts/permissions-audit.sh` following `security-audit.sh` structure — `set -euo pipefail`, argument dispatch (`check` subcommand), parse `permissions.allow[]` and `permissions.deny[]` via jq, assemble JSON output.
+- **Files:** `scripts/permissions-audit.sh`, `tests/permissions-audit.bats`
+- **Verify:** `bats tests/permissions-audit.bats`
 
-### Step 2: validate reports missing-determinism-review (AC-4)
-- **Test:** `docs-check.sh validate` returns `missing-determinism-review` when checkpoint exists but has no `## Determinism Review` section (or empty/placeholder)
-- **Implement:** Extend `cmd_validate` in `docs-check.sh` to check for the section after other checks pass
-- **Files:** `scripts/docs-check.sh`, `tests/docs-check.bats`
-- **Verify:** `bats tests/docs-check.bats` — new validate tests pass, existing tests unaffected
+### Step 2: Parse both settings files + deduplication (AC-1 complete, AC-10)
+- **Test:** Fixture with entries in both `settings.json` and `settings.local.json`. Same entry in both → one entry with `"source": ["settings.json", "settings.local.json"]`. Unique entries report their single source. Missing `settings.local.json` → no error, only `settings.json` parsed.
+- **Implement:** Add `settings.local.json` parsing. Merge by permission string, collecting sources into arrays. Count unique entries for totals.
+- **Files:** `scripts/permissions-audit.sh`, `tests/permissions-audit.bats`
+- **Verify:** `bats tests/permissions-audit.bats`
 
-### Step 3: audit-session basic pattern scanning (AC-5, AC-6)
-- **Test:** `docs-check.sh audit-session` scans a git diff for stochastic patterns (`cp `, `jq `, `shasum`, `git -C`, `curl`, `wget`) and outputs JSON with `patterns_found` array and `summary` object
-- **Implement:** Add `cmd_audit_session` to `docs-check.sh` — uses `git diff --unified=0` to get changed lines, greps for patterns, outputs structured JSON
-- **Files:** `scripts/docs-check.sh`, `tests/docs-check.bats`
-- **Verify:** `bats tests/docs-check.bats` — tests with mock git repos containing known patterns
+### Step 3: Dangerous pattern detection (AC-3)
+- **Test:** Fixture with entries matching each dangerous pattern category: broad wildcard (`echo:*`), compound operator (`cmd;cmd`), env-prefix (`VAR=val cmd`), redirect (`> file`), `find -exec`, loop primitives (`for `, `done`), file mutation (`git branch -D`), arbitrary execution (`xargs -I`). All classified as `DANGER`.
+- **Implement:** Add `DANGER_PATTERNS` array with regex/substring patterns. Classify each entry against patterns before log lookup. DANGER status includes which pattern matched.
+- **Files:** `scripts/permissions-audit.sh`, `tests/permissions-audit.bats`
+- **Verify:** `bats tests/permissions-audit.bats`
 
-### Step 4: audit-session --since flag (AC-7)
-- **Test:** `audit-session --since <commit>` scans from specified commit; without flag, defaults to checkpoint metadata or last 10 commits
-- **Implement:** Add flag parsing to `cmd_audit_session`, read checkpoint.md metadata for default commit
-- **Files:** `scripts/docs-check.sh`, `tests/docs-check.bats`
-- **Verify:** `bats tests/docs-check.bats` — tests with different --since values
+### Step 4: Log-based status classification (AC-4, AC-6)
+- **Test:** Fixture log with: (a) fully-reviewed entry (all fields non-empty, non-TODO) → REVIEWED; (b) stub entry (rationale: "TODO") → UNREVIEWED; (c) entry not in log → UNREVIEWED. Log follows schema: `{"entries": {"<permission>": {"risk", "rationale", "efficiency_justification", "reviewer", "reviewed_epoch"}}}`.
+- **Implement:** Read `.claude/permissions-log.json`, look up each non-DANGER entry by exact key match, check all required fields are present, non-empty, and non-"TODO".
+- **Files:** `scripts/permissions-audit.sh`, `tests/permissions-audit.bats`
+- **Verify:** `bats tests/permissions-audit.bats`
 
-### Step 5: audit-session allowlist (AC-8)
-- **Test:** Patterns found in `scripts/*.sh` are excluded from results; same patterns in other files are reported
-- **Implement:** Add allowlist logic — skip matches in `scripts/*.sh` files by default
-- **Files:** `scripts/docs-check.sh`, `tests/docs-check.bats`
-- **Verify:** `bats tests/docs-check.bats` — zero false positives on scaffold scripts
+### Step 5: Exit codes (AC-2)
+- **Test:** Three fixture scenarios: (a) all REVIEWED, no DANGER → exit 0; (b) UNREVIEWED exists, no DANGER → exit 1; (c) DANGER exists (even with some REVIEWED) → exit 2.
+- **Implement:** Exit code logic after classification: DANGER present → 2; else UNREVIEWED present → 1; else → 0.
+- **Files:** `scripts/permissions-audit.sh`, `tests/permissions-audit.bats`
+- **Verify:** `bats tests/permissions-audit.bats`
 
-### Step 6: audit-session commit message scanning (AC-9)
-- **Test:** Commit messages containing "manually ran", "had to", "workaround" are flagged in output
-- **Implement:** Add `git log --format=%s` scan to `cmd_audit_session`, grep for indicator phrases
-- **Files:** `scripts/docs-check.sh`, `tests/docs-check.bats`
-- **Verify:** `bats tests/docs-check.bats` — tests with mock commits containing indicator phrases
+### Step 6: Error handling — missing and invalid log (AC-8, AC-9)
+- **Test:** (a) No log file → all entries UNREVIEWED, exit 1, stderr contains "NOTE: permissions-log.json not found — run permissions-audit.sh init". (b) Invalid JSON log → stderr "ERROR: permissions-log.json is not valid JSON", exit 2.
+- **Implement:** Add log file existence check with stderr note. Add `jq empty` validation before parsing. Invalid JSON exits 2 immediately.
+- **Files:** `scripts/permissions-audit.sh`, `tests/permissions-audit.bats`
+- **Verify:** `bats tests/permissions-audit.bats`
 
-### Step 7: Workflow rule — checkpoint flow and checklist (AC-2, AC-3)
-- **Test:** `workflow.md` contains checkpoint flow order (content → review → write section → commit → suggest /clear) and the 4-item checklist
-- **Implement:** Update Context Preservation section in `workflow.md`
-- **Files:** `.claude/rules/workflow.md`, `tests/docs-check.bats`
-- **Verify:** `bats tests/` — grep-based tests confirm rule content; existing tests still pass
+### Step 7: Text output mode (AC-5)
+- **Test:** `check --text` outputs grouped report: DANGER first (with matched pattern name), then UNREVIEWED, then REVIEWED. REVIEWED suppressed unless `--verbose` also passed.
+- **Implement:** Add `--text` and `--verbose` flags. Group and format entries by status category.
+- **Files:** `scripts/permissions-audit.sh`, `tests/permissions-audit.bats`
+- **Verify:** `bats tests/permissions-audit.bats`
 
-### Step 8: Self-review.md update
-- **Test:** `self-review.md` references mandatory `## Determinism Review` section and the warm-context checklist
-- **Implement:** Update self-review.md to reference the mandatory checkpoint section instead of optional "Determinism Notes"
-- **Files:** `.claude/rules/self-review.md`, `tests/docs-check.bats`
-- **Verify:** `bats tests/` — grep-based tests confirm references
+### Step 8: Init command (AC-7)
+- **Test:** (a) `init` with no existing log → creates log with all current entries as stubs (risk: "", rationale: "TODO"). (b) `init` with existing reviewed entries → preserves them, adds stubs for new entries only. (c) `init` twice → idempotent, no reviewed data lost.
+- **Implement:** Add `init` subcommand. Read both settings files, diff against existing log, create/merge stubs. Use jq for merge.
+- **Files:** `scripts/permissions-audit.sh`, `tests/permissions-audit.bats`
+- **Verify:** `bats tests/permissions-audit.bats`
 
-### Step 9: /catchup integration (AC-10, AC-11)
-- **Test:** `catchup.md` includes steps to read Determinism Review section and run `audit-session`
-- **Implement:** Update catchup.md to surface outstanding determinism items and run audit-session
-- **Files:** `.claude/commands/catchup.md`, `tests/docs-check.bats`
-- **Verify:** `bats tests/` — grep-based tests confirm catchup references
+### Step 9: Scaffold-audit integration (AC-11)
+- **Test:** N/A (command file, not scriptable). Manual review.
+- **Implement:** Add a "Permissions" step to `.claude/commands/scaffold-audit.md`: run `permissions-audit.sh check`, if exit non-zero include danger/unreviewed counts and all DANGER permission strings in the audit report.
+- **Files:** `.claude/commands/scaffold-audit.md`
+- **Verify:** Read command file, confirm step is present and correct.
 
-### Step 10: Documentation updates
-- **Test:** README manifest includes `audit-session` description; GUIDE command reference includes `audit-session`
-- **Implement:** Update README scripts table and GUIDE command reference + docs lifecycle scripts table
-- **Files:** `README.md`, `GUIDE.md`, `tests/docs-check.bats`
-- **Verify:** `bats tests/` — all tests pass; `bash scripts/manifest-check.sh check README.md` shows verified
+### Step 10: Documentation + settings update
+- **Test:** N/A (documentation). Full suite run for regression.
+- **Implement:** Add `permissions-audit.sh` commands to CLAUDE.md commands block. Add to GUIDE.md utility commands table. Add `Bash(scripts/permissions-audit.sh:*)` to settings.json allow list.
+- **Files:** `CLAUDE.md`, `GUIDE.md`, `.claude/settings.json`
+- **Verify:** `bash -n scripts/permissions-audit.sh`, `bats tests/` (full suite)
 
 ## Risks
 
-- **Git test isolation:** audit-session tests need real git repos with commits. Use `git init` in BATS temp dirs with controlled commits. Risk: test pollution if cleanup fails. Mitigation: BATS teardown handles cleanup.
-- **Pattern false positives:** Regex patterns for `cp `, `jq ` etc. could match legitimate code comments or strings. Mitigation: allowlist mechanism (AC-8) and line-level context in output.
-- **Checkpoint commit detection:** Finding the "last checkpoint commit" from metadata may be fragile if metadata format changes. Mitigation: fallback to `git log --grep` and then to last-10-commits default.
+- **Pattern false positives:** Entries like `Bash(bash -n scripts/foo.sh)` contain "bash" but aren't dangerous — the pattern must match `bash:*` (broad wildcard), not `bash -n` (specific syntax check). Need careful regex boundaries.
+- **jq pipeline complexity:** Multiple jq merges for dedup + log lookup. Mitigation: keep each jq expression simple and tested independently.
+- **settings.local.json absence:** Won't exist in downstream nodes or fresh clones. Script must skip gracefully — already planned in Step 2.
+- **Real settings validation:** Must test against the actual `settings.json` + `settings.local.json` to catch pattern edge cases before shipping. Run against real files as a final sanity check.
 
 ## Definition of Done
 
 - [ ] All 11 acceptance criteria from spec pass
-- [ ] All existing tests still pass (144 + new tests)
-- [ ] No syntax errors (`bash -n scripts/docs-check.sh`)
+- [ ] All existing tests still pass (222 + new)
+- [ ] No syntax errors (`bash -n scripts/permissions-audit.sh`)
 - [ ] Code reviewed (run /review)
-- [ ] README manifest verified (`bash scripts/manifest-check.sh check README.md`)
+- [ ] GUIDE.md and CLAUDE.md updated
+- [ ] Linear issue ZWR-11 status updated

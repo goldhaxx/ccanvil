@@ -510,6 +510,33 @@ flowchart TD
     style USER fill:#e3f2fd,stroke:#333,stroke-width:2px
 ```
 
+### Sync Hardening: Guards and Dry-Run
+
+Every destructive operation in the sync system is self-validating. Guards verify preconditions immediately before execution; `--dry-run` previews changes without applying them.
+
+#### Guards (exit code 3)
+
+| Guard | Trigger | What it prevents |
+|-------|---------|-----------------|
+| **jq validation** | After every lockfile mutation | Corrupt JSON replacing valid lockfile |
+| **Hash re-check** | `pull-apply` with `PLAN_LOCAL_HASH` env var | File modified between plan and apply phases |
+| **Status re-check** | `pull-apply delete` with `PLAN_LOCAL_STATUS` env var | Deleting file whose status changed since plan |
+| **Commit verification** | `pull-finalize`, `push-finalize` | Silent commit failure (HEAD unchanged) |
+
+All guards produce: `GUARD_FAIL: <operation> on <file>: <reason>` on stderr, exit code 3.
+
+#### Dry-run mode
+
+| Command | Flag | What it shows |
+|---------|------|--------------|
+| `pull-auto --dry-run` | `--dry-run` | Files that would be copied |
+| `pull-apply <file> <action> --dry-run` | `--dry-run` | Action that would be applied |
+| `pull-finalize --dry-run` | `--dry-run` | Commit message and file list |
+| `push-apply <file> --dry-run` | `--dry-run` | File that would be pushed |
+| `push-finalize <msg> --dry-run` | `--dry-run` | Commit message |
+
+Dry-run output uses prefix: `DRY-RUN: would <verb> <file>`. Pre-check still runs (cleanness verification is not skipped).
+
 ### Promote and Demote
 
 Demote is fully deterministic. Promote has one judgment call: checking for project-specific content.
@@ -611,10 +638,12 @@ When adding a new rule, command, agent, skill, or template to the scaffold, **al
 
 | Command | Phase | What it does | Files affected |
 |---------|-------|-------------|----------------|
-| *"Describe feature"* | Spec | Triggers spec-writer agent | Writes `docs/spec.md` |
+| *"Describe feature"* | Spec | Triggers spec-writer agent | Writes `docs/specs/<id>.md` |
 | `/plan` | Plan | Creates ordered TDD steps from spec | Writes `docs/plan.md` |
 | *"Start building"* | Build | Enters TDD cycle | Source + test files |
+| `/commit` | Build | Stages, generates conventional commit, runs tests | Git history |
 | `/review` | Review | Spawns code-reviewer sub-agent | None (read-only) |
+| `/pr` | Ship | Creates draft PR with evaluation gates | GitHub PR |
 
 ### Session Management Commands
 
@@ -641,9 +670,26 @@ When adding a new rule, command, agent, skill, or template to the scaffold, **al
 
 | Command | What it does |
 |---------|-------------|
-| `/scaffold-audit` | Analyzes scaffold for stochastic-to-deterministic improvement opportunities. Calls `manifest-check.sh check` for deterministic README verification. |
+| `/scaffold-audit` | Analyzes scaffold for stochastic-to-deterministic improvement opportunities. Calls `manifest-check.sh check` for deterministic README verification. Includes permissions audit when `permissions-audit.sh` exists. |
 | `/fix-certs` | Diagnoses and repairs Cloudflare WARP TLS certificate issues |
 | `/init` | Initializes a new project from the scaffold (global command) |
+
+### Permissions Audit Scripts
+
+| Command | What it does |
+|---------|-------------|
+| `permissions-audit.sh check [--settings-dir DIR] [--log FILE]` | Classify all Bash permission entries as DANGER/UNREVIEWED/REVIEWED → JSON |
+| `permissions-audit.sh check --text [--verbose]` | Human-readable grouped report (DANGER, UNREVIEWED, optionally REVIEWED) |
+| `permissions-audit.sh init [--settings-dir DIR] [--log FILE]` | Create/update decision log with stubs for unreviewed entries |
+
+### Multi-Spec Lifecycle Scripts
+
+| Command | What it does |
+|---------|-------------|
+| `docs-check.sh list-specs [docs-dir]` | List all specs in `docs/specs/` with feature_id, status, created → JSON array |
+| `docs-check.sh activate <feature-id> [docs-dir]` | Create branch `claude/<type>/<id>`, copy spec to `docs/spec.md`, set status to In Progress |
+| `docs-check.sh complete <feature-id> [docs-dir]` | Set spec status to Complete, clear `docs/assumptions.md` |
+| `docs-check.sh config-get <key> [project-dir]` | Read feature toggle from `.claude/scaffold.json` (returns `true`/`false`) |
 
 ### Manifest Verification Scripts
 
@@ -923,6 +969,45 @@ Every scaffold feature traces back to transformer architecture research. This ta
 | SCAFFOLD_FRAMEWORK.md protection | Research source material is foundational — changes only under paradigm shifts, preserving the reasoning behind every design decision. |
 | Manifest verification with lockfile | Hash comparison auto-verifies unchanged files (zero Claude involvement). Changed files get a diff (not full content) — Claude judges "does this diff affect the description?" rather than re-reading 200-line files. Untracked files get identity extraction (headers/frontmatter), not full reads. Converts N full-file reads into N hash comparisons + K diffs where K << N. |
 | Docs lifecycle linking | Hash-chain validation between spec→plan→checkpoint. Metadata changes (status, timestamps) don't invalidate hashes — only body content changes do. State machine maps document state to next action deterministically. `/catchup` surfaces staleness before reading content, preventing wasted sessions on outdated context. |
+| Multi-spec backlog | Specs live in `docs/specs/` with lifecycle states. One active spec at a time (enforced by `activate`). Branch = isolation boundary. Git already solves parallel workstreams — the scaffold just formalizes the mapping. |
+| Branch-based feature lifecycle | Branch naming convention (`claude/<type>/<name>`) enables programmatic identification. Draft PRs with mandatory human review (universal consensus across 12 teams). `/commit` and `/pr` commands enforce discipline without manual git orchestration. |
+
+---
+
+## Parallel Agent Sessions
+
+Claude Code supports running multiple agents in parallel via git worktrees (`claude --worktree` or `-w`). The scaffold is compatible with this workflow.
+
+### How it works
+
+- **Worktrees share `.git`:** All scaffold configuration (CLAUDE.md, rules, hooks, settings.json) is inherited automatically. No duplication needed.
+- **Branch-local docs:** `docs/spec.md`, `docs/plan.md`, `docs/checkpoint.md` are branch-specific. Each worktree operates on its own branch, so parallel agents get isolated doc state.
+- **Lockfile is shared:** `.claude/scaffold.lock` lives in `.git`-tracked state. Avoid running `/scaffold-pull` from multiple worktrees simultaneously.
+
+### Usage pattern
+
+```bash
+# Start a new agent on a feature branch in a worktree
+claude --worktree feature-name
+
+# Or create a worktree manually and launch Claude in it
+git worktree add .claude/worktrees/auth-system claude/feat/auth-system
+cd .claude/worktrees/auth-system
+claude
+```
+
+### What to watch for
+
+| Concern | Mitigation |
+|---------|-----------|
+| Port conflicts | Each worktree may try to start dev servers on the same port. Use different ports per worktree. |
+| Database locks | Multiple agents writing to the same SQLite/local DB will conflict. Use separate DB files or a shared server. |
+| File locks | Lock files (`.lock`, `*.pid`) in the repo root are shared. Ensure they're branch-specific or gitignored. |
+| Scaffold sync | Don't run `/scaffold-pull` from multiple worktrees simultaneously — lockfile mutations will conflict. |
+
+### `.gitignore` and `.claudeignore`
+
+Both files include `.claude/worktrees/` to prevent worktree contents from being tracked or loaded into context.
 
 <!-- NODE-SPECIFIC-START -->
 <!-- Everything above is managed by the scaffold hub and updated via /scaffold-pull. -->

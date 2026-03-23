@@ -2,7 +2,7 @@
 
 > Feature: permissions-audit
 > Created: 1774218765
-> Status: Backlogged
+> Status: Complete
 
 ## Summary
 

@@ -357,6 +357,14 @@ JSON
 # Step 9: scaffold.json integrations schema + scaffold-sync tracking (AC-8)
 # =========================================================================
 
+# =========================================================================
+# Step 10: Wire /catchup command (AC-7)
+# =========================================================================
+
+@test "catchup.md references operations.sh resolve backlog.list" {
+  grep -q "operations.sh resolve backlog.list" "$BATS_TEST_DIRNAME/../.claude/commands/catchup.md"
+}
+
 @test "scaffold.json with integrations key passes jq validation" {
   local REAL_CONFIG="$BATS_TEST_DIRNAME/../.claude/scaffold.json"
   jq empty "$REAL_CONFIG"

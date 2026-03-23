@@ -314,6 +314,25 @@ JSON
   echo "$output" | jq -e '.mechanism == "webhook"'
 }
 
+@test "unknown mechanism with sdk type passes through" {
+  mkdir -p "$PROJECT/.claude"
+  cat > "$PROJECT/.claude/scaffold.json" <<'JSON'
+{
+  "integrations": {
+    "providers": {
+      "agent": { "mechanism": "sdk", "runtime": "node" }
+    },
+    "routing": {
+      "review": "agent"
+    }
+  }
+}
+JSON
+  run bash "$SCRIPT" resolve review.run --project-dir "$PROJECT"
+  [ "$status" -eq 0 ]
+  echo "$output" | jq -e '.mechanism == "sdk"'
+}
+
 @test "unknown mechanism with api type passes through" {
   mkdir -p "$PROJECT/.claude"
   cat > "$PROJECT/.claude/scaffold.json" <<'JSON'
@@ -332,4 +351,17 @@ JSON
   [ "$status" -eq 0 ]
   echo "$output" | jq -e '.mechanism == "api"'
   echo "$output" | jq -e '.provider == "jira"'
+}
+
+# =========================================================================
+# Step 9: scaffold.json integrations schema + scaffold-sync tracking (AC-8)
+# =========================================================================
+
+@test "scaffold.json with integrations key passes jq validation" {
+  local REAL_CONFIG="$BATS_TEST_DIRNAME/../.claude/scaffold.json"
+  jq empty "$REAL_CONFIG"
+}
+
+@test "scaffold.json is tracked in scaffold-sync TRACKED_PATTERNS" {
+  grep -q 'scaffold.json' "$BATS_TEST_DIRNAME/../scripts/scaffold-sync.sh"
 }

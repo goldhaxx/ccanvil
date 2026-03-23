@@ -365,6 +365,18 @@ JSON
   grep -q "operations.sh resolve backlog.list" "$BATS_TEST_DIRNAME/../.claude/commands/catchup.md"
 }
 
+# =========================================================================
+# Step 11: Documentation (CLAUDE.md, GUIDE.md)
+# =========================================================================
+
+@test "CLAUDE.md documents operations.sh" {
+  grep -q "operations.sh" "$BATS_TEST_DIRNAME/../CLAUDE.md"
+}
+
+@test "GUIDE.md documents operations.sh" {
+  grep -q "operations.sh" "$BATS_TEST_DIRNAME/../GUIDE.md"
+}
+
 @test "scaffold.json with integrations key passes jq validation" {
   local REAL_CONFIG="$BATS_TEST_DIRNAME/../.claude/scaffold.json"
   jq empty "$REAL_CONFIG"

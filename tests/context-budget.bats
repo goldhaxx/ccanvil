@@ -370,3 +370,54 @@ teardown() {
   line_warnings=$(echo "$output" | jq '[.warnings[] | select(.type == "line_count")] | length')
   [ "$line_warnings" -eq 0 ]
 }
+
+
+# =========================================================================
+# Step 7: Text output mode (AC-4)
+# =========================================================================
+
+@test "--text outputs human-readable table header" {
+  run bash "$SCRIPT" check --project-dir "$FIXTURE" $NO_GLOBAL --text
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"File"* ]]
+  [[ "$output" == *"Lines"* ]]
+  [[ "$output" == *"Tokens"* ]]
+}
+
+@test "--text shows status line" {
+  run bash "$SCRIPT" check --project-dir "$FIXTURE" $NO_GLOBAL --text
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"HEALTHY"* ]]
+}
+
+@test "--text shows context window info" {
+  run bash "$SCRIPT" check --project-dir "$FIXTURE" $NO_GLOBAL --text
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"200000"* ]] || [[ "$output" == *"200,000"* ]] || [[ "$output" == *"200k"* ]]
+}
+
+@test "--text shows total row" {
+  run bash "$SCRIPT" check --project-dir "$FIXTURE" $NO_GLOBAL --text
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"TOTAL"* ]] || [[ "$output" == *"Total"* ]]
+}
+
+@test "--text with --model shows model info" {
+  run bash "$SCRIPT" check --project-dir "$FIXTURE" $NO_GLOBAL --text --model 'claude-opus-4-6[1m]'
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"claude-opus-4-6"* ]]
+  [[ "$output" == *"1000000"* ]] || [[ "$output" == *"1,000,000"* ]]
+}
+
+@test "--text WARNING status with appropriate exit code" {
+  run bash "$SCRIPT" check --project-dir "$FIXTURE" $NO_GLOBAL --text --budget 15
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"WARNING"* ]]
+}
+
+@test "--text does not output JSON" {
+  run bash "$SCRIPT" check --project-dir "$FIXTURE" $NO_GLOBAL --text
+  [ "$status" -eq 0 ]
+  # Should NOT be valid JSON
+  ! echo "$output" | jq -e '.' >/dev/null 2>&1
+}

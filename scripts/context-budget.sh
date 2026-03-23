@@ -205,19 +205,88 @@ cmd_check() {
     exit_code=0
   fi
 
-  jq -n --argjson files "$files_json" \
-    --argjson tl "$total_lines" --argjson tc "$total_chars" --argjson tt "$total_tokens" \
-    --arg bp "$budget_percent" --arg st "$status_label" \
-    --arg model "$model" --argjson cw "$context_window" --argjson bc "$budget_ceiling" --arg src "$source" \
-    --argjson warnings "$warnings_json" \
-    '{
-      files: $files,
-      totals: {lines: $tl, chars: $tc, estimated_tokens: $tt, budget_percent: ($bp | tonumber), status: $st},
-      context: {model: (if $model == "null" then null else $model end), context_window: $cw, budget_ceiling: $bc, source: $src},
-      warnings: $warnings
-    }'
+  # Output
+  if [[ "$TEXT_MODE" == "true" ]]; then
+    print_text_report "$files_json" "$total_lines" "$total_tokens" "$budget_ceiling" \
+      "$budget_percent" "$status_label" "$context_window" "$model" "$warnings_json"
+  else
+    jq -n --argjson files "$files_json" \
+      --argjson tl "$total_lines" --argjson tc "$total_chars" --argjson tt "$total_tokens" \
+      --arg bp "$budget_percent" --arg st "$status_label" \
+      --arg model "$model" --argjson cw "$context_window" --argjson bc "$budget_ceiling" --arg src "$source" \
+      --argjson warnings "$warnings_json" \
+      '{
+        files: $files,
+        totals: {lines: $tl, chars: $tc, estimated_tokens: $tt, budget_percent: ($bp | tonumber), status: $st},
+        context: {model: (if $model == "null" then null else $model end), context_window: $cw, budget_ceiling: $bc, source: $src},
+        warnings: $warnings
+      }'
+  fi
 
   return "$exit_code"
+}
+
+# ---------------------------------------------------------------------------
+# Text output
+# ---------------------------------------------------------------------------
+
+print_text_report() {
+  local files_json="$1"
+  local total_lines="$2"
+  local total_tokens="$3"
+  local budget_ceiling="$4"
+  local budget_percent="$5"
+  local status_label="$6"
+  local context_window="$7"
+  local model="$8"
+  local warnings_json="$9"
+
+  echo "Context Budget Report"
+  echo "====================="
+  echo ""
+
+  # Context info line
+  if [[ "$model" != "null" ]]; then
+    echo "Model: $model  |  Context window: $context_window tokens  |  Budget ceiling: $budget_ceiling tokens"
+  else
+    echo "Context window: $context_window tokens  |  Budget ceiling: $budget_ceiling tokens"
+  fi
+  echo ""
+
+  # Table header
+  printf "%-50s %8s %8s %8s\n" "File" "Lines" "Tokens" "% Budget"
+  printf "%-50s %8s %8s %8s\n" "----" "-----" "------" "--------"
+
+  # File rows
+  echo "$files_json" | jq -r '.[] | "\(.path)\t\(.lines)\t\(.estimated_tokens)"' | while IFS=$'\t' read -r path lines tokens; do
+    # Shorten path for display — keep .claude/ prefix for rules/settings, mark global
+    local display_path
+    if [[ "$path" == *"/.claude/CLAUDE.md" ]] || [[ "$path" == "$HOME/.claude/CLAUDE.md" ]] || [[ "$path" == *"/global-claude"* ]]; then
+      display_path="~/.claude/CLAUDE.md (global)"
+    else
+      display_path=$(echo "$path" | sed "s|.*\(/\.claude/\)|.claude/|; s|.*/\([^/]*\)$|\1|" | head -c 50)
+    fi
+    local pct
+    pct=$(awk "BEGIN {printf \"%.1f\", ($tokens / $budget_ceiling) * 100}")
+    printf "%-50s %8s %8s %7s%%\n" "$display_path" "$lines" "$tokens" "$pct"
+  done
+
+  # Total row
+  printf "%-50s %8s %8s %8s\n" "" "-----" "------" "--------"
+  printf "%-50s %8s %8s %7s%%\n" "TOTAL" "$total_lines" "$total_tokens" "$budget_percent"
+  echo ""
+
+  # Status
+  echo "Status: $status_label ($budget_percent% of $budget_ceiling token budget)"
+
+  # Warnings
+  local warning_count
+  warning_count=$(echo "$warnings_json" | jq 'length')
+  if [[ "$warning_count" -gt 0 ]]; then
+    echo ""
+    echo "Warnings:"
+    echo "$warnings_json" | jq -r '.[] | "  - \(.message)"'
+  fi
 }
 
 # ---------------------------------------------------------------------------

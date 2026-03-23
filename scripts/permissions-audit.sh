@@ -169,6 +169,12 @@ cmd_check() {
     })
   ')
 
+  # Load permissions log if available
+  local log_data="{}"
+  if [[ -f "$LOG_FILE" ]]; then
+    log_data=$(jq '.entries // {}' "$LOG_FILE")
+  fi
+
   # Classify each entry
   local classified danger_count=0 unreviewed_count=0 reviewed_count=0
   classified="[]"
@@ -181,20 +187,38 @@ cmd_check() {
     perm=$(echo "$all_entries" | jq -r ".[$i].permission")
     sources=$(echo "$all_entries" | jq -c ".[$i].source")
 
-    local inner matched_pattern status
+    local inner matched_pattern
     inner=$(strip_bash_wrapper "$perm")
     matched_pattern=$(check_danger "$inner" || true)
 
     if [[ -n "$matched_pattern" ]]; then
-      status="DANGER"
+      # DANGER takes precedence regardless of log status
       danger_count=$((danger_count + 1))
       classified=$(echo "$classified" | jq --arg p "$perm" --argjson s "$sources" --arg mp "$matched_pattern" \
         '. + [{permission: $p, source: $s, status: "DANGER", matched_pattern: $mp}]')
     else
-      status="UNREVIEWED"
-      unreviewed_count=$((unreviewed_count + 1))
-      classified=$(echo "$classified" | jq --arg p "$perm" --argjson s "$sources" \
-        '. + [{permission: $p, source: $s, status: "UNREVIEWED"}]')
+      # Check log for review status
+      local is_reviewed
+      is_reviewed=$(echo "$log_data" | jq --arg p "$perm" '
+        .[$p] // null |
+        if . == null then false
+        elif .risk == "" or .risk == "TODO" then false
+        elif .rationale == "" or .rationale == "TODO" then false
+        elif .efficiency_justification == "" or .efficiency_justification == "TODO" then false
+        elif .reviewer == "" or .reviewer == "TODO" then false
+        else true
+        end
+      ')
+
+      if [[ "$is_reviewed" == "true" ]]; then
+        reviewed_count=$((reviewed_count + 1))
+        classified=$(echo "$classified" | jq --arg p "$perm" --argjson s "$sources" \
+          '. + [{permission: $p, source: $s, status: "REVIEWED"}]')
+      else
+        unreviewed_count=$((unreviewed_count + 1))
+        classified=$(echo "$classified" | jq --arg p "$perm" --argjson s "$sources" \
+          '. + [{permission: $p, source: $s, status: "UNREVIEWED"}]')
+      fi
     fi
   done
 

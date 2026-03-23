@@ -304,3 +304,144 @@ EOF
   run bash "$SCRIPT" check --settings-dir "$FIXTURE"
   echo "$output" | jq -e '.entries[0].matched_pattern'
 }
+
+
+# =========================================================================
+# Step 4: Log-based status classification (AC-4, AC-6)
+# =========================================================================
+
+@test "fully reviewed entry in log → REVIEWED status" {
+  cat > "$FIXTURE/settings.json" <<'EOF'
+{
+  "permissions": {
+    "allow": ["Bash(git status:*)"]
+  }
+}
+EOF
+  cat > "$FIXTURE/permissions-log.json" <<'EOF'
+{
+  "entries": {
+    "Bash(git status:*)": {
+      "risk": "LOW",
+      "rationale": "Read-only git command",
+      "efficiency_justification": "Used constantly during development",
+      "reviewer": "zach",
+      "reviewed_epoch": 1774200000
+    }
+  }
+}
+EOF
+
+  run bash "$SCRIPT" check --settings-dir "$FIXTURE" --log "$FIXTURE/permissions-log.json"
+  [ "$status" -eq 0 ]
+  echo "$output" | jq -e '.entries[0].status == "REVIEWED"'
+  echo "$output" | jq -e '.reviewed == 1'
+  echo "$output" | jq -e '.unreviewed == 0'
+}
+
+@test "stub entry with TODO rationale → UNREVIEWED" {
+  cat > "$FIXTURE/settings.json" <<'EOF'
+{
+  "permissions": {
+    "allow": ["Bash(git status:*)"]
+  }
+}
+EOF
+  cat > "$FIXTURE/permissions-log.json" <<'EOF'
+{
+  "entries": {
+    "Bash(git status:*)": {
+      "risk": "",
+      "rationale": "TODO",
+      "efficiency_justification": "",
+      "reviewer": "",
+      "reviewed_epoch": 0
+    }
+  }
+}
+EOF
+
+  run bash "$SCRIPT" check --settings-dir "$FIXTURE" --log "$FIXTURE/permissions-log.json"
+  [ "$status" -eq 1 ]
+  echo "$output" | jq -e '.entries[0].status == "UNREVIEWED"'
+}
+
+@test "entry not in log → UNREVIEWED" {
+  cat > "$FIXTURE/settings.json" <<'EOF'
+{
+  "permissions": {
+    "allow": ["Bash(git status:*)"]
+  }
+}
+EOF
+  cat > "$FIXTURE/permissions-log.json" <<'EOF'
+{
+  "entries": {}
+}
+EOF
+
+  run bash "$SCRIPT" check --settings-dir "$FIXTURE" --log "$FIXTURE/permissions-log.json"
+  [ "$status" -eq 1 ]
+  echo "$output" | jq -e '.entries[0].status == "UNREVIEWED"'
+}
+
+@test "DANGER overrides REVIEWED log status" {
+  cat > "$FIXTURE/settings.json" <<'EOF'
+{
+  "permissions": {
+    "allow": ["Bash(echo:*)"]
+  }
+}
+EOF
+  cat > "$FIXTURE/permissions-log.json" <<'EOF'
+{
+  "entries": {
+    "Bash(echo:*)": {
+      "risk": "HIGH",
+      "rationale": "Needed for output",
+      "efficiency_justification": "Used in scripts",
+      "reviewer": "zach",
+      "reviewed_epoch": 1774200000
+    }
+  }
+}
+EOF
+
+  run bash "$SCRIPT" check --settings-dir "$FIXTURE" --log "$FIXTURE/permissions-log.json"
+  [ "$status" -eq 2 ]
+  echo "$output" | jq -e '.entries[0].status == "DANGER"'
+  echo "$output" | jq -e '.danger == 1'
+}
+
+@test "mixed statuses counted correctly" {
+  cat > "$FIXTURE/settings.json" <<'EOF'
+{
+  "permissions": {
+    "allow": [
+      "Bash(git status:*)",
+      "Bash(ls:*)",
+      "Bash(echo:*)"
+    ]
+  }
+}
+EOF
+  cat > "$FIXTURE/permissions-log.json" <<'EOF'
+{
+  "entries": {
+    "Bash(git status:*)": {
+      "risk": "LOW",
+      "rationale": "Read-only",
+      "efficiency_justification": "Constant use",
+      "reviewer": "zach",
+      "reviewed_epoch": 1774200000
+    }
+  }
+}
+EOF
+
+  run bash "$SCRIPT" check --settings-dir "$FIXTURE" --log "$FIXTURE/permissions-log.json"
+  [ "$status" -eq 2 ]
+  echo "$output" | jq -e '.reviewed == 1'
+  echo "$output" | jq -e '.unreviewed == 1'
+  echo "$output" | jq -e '.danger == 1'
+}

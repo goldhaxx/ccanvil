@@ -157,3 +157,55 @@ JSON
   echo "$output" | jq -e '.invocation.params.team == "Test Team"'
   echo "$output" | jq -e '.contract.output | length > 0'
 }
+
+# =========================================================================
+# Step 5: Missing provider error + partial routing fallback (AC-3, AC-4)
+# =========================================================================
+
+@test "missing provider exits 1 with error message (AC-3)" {
+  mkdir -p "$PROJECT/.claude"
+  cat > "$PROJECT/.claude/scaffold.json" <<'JSON'
+{
+  "integrations": {
+    "providers": {},
+    "routing": {
+      "backlog": "linear"
+    }
+  }
+}
+JSON
+  run bash "$SCRIPT" resolve backlog.list --project-dir "$PROJECT"
+  [ "$status" -eq 1 ]
+  echo "$output" | grep -q 'ERROR: provider "linear" is configured for backlog but has no entry in integrations.providers'
+}
+
+@test "partial routing: unrouted groups fall back to local (AC-4)" {
+  mkdir -p "$PROJECT/.claude"
+  cat > "$PROJECT/.claude/scaffold.json" <<'JSON'
+{
+  "integrations": {
+    "providers": {
+      "linear": { "mechanism": "mcp", "project": "P", "team": "T" }
+    },
+    "routing": {
+      "backlog": "linear"
+    }
+  }
+}
+JSON
+  # spec.read should still be local
+  run bash "$SCRIPT" resolve spec.read --project-dir "$PROJECT"
+  [ "$status" -eq 0 ]
+  echo "$output" | jq -e '.provider == "local"'
+  echo "$output" | jq -e '.mechanism == "bash"'
+
+  # plan.read should still be local
+  run bash "$SCRIPT" resolve plan.read --project-dir "$PROJECT"
+  [ "$status" -eq 0 ]
+  echo "$output" | jq -e '.provider == "local"'
+
+  # backlog.list should be linear
+  run bash "$SCRIPT" resolve backlog.list --project-dir "$PROJECT"
+  [ "$status" -eq 0 ]
+  echo "$output" | jq -e '.provider == "linear"'
+}

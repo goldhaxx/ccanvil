@@ -2,32 +2,49 @@
 
 # Checkpoint
 
-> Feature: sync-hardening
-> Last updated: 1774217446
-> Plan hash: 170ec2dc
-> Session objective: Implement sync hardening + triage backlog items
-<!-- Reminder: if no plan exists yet, run /plan before checkpointing (plan before checkpoint). -->
+> Feature: feature-lifecycle
+> Last updated: 1774229091
+> Plan hash: e3381a95
+> Session objective: Build branch-based feature lifecycle (ZWR-10) + establish Linear tracking + research agentic git workflows
 
 ## Accomplished
 
-### Sync hardening (complete)
-- **All 15 ACs implemented** across 10 TDD steps, 12 commits, 188 tests passing.
-- Guards: `guard_fail` (exit 3), `safe_lock_mv` (jq validation), hash re-check before cp, status re-check before rm, commit verification.
-- Dry-run: `--dry-run` on pull-auto, pull-apply, pull-finalize, push-apply, push-finalize.
-- README + GUIDE updated with sync hardening docs.
+### Feature lifecycle (ZWR-10, complete)
+- **All 24 ACs implemented** across 12 TDD steps, 34 new tests (222 total), all passing.
+- `docs-check.sh` extended: `list-specs`, `activate`, `complete`, `config-get` commands; `validate`/`recommend` adapted for multi-spec.
+- Hooks: `branch-name-lint.sh` (warn on non-convention branches), `commit-msg-lint.sh` (warn on non-conventional commits). Both PostToolUse, exit 0 always.
+- Commands: `/commit` (test → stage → conventional message → co-authored-by), `/pr` (evaluation gates → optional critic review → draft PR).
+- Scaffold config: `.claude/scaffold.json` with feature toggles (`pr_review`), node-only, defaults template.
+- Assumptions tracking: `docs/assumptions.md` template, included in PR body, cleared on `complete`.
+- Worktree compatibility: `.gitignore`/`.claudeignore` entries, GUIDE.md parallel sessions docs, path resolution tested.
+- GUIDE.md + CLAUDE.md updated with new commands, architecture, tables.
 
-### Housekeeping
-- Whitelisted `bats`, `bash -n`, `echo` in settings.json permissions.
-- Researched and triaged 3 backlog items (see below).
-- Cleaned up memory: trimmed completed project memories, reorganized index by category.
+### Settings.json hardening (ZWR-13, complete)
+- Established read-only permission principle: auto-allow reads, require approval for mutations.
+- Removed 7 dangerous entries (cat, find, env, echo, sort, git branch, git tag).
+- Split `Bash(git:*)` into individual read-only git commands.
+- Identified compound command issue (`;`/`&&` bypass allow-list matching).
+
+### Permissions audit spec (ZWR-11, backlogged)
+- Spec written at `docs/specs/permissions-audit.md` with 11 ACs.
+- Blocked by ZWR-10 (now complete — ready to plan).
+
+### Research
+- Deep research on agentic git workflows: `docs/research/agentic-git-workflows.md` — 25+ sources, 12 teams.
+- Key findings: worktrees universal, agent-prefixed branches, draft PRs mandatory, deterministic/stochastic separation validates our approach.
+
+### Linear setup
+- Project "Claude Code Scaffold" created at https://linear.app/zwright/project/claude-code-scaffold-a2b015bd5fb5
+- 10 issues created (ZWR-10 through ZWR-21), labels (scaffold, has-spec, needs-research).
+- Completed features backfilled (ZWR-13 through ZWR-18).
 
 ## Current State
 
 - **Branch:** main
-- **Tests:** 188/188 passing
+- **Tests:** 222/222 passing
 - **Uncommitted changes:** This checkpoint only
 - **Build status:** Clean
-- **Docs lifecycle:** Aligned (sync-hardening spec = Complete)
+- **Docs lifecycle:** feature-lifecycle spec Complete
 
 ## Blocked On
 
@@ -35,29 +52,35 @@
 
 ## Next Steps
 
-### Backlog (priority order)
+### Next session: Backlog review + Linear integration planning
+Zach requested a dedicated planning session to:
+1. **Review full backlog** — prioritize across all ZWR issues with Linear as source of truth
+2. **Resolve Linear's role in the lifecycle** — how does Linear fit with `docs/specs/`, `activate`, `/pr`? Does modular tool integration (ZWR-19) need to come before other backlog items?
+3. **Adjust to the new lifecycle** — first real use of `activate` → branch → `/commit` → `/pr` flow
+4. **Deep discussion** — not implementation. Planning and alignment only.
 
-1. **Context budget measurement** (HIGH) — Script to count tokens in always-loaded files, report budget utilization %, warn on threshold. Currently ~4,500 tokens always-loaded with no measurement. Integrates into /scaffold-audit. Key concern: as nodes grow, scaffold content competes for ~150-200 instruction slots.
+### Backlog (in Linear, priority order)
+- **ZWR-11** Permissions security audit (has-spec, was blocked by ZWR-10)
+- **ZWR-12** Context budget measurement
+- **ZWR-19** Modular tool integration layer (Linear, GitHub, etc.)
+- **ZWR-20** Workflow engine / deterministic state machine
+- **ZWR-21** GitHub Agentic Workflows integration
 
-2. **Git workflow maturity** — Commit message validation hook (pre-commit), `/commit` command, `/pr` command, branch naming enforcement. Gap: conventions are documented but not enforced deterministically.
-
-3. **Doc archival lifecycle** — Unique doc identity + lifespan + archive on completion. Missing doc = fresh start. Needs deep research on archive structure, sync interaction, .claudeignore implications.
-
-### Operational
-- Sync latest changes to downstream (fucina) — includes sync hardening + determinism enforcement.
+### Open question
+How should Linear integrate with the lifecycle? Today: specs live in `docs/specs/`, Linear tracks the backlog separately. Risk of drift. Options:
+- Linear is source of truth for backlog priority; specs remain in git for deterministic validation
+- Linear issues link to spec files; `/activate` updates Linear status
+- Full integration waits for ZWR-19 (modular tool layer)
 
 ## Determinism Review
 
-- **operations_reviewed:** 8
+- **operations_reviewed:** 12
 - **candidates_found:** 0
-- All implementation followed TDD. No manual `cp`, `jq`, `shasum`, or `git -C` improvised.
-- Research was delegated to sub-agents (context budget analysis, git workflow gaps).
-- Settings.json edit was a direct targeted change, not improvised multi-step.
+- All implementation followed TDD (red → green → refactor → commit pattern).
+- Script commands are deterministic (list-specs, activate, complete, config-get).
+- Hooks are deterministic (regex matching on command strings).
+- Research was delegated to sub-agent (isolated context).
+- Settings.json edits were direct targeted changes.
+- Linear operations used MCP tools (deterministic API calls).
+- No manual `cp`, `jq`, `shasum`, or `git -C` improvised outside scripts.
 - No candidates this session.
-
-## Context Notes
-
-- `set -e` interacts with jq guards: jq failure on corrupt input triggers `set -e` before `safe_lock_mv` can catch it. Solution: `|| true` on every jq invocation, validation in `safe_lock_mv` catches empty/invalid output.
-- `jq empty` returns 0 on empty file — guard checks `[[ ! -s "$tmp" ]]` in addition to `jq empty`.
-- Guard env vars (`PLAN_LOCAL_HASH`, `PLAN_LOCAL_STATUS`) are opt-in — `/scaffold-pull` command should set them from plan JSON.
-- Context budget research found: always-loaded ~4,500 tokens, on-demand ~6,515 tokens, SCAFFOLD_FRAMEWORK.md says degradation starts at 3,000 tokens.

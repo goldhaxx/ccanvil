@@ -64,7 +64,8 @@ Each criterion is independently testable. Binary pass/fail.
 ## Out of Scope
 
 - Linear adapters for `spec`, `plan`, `checkpoint`, `status`, `pr`, `review` operation groups
-- Notion adapter, GitHub adapter
+- Notion adapter, GitHub adapter, Confluence adapter
+- Multi-destination routing (writing to multiple providers simultaneously — see Design Consideration below)
 - Wiring commands other than `/catchup`
 - Auto-detection of available MCP tools from `settings.local.json`
 - Migration tooling (moving data between providers)
@@ -73,6 +74,27 @@ Each criterion is independently testable. Binary pass/fail.
 - Webhook triggers — Phase 3
 - Plugin packaging — Phase 4
 - GitHub Agentic Workflows integration — Phase 5
+
+## Design Consideration: Multi-Destination Routing and Document Granularity
+
+> This section captures a design direction that Phase 1 must not preclude, even though it is out of scope for implementation.
+
+**Per-document-type routing:** The operations taxonomy already separates `spec`, `plan`, and `checkpoint` as distinct operation groups. This granularity exists specifically so each document type can route to a different provider: specs to Linear, plans to Confluence, checkpoints to local. The Phase 1 config schema supports this natively via Level 2 routing.
+
+**Multi-destination routing:** A user may want a spec to exist in Linear (for team visibility) AND locally (for deterministic validation via `docs-check.sh`). This is not "either/or" — it's "both." The local copy serves as the scaffold's validation layer (hash-based lifecycle state machine, spec↔plan alignment checks). The external copy serves as the collaboration layer.
+
+The likely pattern:
+```json
+"routing": {
+  "spec": ["linear", "local"],
+  "plan": ["confluence", "local"],
+  "checkpoint": "local"
+}
+```
+
+Where a routing value is either a string (single provider) or an array (multi-destination, written in order). The first entry is the "primary" (source of truth for reads), all entries receive writes.
+
+**Why this matters for Phase 1:** The `resolve` output schema must not assume a single provider per operation. Phase 1 returns a single resolution object (since only single-destination is implemented), but the schema should not break if a future phase returns an array. The simplest guard: Phase 1 always returns a single object, future phases may return `[{...}, {...}]` for multi-destination operations.
 
 ## Implementation Notes
 

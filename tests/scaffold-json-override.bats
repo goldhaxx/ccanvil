@@ -136,6 +136,18 @@ EOF
   [ "$output" = "false" ]
 }
 
+# =========================================================================
+# Step 6: Gitignore and claudeignore (AC-9, AC-10)
+# =========================================================================
+
+@test "AC-9: scaffold.local.json is in .gitignore" {
+  grep -q 'scaffold.local.json' "$BATS_TEST_DIRNAME/../.gitignore"
+}
+
+@test "AC-10: scaffold.local.json is in .claudeignore" {
+  grep -q 'scaffold.local.json' "$BATS_TEST_DIRNAME/../.claudeignore"
+}
+
 @test "AC-11: deep merge preserves nested keys from both sides" {
   cat > "$PROJECT/.claude/scaffold.json" <<'EOF'
 {"integrations":{"providers":{"github":{"mechanism":"cli"}}}}

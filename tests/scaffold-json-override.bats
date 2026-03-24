@@ -148,6 +148,49 @@ EOF
   grep -q 'scaffold.local.json' "$BATS_TEST_DIRNAME/../.claudeignore"
 }
 
+# =========================================================================
+# Step 7: Pull safety — scaffold.json stays clean when overrides in local (AC-8)
+# =========================================================================
+
+@test "AC-8: pull-plan classifies scaffold.json as auto-update when local is clean" {
+  SYNC_SCRIPT="$BATS_TEST_DIRNAME/../scripts/scaffold-sync.sh"
+
+  # Set up a "hub" scaffold with scaffold.json
+  HUB=$(mktemp -d)
+  mkdir -p "$HUB/.claude"
+  cat > "$HUB/.claude/scaffold.json" <<'EOF'
+{"features":{"pr_review":false}}
+EOF
+
+  # Set up a "node" project — init lockfile from hub
+  NODE=$(mktemp -d)
+  cd "$NODE"
+  git init -q
+  mkdir -p .claude
+  cp "$HUB/.claude/scaffold.json" .claude/scaffold.json
+  git add -A
+  git commit -q -m "init"
+
+  # Create lockfile tracking scaffold.json
+  bash "$SYNC_SCRIPT" init "$HUB"
+
+  # Node adds overrides to scaffold.local.json (not scaffold.json)
+  cat > "$NODE/.claude/scaffold.local.json" <<'EOF'
+{"integrations":{"routing":{"backlog":"linear"}}}
+EOF
+  # scaffold.local.json is gitignored — don't commit it
+
+  # Hub changes scaffold.json (adds a feature toggle)
+  cat > "$HUB/.claude/scaffold.json" <<'EOF'
+{"features":{"pr_review":false,"auto_format":true}}
+EOF
+
+  # Run pull-plan — scaffold.json should be auto-update (local is clean)
+  run bash "$SYNC_SCRIPT" pull-plan "$HUB"
+  [ "$status" -eq 0 ]
+  echo "$output" | jq -e '.[] | select(.file == ".claude/scaffold.json") | .action == "auto-update"'
+}
+
 @test "AC-11: deep merge preserves nested keys from both sides" {
   cat > "$PROJECT/.claude/scaffold.json" <<'EOF'
 {"integrations":{"providers":{"github":{"mechanism":"cli"}}}}

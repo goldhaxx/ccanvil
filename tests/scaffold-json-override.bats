@@ -50,6 +50,23 @@ EOF
   echo "$output" | jq -e '. == {}'
 }
 
+# =========================================================================
+# Step 2: Node-wins conflict behavior (AC-2)
+# =========================================================================
+
+@test "AC-2: node wins on conflict — local overrides hub value" {
+  cat > "$PROJECT/.claude/scaffold.json" <<'EOF'
+{"features":{"pr_review":false}}
+EOF
+  cat > "$PROJECT/.claude/scaffold.local.json" <<'EOF'
+{"features":{"pr_review":true}}
+EOF
+
+  run bash "$OPERATIONS_SCRIPT" merge-config --project-dir "$PROJECT"
+  [ "$status" -eq 0 ]
+  echo "$output" | jq -e '.features.pr_review == true'
+}
+
 @test "AC-11: deep merge preserves nested keys from both sides" {
   cat > "$PROJECT/.claude/scaffold.json" <<'EOF'
 {"integrations":{"providers":{"github":{"mechanism":"cli"}}}}

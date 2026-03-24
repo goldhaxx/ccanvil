@@ -67,6 +67,21 @@ EOF
   echo "$output" | jq -e '.features.pr_review == true'
 }
 
+# =========================================================================
+# Step 3: Invalid local JSON error (AC-7)
+# =========================================================================
+
+@test "AC-7: invalid local JSON exits 1 with error message" {
+  cat > "$PROJECT/.claude/scaffold.json" <<'EOF'
+{"features":{"pr_review":false}}
+EOF
+  echo "not valid json{{{" > "$PROJECT/.claude/scaffold.local.json"
+
+  run bash "$OPERATIONS_SCRIPT" merge-config --project-dir "$PROJECT"
+  [ "$status" -eq 1 ]
+  echo "$output" | grep -q "ERROR: .claude/scaffold.local.json is not valid JSON"
+}
+
 @test "AC-11: deep merge preserves nested keys from both sides" {
   cat > "$PROJECT/.claude/scaffold.json" <<'EOF'
 {"integrations":{"providers":{"github":{"mechanism":"cli"}}}}

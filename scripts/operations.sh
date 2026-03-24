@@ -150,19 +150,21 @@ merge_scaffold_config() {
 }
 
 read_config() {
-  CONFIG_FILE="$PROJECT_DIR/.claude/scaffold.json"
+  local hub_file="$PROJECT_DIR/.claude/scaffold.json"
+  local local_file="$PROJECT_DIR/.claude/scaffold.local.json"
 
-  # No config file → all local (not an error)
-  if [[ ! -f "$CONFIG_FILE" ]]; then
+  # No config files → all local (not an error)
+  if [[ ! -f "$hub_file" && ! -f "$local_file" ]]; then
     CONFIG_FILE=""
     return 0
   fi
 
-  # Validate JSON
-  if ! jq empty "$CONFIG_FILE" 2>/dev/null; then
-    echo "ERROR: .claude/scaffold.json is not valid JSON" >&2
-    exit 1
-  fi
+  # Merge configs into a temp file so downstream jq queries work unchanged
+  local merged
+  merged=$(merge_scaffold_config "$PROJECT_DIR") || exit 1
+
+  CONFIG_FILE=$(mktemp)
+  echo "$merged" > "$CONFIG_FILE"
 }
 
 # Extract the routing group from an operation name (e.g., "backlog.list" → "backlog")

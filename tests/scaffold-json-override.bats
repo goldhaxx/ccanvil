@@ -82,6 +82,31 @@ EOF
   echo "$output" | grep -q "ERROR: .claude/scaffold.local.json is not valid JSON"
 }
 
+# =========================================================================
+# Step 4: Wire operations.sh resolve to use merged config (AC-5)
+# =========================================================================
+
+@test "AC-5: resolve uses merged config — routing in local file only" {
+  # Hub has features only, no routing
+  cat > "$PROJECT/.claude/scaffold.json" <<'EOF'
+{"features":{"pr_review":false},"integrations":{}}
+EOF
+  # Local file has routing config
+  cat > "$PROJECT/.claude/scaffold.local.json" <<'EOF'
+{
+  "integrations":{
+    "routing":{"backlog":"linear"},
+    "providers":{"linear":{"mechanism":"mcp","project":"Test","team":"TestTeam"}}
+  }
+}
+EOF
+
+  run bash "$OPERATIONS_SCRIPT" resolve backlog.list --project-dir "$PROJECT"
+  [ "$status" -eq 0 ]
+  echo "$output" | jq -e '.provider == "linear"'
+  echo "$output" | jq -e '.mechanism == "mcp"'
+}
+
 @test "AC-11: deep merge preserves nested keys from both sides" {
   cat > "$PROJECT/.claude/scaffold.json" <<'EOF'
 {"integrations":{"providers":{"github":{"mechanism":"cli"}}}}

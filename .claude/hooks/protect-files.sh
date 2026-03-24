@@ -22,9 +22,8 @@ case "$FILE_PATH" in
 esac
 
 # --- Protected scaffold files ---
-BASENAME=$(basename "$FILE_PATH")
-case "$BASENAME" in
-  scaffold-framework.md)
+case "$FILE_PATH" in
+  *docs/scaffold-guide/scaffold-framework.md)
     echo "BLOCKED: scaffold-framework.md is research source material — read-only." >&2
     echo "Only modify with explicit user approval for paradigm shifts or new research." >&2
     exit 2

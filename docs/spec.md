@@ -2,7 +2,7 @@
 
 > Feature: guide-restructuring
 > Created: 1774505200
-> Status: In Progress
+> Status: Complete
 
 ## Summary
 

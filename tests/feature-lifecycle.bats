@@ -367,6 +367,55 @@ EOF
 }
 
 # ---------------------------------------------------------------------------
+# Step 3d: squash-merge simulation (BTS-28 AC-10)
+# ---------------------------------------------------------------------------
+
+@test "activate: no divergence after squash-merge (AC-10)" {
+  # 1. Create spec (uncommitted)
+  cat > "$PROJECT/docs/specs/auth-system.md" <<'EOF'
+# Feature: Auth System
+
+> Feature: auth-system
+> Created: 1774200000
+> Status: Ready
+
+## Summary
+Auth feature.
+EOF
+
+  # 2. Activate — creates branch, auto-commits spec
+  "$PROJECT/scripts/docs-check.sh" activate auth-system "$PROJECT/docs"
+
+  # 3. Simulate implementation work on the branch
+  echo "impl" > "$PROJECT/src.sh"
+  git -C "$PROJECT" add -A && git -C "$PROJECT" commit -q -m "feat: implement auth"
+
+  # 4. Switch to main and squash-merge
+  git -C "$PROJECT" checkout -q main
+  git -C "$PROJECT" merge --squash claude/feat/auth-system
+  git -C "$PROJECT" commit -q -m "feat: auth system (#1)"
+
+  # 5. Verify: main has clean linear history
+  # Main should have exactly 2 commits: init + squash
+  local main_count
+  main_count=$(git -C "$PROJECT" log --oneline | wc -l | tr -d ' ')
+  [ "$main_count" -eq 2 ]
+
+  # 6. Verify: no spec commit on main before the squash
+  # The first commit is "init", the second is the squash — no "add spec" commit
+  local first_msg
+  first_msg=$(git -C "$PROJECT" log --oneline --reverse | head -1)
+  echo "$first_msg" | grep -q "init"
+  local second_msg
+  second_msg=$(git -C "$PROJECT" log --oneline --reverse | tail -1)
+  echo "$second_msg" | grep -q "auth system"
+
+  # 7. Verify: spec file exists in the squash commit (came from branch)
+  git -C "$PROJECT" show HEAD:docs/specs/auth-system.md | grep -q "Status: In Progress"
+  git -C "$PROJECT" show HEAD:docs/spec.md | grep -q "auth-system"
+}
+
+# ---------------------------------------------------------------------------
 # Step 4: complete (AC-3, AC-18)
 # ---------------------------------------------------------------------------
 

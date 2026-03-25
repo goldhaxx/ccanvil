@@ -233,6 +233,69 @@ EOF
 }
 
 # ---------------------------------------------------------------------------
+# Step 3b: activate commit sequencing (BTS-28)
+# ---------------------------------------------------------------------------
+
+@test "activate: succeeds with uncommitted spec file (AC-1)" {
+  # Spec exists but is NOT committed — activate should handle this
+  cat > "$PROJECT/docs/specs/auth-system.md" <<'EOF'
+# Feature: Auth System
+
+> Feature: auth-system
+> Created: 1774200000
+> Status: Ready
+
+## Summary
+Auth feature.
+EOF
+
+  run "$PROJECT/scripts/docs-check.sh" activate auth-system "$PROJECT/docs"
+  [ "$status" -eq 0 ]
+  echo "$output" | grep -q "Activated spec 'auth-system'"
+}
+
+@test "activate: succeeds with uncommitted spec file and docs/spec.md (AC-2)" {
+  # Both the spec and a stale docs/spec.md are uncommitted
+  cat > "$PROJECT/docs/specs/auth-system.md" <<'EOF'
+# Feature: Auth System
+
+> Feature: auth-system
+> Created: 1774200000
+> Status: Ready
+
+## Summary
+Auth feature.
+EOF
+  echo "stale spec" > "$PROJECT/docs/spec.md"
+
+  run "$PROJECT/scripts/docs-check.sh" activate auth-system "$PROJECT/docs"
+  [ "$status" -eq 0 ]
+  echo "$output" | grep -q "Activated spec 'auth-system'"
+}
+
+@test "activate: fails with uncommitted non-spec file (AC-3)" {
+  # Spec is committed, but a non-spec file is dirty — should still reject
+  cat > "$PROJECT/docs/specs/auth-system.md" <<'EOF'
+# Feature: Auth System
+
+> Feature: auth-system
+> Created: 1774200000
+> Status: Ready
+
+## Summary
+Auth feature.
+EOF
+  git -C "$PROJECT" add -A && git -C "$PROJECT" commit -q -m "add spec"
+
+  # Create an uncommitted non-spec file
+  echo "dirty" > "$PROJECT/README.md"
+
+  run "$PROJECT/scripts/docs-check.sh" activate auth-system "$PROJECT/docs"
+  [ "$status" -eq 1 ]
+  echo "$output" | grep -q "uncommitted changes"
+}
+
+# ---------------------------------------------------------------------------
 # Step 4: complete (AC-3, AC-18)
 # ---------------------------------------------------------------------------
 
@@ -483,7 +546,7 @@ EOF
   [ "$status" -eq 0 ]
 }
 
-@test "activate: fails on dirty worktree" {
+@test "activate: fails on dirty worktree with non-spec files" {
   cat > "$PROJECT/docs/specs/auth-system.md" <<'EOF'
 # Feature: Auth System
 
@@ -494,7 +557,9 @@ EOF
 ## Summary
 Auth feature.
 EOF
-  # Don't commit — leave dirty
+  git -C "$PROJECT" add -A && git -C "$PROJECT" commit -q -m "add spec"
+  # Create a non-spec dirty file
+  echo "dirty" > "$PROJECT/README.md"
   run "$PROJECT/scripts/docs-check.sh" activate auth-system "$PROJECT/docs"
   [ "$status" -eq 1 ]
 }

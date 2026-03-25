@@ -1,85 +1,77 @@
-# Implementation Plan: Guide Directory Restructuring
+# Implementation Plan: Activate Commit Sequencing
 
-> Feature: guide-restructuring
-> Created: 1774505400
-> Spec hash: 8bf23e80
+> Feature: activate-commit-sequencing
+> Created: 1774403940
+> Spec hash: e18c2570
 > Based on: docs/spec.md
 
 ## Objective
 
-Split GUIDE.md into `docs/scaffold-guide/` directory, remove the duplicate Appendix, and move SCAFFOLD_FRAMEWORK.md into `docs/scaffold-guide/`. Update all references, hooks, scripts, and tests.
+Make `docs-check.sh activate` auto-commit spec changes on the feature branch so specs never need to be committed to `main`, eliminating post-squash-merge divergence.
 
 ## Sequence
 
-### Step 1: Create docs/scaffold-guide/ directory and split GUIDE.md (AC-1, AC-2, AC-3, AC-4)
-- **Test:** Verify `docs/scaffold-guide/index.md` exists and is under 4k chars; verify each section file exists with correct content; verify Appendix is absent; verify `GUIDE.md` no longer exists at root
-- **Implement:** Split GUIDE.md at `##` heading boundaries into separate files. Index gets the intro + system overview + TOC table. Appendix is dropped entirely. Each file gets `<!-- NODE-SPECIFIC-START -->` delimiter (AC-11).
-- **Files:** `GUIDE.md` (delete), `docs/scaffold-guide/index.md`, `docs/scaffold-guide/getting-started.md`, `docs/scaffold-guide/core-workflow.md`, `docs/scaffold-guide/session-management.md`, `docs/scaffold-guide/scaffold-sync.md`, `docs/scaffold-guide/command-reference.md`, `docs/scaffold-guide/configuration.md`, `docs/scaffold-guide/hooks.md`, `docs/scaffold-guide/decision-guide.md`, `docs/scaffold-guide/parallel-sessions.md`
-- **Verify:** `ls docs/scaffold-guide/`, `wc -c docs/scaffold-guide/index.md`, `! test -f GUIDE.md`
+### Step 1: Targeted worktree check — allow uncommitted spec files (AC-1, AC-2, AC-3)
 
-### Step 2: Move SCAFFOLD_FRAMEWORK.md (AC-5)
-- **Test:** Verify `docs/scaffold-guide/scaffold-framework.md` exists with identical content; verify root `SCAFFOLD_FRAMEWORK.md` is gone
-- **Implement:** `git mv SCAFFOLD_FRAMEWORK.md docs/scaffold-guide/scaffold-framework.md`
-- **Files:** `SCAFFOLD_FRAMEWORK.md` (moved to `docs/scaffold-guide/scaffold-framework.md`)
-- **Verify:** `diff` original vs moved (should be identical), `! test -f SCAFFOLD_FRAMEWORK.md`
+- **Test:** Three tests in `feature-lifecycle.bats`:
+  1. `activate` succeeds when `docs/specs/<id>.md` is uncommitted (write spec, don't commit, run activate)
+  2. `activate` succeeds when both `docs/specs/<id>.md` and `docs/spec.md` are uncommitted
+  3. `activate` fails when a non-spec file (e.g., `README.md`) is uncommitted
+- **Implement:** Replace the blanket `git status --porcelain` check in `cmd_activate` (lines 683–687) with a targeted check: filter porcelain output, reject only if lines refer to files outside `docs/specs/` and `docs/spec.md`
+- **Files:** `scripts/docs-check.sh`, `tests/feature-lifecycle.bats`
+- **Verify:** New tests pass; AC-3 confirms safety guard still works
 
-### Step 3: Update CLAUDE.md reference (AC-6)
-- **Test:** Verify CLAUDE.md references `docs/scaffold-guide/index.md` and does not reference `@GUIDE.md` or `SCAFFOLD_FRAMEWORK.md` (at root)
-- **Implement:** Update Reference Documents section — change `@GUIDE.md` to `docs/scaffold-guide/index.md`, update SCAFFOLD_FRAMEWORK.md reference to new path, update the "Do Not" section
-- **Files:** `CLAUDE.md`
-- **Verify:** `grep -c '@GUIDE.md' CLAUDE.md` returns 0
+### Step 2: Auto-commit on branch (AC-4, AC-5, AC-6)
 
-### Step 4: Update scaffold-sync.sh TRACKED_PATTERNS (AC-7)
-- **Test:** Write bats test: given hub with `docs/scaffold-guide/*.md` files and node with same, `pull-plan` correctly identifies them as tracked files
-- **Implement:** Replace `"GUIDE.md"` and `"SCAFFOLD_FRAMEWORK.md"` entries in TRACKED_PATTERNS with `"docs/scaffold-guide/*.md"`
-- **Files:** `scripts/scaffold-sync.sh`
-- **Verify:** `bats tests/scaffold-sync.bats`
+- **Test:** Three tests:
+  1. After `activate`, branch has one new commit containing the spec files (check `git log --oneline` count and `git diff-tree`)
+  2. Commit message is `docs(lifecycle): activate <feature-id>`
+  3. After `activate`, `git status --porcelain` is empty (clean worktree)
+- **Implement:** After status update and `cp`, add `git add` for the specific spec file and `docs/spec.md`, then `git commit` with convention message. Handle both untracked (new) and modified spec files.
+- **Files:** `scripts/docs-check.sh` (after current line 711)
+- **Verify:** New tests pass; worktree is clean after activate
 
-### Step 5: Update hooks — lint-on-write.sh and protect-files.sh (AC-8, AC-9)
-- **Test:** Write bats test: lint-on-write enforces 40k limit on `docs/scaffold-guide/index.md`; protect-files blocks writes to `docs/scaffold-guide/scaffold-framework.md`
-- **Implement:** Update ALWAYS_LOADED_PATTERNS in `lint-on-write.sh` (replace `GUIDE.md` with `docs/scaffold-guide/index.md`). Update case pattern in `protect-files.sh` (match `scaffold-framework.md` basename or full path).
-- **Files:** `.claude/hooks/lint-on-write.sh`, `.claude/hooks/protect-files.sh`
-- **Verify:** Echo test JSON through hooks, check exit codes
+### Step 3: Update existing tests for new behavior (AC-7, AC-8, AC-9)
 
-### Step 6: Update security-audit.sh whitelist (AC-10)
-- **Test:** Verify `docs/scaffold-guide/scaffold-framework.md` is in the whitelist
-- **Implement:** Update WHITELIST entry from `SCAFFOLD_FRAMEWORK.md` to `docs/scaffold-guide/scaffold-framework.md`
-- **Files:** `scripts/security-audit.sh`
-- **Verify:** `bats tests/security-audit.bats`
+- **Test:** Update the four existing activate tests:
+  1. `creates branch with correct naming convention` — leave spec uncommitted instead of pre-committing
+  2. `copies spec to docs/spec.md` — same; verify spec.md exists with In Progress status
+  3. `updates spec status to In Progress` — same; check committed file
+  4. `fails if another spec is In Progress` — blocking spec still needs to be committed (prior activation); target spec can be uncommitted
+  5. `fails if feature-id not found` — no change needed
+- **Implement:** Remove `git add -A && git commit` lines from tests where the activated spec no longer needs pre-committing
+- **Files:** `tests/feature-lifecycle.bats` (lines 143–233)
+- **Verify:** `bats tests/feature-lifecycle.bats` — all pass
 
-### Step 7: Update all remaining references (AC-13)
-- **Implement:** Update references in:
-  - `.claude/rules/workflow.md` — GUIDE.md → docs/scaffold-guide/ references
-  - `.claude/rules/code-quality.md` — SCAFFOLD_FRAMEWORK.md → new path
-  - `.claude/rules/deterministic-first.md` — if references exist
-  - `.claude/commands/plan.md` — GUIDE.md → docs/scaffold-guide/ references
-  - `global-commands/init.md` — update file list
-  - `docs/templates/hooks-reference.md` — SCAFFOLD_FRAMEWORK.md → new path
-- **Files:** All files listed above
-- **Verify:** `grep -r 'GUIDE\.md' --include='*.md' .claude/ global-commands/` returns no hits for root GUIDE.md; `grep -r 'SCAFFOLD_FRAMEWORK\.md' --include='*.md' .claude/` returns no root-path hits
+### Step 4: Squash-merge simulation test (AC-10)
 
-### Step 8: Update tests (AC-12)
-- **Test:** All existing tests pass with new paths
-- **Implement:** Update test fixtures in `tests/scaffold-sync.bats`, `tests/operations.bats`, `tests/docs-check.bats` to use `docs/scaffold-guide/` paths instead of root `GUIDE.md` / `SCAFFOLD_FRAMEWORK.md`
-- **Files:** `tests/scaffold-sync.bats`, `tests/operations.bats`, `tests/docs-check.bats`
-- **Verify:** `bats tests/`
+- **Test:** One integration test simulating the full lifecycle:
+  1. Create spec in `docs/specs/` (uncommitted)
+  2. Run `activate` → branch created, spec auto-committed on branch
+  3. Add an implementation commit on the branch
+  4. Switch to `main`, `git merge --squash`, commit
+  5. Verify: `main` has clean linear history — spec changes only in the squash commit, not in a separate pre-branch commit
+- **Implement:** Pure test — no code changes
+- **Files:** `tests/feature-lifecycle.bats`
+- **Verify:** Test passes; confirms the divergence fix
 
-### Step 9: Update manifest.lock
-- **Implement:** Remove old `GUIDE.md` entry, run `manifest-check.sh verify` on new paths
-- **Files:** `.claude/manifest.lock`
-- **Verify:** `bash scripts/manifest-check.sh hash-check`
+### Step 5: Full suite verification
+
+- **Test:** Run `bats tests/` — all tests pass
+- **Implement:** Fix any breakage from the worktree-check change in other tests
+- **Files:** Any test files that break
+- **Verify:** `bats tests/` exits 0
 
 ## Risks
 
-- **Cross-references within GUIDE.md sections:** Internal anchor links (`#section-name`) will break across files. Mitigation: replace with file-path references in the index.
-- **Test fixture complexity:** scaffold-sync.bats creates mock hub/node structures. Changing from single file to directory requires updating multiple test helpers. Mitigation: update systematically, run after each change.
-- **Self-referential content in GUIDE.md:** The Scaffold Sync section documents GUIDE.md's own sync behavior. After the split, `docs/scaffold-guide/scaffold-sync.md` must document its own sync behavior (docs/scaffold-guide/*.md). Update the diagrams and tables.
+- **Untracked vs modified spec files:** `git status --porcelain` shows `??` for untracked and ` M`/`M ` for modified. The targeted filter must handle both prefixes. Mitigation: AC-1 tests untracked, AC-2 tests modified `docs/spec.md` alongside untracked spec.
+- **Blocking spec detection with dirty worktree:** The "another spec is In Progress" check reads `docs/specs/` files. If a new spec is untracked, `parse_metadata` still works on the file (it reads from disk, not git). No risk here.
+- **Tests that commit specs before activate:** Existing tests follow the old pattern. Step 3 updates them — but must verify the blocking-spec test still works (the *blocking* spec is a pre-existing committed spec, not the one being activated).
 
 ## Definition of Done
 
-- [ ] All 13 acceptance criteria from spec pass
+- [ ] All acceptance criteria from spec pass (AC-1 through AC-10)
 - [ ] All existing tests still pass
-- [ ] No type errors
 - [ ] Code reviewed (run /review)
 
 <!-- NODE-SPECIFIC-START -->

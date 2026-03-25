@@ -2,7 +2,7 @@
 
 > Feature: activate-commit-sequencing
 > Created: 1774588800
-> Status: Draft
+> Status: In Progress
 
 ## Summary
 

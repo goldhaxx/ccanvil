@@ -1,69 +1,61 @@
-# Feature: Guide Directory Restructuring
+# Feature: Activate Commit Sequencing
 
-> Feature: guide-restructuring
-> Created: 1774505200
-> Status: Complete
+> Feature: activate-commit-sequencing
+> Created: 1774588800
+> Status: In Progress
 
 ## Summary
 
-Split the monolithic GUIDE.md (45.5k chars) into a `docs/scaffold-guide/` directory with separate section files, remove the duplicate Appendix, and relocate SCAFFOLD_FRAMEWORK.md into `docs/scaffold-guide/`. This eliminates the file size hook block, enables progressive disclosure (only relevant sections loaded), and organizes all scaffold reference material under one directory.
+Change `docs-check.sh activate` to commit the spec status update and `docs/spec.md` copy on the new feature branch instead of leaving them uncommitted. Currently, specs must be committed to `main` before activation (clean worktree requirement), and the status change is left uncommitted on the branch. After squash-merge, the spec commit on `main` and the squash commit both touch `docs/specs/*.md`, causing divergent histories that require `git pull --rebase` + `git rebase --skip` to resolve.
 
 ## Job To Be Done
 
-**When** I need to read or edit scaffold documentation,
-**I want to** access only the relevant section without loading 45k chars,
-**So that** context budget is preserved and the file size hook no longer blocks edits.
+**When** I activate a spec and later squash-merge the feature PR,
+**I want to** return to `main` with a clean `git pull`,
+**So that** I don't have to manually resolve divergent branches after every feature.
+
+## Root Cause
+
+The current `cmd_activate` flow:
+
+1. **Requires** clean worktree → spec file must already be committed on `main`
+2. Creates feature branch from `main`
+3. Modifies `docs/specs/*.md` (status → In Progress) and copies to `docs/spec.md`
+4. Leaves these changes **uncommitted**
+
+The user/Claude then commits the status change on the branch. After squash-merge, `main` has: (a) the original spec commit and (b) a squash commit that also modifies `docs/specs/*.md`. This creates duplicate changes to the same file across different commit lineages.
+
+## Proposed Fix
+
+`cmd_activate` should:
+1. Allow the spec file to be uncommitted (don't reject dirty worktree for spec-related files)
+2. Create the branch
+3. Update spec status + copy to `docs/spec.md`
+4. Auto-commit all spec-related changes on the branch
+
+This ensures `main` never has a spec commit — the spec addition and activation are both on the feature branch, and squash-merge cleanly collapses them.
 
 ## Acceptance Criteria
 
 Each criterion is independently testable. Binary pass/fail.
 
-- [ ] **AC-1:** `GUIDE.md` no longer exists at repository root
-- [ ] **AC-2:** `docs/scaffold-guide/index.md` exists with a table linking to all section files, and is under 4k chars
-- [ ] **AC-3:** Each section from the original GUIDE.md exists as a separate file in `docs/scaffold-guide/` with its full content preserved (minus Appendix)
-- [ ] **AC-4:** The Appendix ("Why Each Practice Exists") section is not present in any `docs/scaffold-guide/` file — it duplicates SCAFFOLD_FRAMEWORK.md
-- [ ] **AC-5:** `SCAFFOLD_FRAMEWORK.md` no longer exists at repository root; `docs/scaffold-guide/scaffold-framework.md` contains identical content
-- [ ] **AC-6:** `CLAUDE.md` references `docs/scaffold-guide/index.md` (not `@GUIDE.md`) in its Reference Documents section
-- [ ] **AC-7:** `scripts/scaffold-sync.sh` TRACKED_PATTERNS references `docs/scaffold-guide/*.md` instead of `GUIDE.md` and `SCAFFOLD_FRAMEWORK.md`
-- [ ] **AC-8:** `.claude/hooks/lint-on-write.sh` ALWAYS_LOADED_PATTERNS includes `docs/scaffold-guide/index.md` instead of `GUIDE.md`
-- [ ] **AC-9:** `.claude/hooks/protect-files.sh` blocks writes to `docs/scaffold-guide/scaffold-framework.md` (not root `SCAFFOLD_FRAMEWORK.md`)
-- [ ] **AC-10:** `scripts/security-audit.sh` whitelist references `docs/scaffold-guide/scaffold-framework.md`
-- [ ] **AC-11:** Each `docs/scaffold-guide/*.md` file (except scaffold-framework.md) has a `<!-- NODE-SPECIFIC-START -->` delimiter
-- [ ] **AC-12:** All existing tests pass (updated for new paths where needed)
-- [ ] **AC-13:** `.claude/rules/*.md`, `.claude/commands/plan.md`, `global-commands/init.md`, and `docs/templates/hooks-reference.md` reference the new paths
+- [ ] **AC-1:** `activate` succeeds when `docs/specs/<id>.md` is the only uncommitted file (previously rejected)
+- [ ] **AC-2:** `activate` succeeds when both `docs/specs/<id>.md` and `docs/spec.md` are uncommitted
+- [ ] **AC-3:** `activate` still fails if non-spec files are uncommitted (safety guard)
+- [ ] **AC-4:** After `activate`, the branch has exactly one commit containing: spec status update in `docs/specs/<id>.md`, and `docs/spec.md` copy
+- [ ] **AC-5:** The auto-commit message follows convention: `docs(lifecycle): activate <feature-id>`
+- [ ] **AC-6:** After `activate`, the worktree is clean (no uncommitted changes)
+- [ ] **AC-7:** `activate` still fails if another spec is In Progress
+- [ ] **AC-8:** `activate` still fails if feature-id not found
+- [ ] **AC-9:** Existing tests pass (updated for new behavior where needed)
+- [ ] **AC-10:** After squash-merge simulation, `main` has no divergent history (no rebase/skip needed)
 
 ## Affected Files
 
 | File | Change |
 |------|--------|
-| `GUIDE.md` | Deleted — content split into docs/scaffold-guide/ |
-| `SCAFFOLD_FRAMEWORK.md` | Moved to `docs/scaffold-guide/scaffold-framework.md` |
-| `docs/scaffold-guide/index.md` | New — TOC + system overview |
-| `docs/scaffold-guide/getting-started.md` | New — first-time setup |
-| `docs/scaffold-guide/core-workflow.md` | New — spec/plan/build/review + TDD cycle |
-| `docs/scaffold-guide/session-management.md` | New — catchup/checkpoint/clear |
-| `docs/scaffold-guide/scaffold-sync.md` | New — hub/node architecture, pull/push flows |
-| `docs/scaffold-guide/command-reference.md` | New — all command tables |
-| `docs/scaffold-guide/configuration.md` | New — config layers, what goes where |
-| `docs/scaffold-guide/hooks.md` | New — hooks system, deterministic-first, adding hooks |
-| `docs/scaffold-guide/decision-guide.md` | New — when to use what |
-| `docs/scaffold-guide/parallel-sessions.md` | New — worktree usage |
-| `docs/scaffold-guide/scaffold-framework.md` | New (moved from root) |
-| `CLAUDE.md` | Modified — update reference |
-| `scripts/scaffold-sync.sh` | Modified — update TRACKED_PATTERNS |
-| `.claude/hooks/lint-on-write.sh` | Modified — update ALWAYS_LOADED_PATTERNS |
-| `.claude/hooks/protect-files.sh` | Modified — update blocked path |
-| `scripts/security-audit.sh` | Modified — update whitelist |
-| `.claude/rules/workflow.md` | Modified — update GUIDE.md reference |
-| `.claude/rules/code-quality.md` | Modified — update SCAFFOLD_FRAMEWORK.md reference |
-| `.claude/rules/deterministic-first.md` | Modified — update reference if present |
-| `.claude/commands/plan.md` | Modified — update GUIDE.md references |
-| `global-commands/init.md` | Modified — update file list |
-| `docs/templates/hooks-reference.md` | Modified — update SCAFFOLD_FRAMEWORK.md reference |
-| `.claude/manifest.lock` | Modified — update entries |
-| `tests/scaffold-sync.bats` | Modified — update test fixtures |
-| `tests/operations.bats` | Modified — update path references |
-| `tests/docs-check.bats` | Modified — update GUIDE variable |
+| `scripts/docs-check.sh` | Modify `cmd_activate` — relax worktree check, add auto-commit |
+| `tests/feature-lifecycle.bats` | Update activate tests for new commit behavior, add AC-1 through AC-10 tests |
 
 ## Dependencies
 
@@ -72,20 +64,17 @@ Each criterion is independently testable. Binary pass/fail.
 
 ## Out of Scope
 
-- Converting GUIDE.md content to a skill (wrong abstraction — it's reference, not a workflow)
-- Changing scaffold-sync.sh to support directory-level merge (per-file tracking with existing glob patterns is sufficient)
-- Rewriting GUIDE.md content (preserve as-is, just split)
-- Changing the `@` import semantics in Claude Code itself
+- Changing `cmd_complete` behavior (it runs on `main` after merge, which is correct)
+- Changing the spec backlog directory structure
+- Modifying squash-merge or PR creation workflows
+- Adding spec creation to `activate` (spec authoring remains a separate step)
 
 ## Implementation Notes
 
-- Split boundaries follow existing `##` headings — each top-level section becomes its own file
-- `docs/scaffold-guide/index.md` should contain the intro paragraph, system overview diagram, and a table of sections with file paths and "when to read" guidance
-- scaffold-sync.sh change is minimal: replace two literal entries in TRACKED_PATTERNS with one glob `"docs/scaffold-guide/*.md"`
-- SCAFFOLD_FRAMEWORK.md keeps its existing protection (hook block) — just update the path match
-- The `<!-- NODE-SPECIFIC-START -->` delimiter goes at the end of each section file, same pattern as rules/commands/agents
-- scaffold-framework.md does NOT get a delimiter (it's whole-file auto-update, read-only research)
-- Tests that create GUIDE.md in temp directories need path updates but logic stays the same
+- The dirty-worktree check should use a targeted approach: reject if `git status --porcelain` shows files outside `docs/specs/` and `docs/spec.md`
+- The auto-commit should `git add docs/specs/<id>.md docs/spec.md` (only the specific files, not `-A`)
+- Consider: if `docs/spec.md` already exists from a previous feature, it will be overwritten — this is correct and expected
+- The squash-merge simulation test (AC-10) can create a branch, make commits, `git merge --squash`, then verify `git pull` works cleanly on a second clone/worktree
 
 <!-- NODE-SPECIFIC-START -->
 <!-- Add project-specific content below this line. -->

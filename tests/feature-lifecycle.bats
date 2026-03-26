@@ -151,7 +151,7 @@ EOF
 ## Summary
 Auth feature.
 EOF
-  git -C "$PROJECT" add -A && git -C "$PROJECT" commit -q -m "add spec"
+  # Spec is uncommitted — activate should handle it
 
   run "$PROJECT/scripts/docs-check.sh" activate auth-system "$PROJECT/docs"
   [ "$status" -eq 0 ]
@@ -173,7 +173,7 @@ EOF
 ## Summary
 Auth feature.
 EOF
-  git -C "$PROJECT" add -A && git -C "$PROJECT" commit -q -m "add spec"
+  # Spec is uncommitted — activate should handle it
 
   "$PROJECT/scripts/docs-check.sh" activate auth-system "$PROJECT/docs"
   [ -f "$PROJECT/docs/spec.md" ]
@@ -193,13 +193,14 @@ EOF
 ## Summary
 Auth feature.
 EOF
-  git -C "$PROJECT" add -A && git -C "$PROJECT" commit -q -m "add spec"
+  # Spec is uncommitted — activate should handle it
 
   "$PROJECT/scripts/docs-check.sh" activate auth-system "$PROJECT/docs"
   grep -q "Status: In Progress" "$PROJECT/docs/specs/auth-system.md"
 }
 
 @test "activate: fails if another spec is In Progress" {
+  # Blocking spec is committed (represents prior activation)
   cat > "$PROJECT/docs/specs/first.md" <<'EOF'
 # Feature: First
 
@@ -210,6 +211,9 @@ EOF
 ## Summary
 First feature.
 EOF
+  git -C "$PROJECT" add -A && git -C "$PROJECT" commit -q -m "add blocking spec"
+
+  # Target spec is uncommitted
   cat > "$PROJECT/docs/specs/second.md" <<'EOF'
 # Feature: Second
 
@@ -220,7 +224,6 @@ EOF
 ## Summary
 Second feature.
 EOF
-  git -C "$PROJECT" add -A && git -C "$PROJECT" commit -q -m "add specs"
 
   run "$PROJECT/scripts/docs-check.sh" activate second "$PROJECT/docs"
   [ "$status" -eq 1 ]
@@ -230,6 +233,186 @@ EOF
 @test "activate: fails if feature-id not found" {
   run "$PROJECT/scripts/docs-check.sh" activate nonexistent "$PROJECT/docs"
   [ "$status" -eq 1 ]
+}
+
+# ---------------------------------------------------------------------------
+# Step 3b: activate commit sequencing (BTS-28)
+# ---------------------------------------------------------------------------
+
+@test "activate: succeeds with uncommitted spec file (AC-1)" {
+  # Spec exists but is NOT committed — activate should handle this
+  cat > "$PROJECT/docs/specs/auth-system.md" <<'EOF'
+# Feature: Auth System
+
+> Feature: auth-system
+> Created: 1774200000
+> Status: Ready
+
+## Summary
+Auth feature.
+EOF
+
+  run "$PROJECT/scripts/docs-check.sh" activate auth-system "$PROJECT/docs"
+  [ "$status" -eq 0 ]
+  echo "$output" | grep -q "Activated spec 'auth-system'"
+}
+
+@test "activate: succeeds with uncommitted spec file and docs/spec.md (AC-2)" {
+  # Both the spec and a stale docs/spec.md are uncommitted
+  cat > "$PROJECT/docs/specs/auth-system.md" <<'EOF'
+# Feature: Auth System
+
+> Feature: auth-system
+> Created: 1774200000
+> Status: Ready
+
+## Summary
+Auth feature.
+EOF
+  echo "stale spec" > "$PROJECT/docs/spec.md"
+
+  run "$PROJECT/scripts/docs-check.sh" activate auth-system "$PROJECT/docs"
+  [ "$status" -eq 0 ]
+  echo "$output" | grep -q "Activated spec 'auth-system'"
+}
+
+@test "activate: fails with uncommitted non-spec file (AC-3)" {
+  # Spec is committed, but a non-spec file is dirty — should still reject
+  cat > "$PROJECT/docs/specs/auth-system.md" <<'EOF'
+# Feature: Auth System
+
+> Feature: auth-system
+> Created: 1774200000
+> Status: Ready
+
+## Summary
+Auth feature.
+EOF
+  git -C "$PROJECT" add -A && git -C "$PROJECT" commit -q -m "add spec"
+
+  # Create an uncommitted non-spec file
+  echo "dirty" > "$PROJECT/README.md"
+
+  run "$PROJECT/scripts/docs-check.sh" activate auth-system "$PROJECT/docs"
+  [ "$status" -eq 1 ]
+  echo "$output" | grep -q "uncommitted changes"
+}
+
+# ---------------------------------------------------------------------------
+# Step 3c: activate auto-commit (BTS-28 AC-4, AC-5, AC-6)
+# ---------------------------------------------------------------------------
+
+@test "activate: auto-commits spec files on branch (AC-4)" {
+  cat > "$PROJECT/docs/specs/auth-system.md" <<'EOF'
+# Feature: Auth System
+
+> Feature: auth-system
+> Created: 1774200000
+> Status: Ready
+
+## Summary
+Auth feature.
+EOF
+
+  "$PROJECT/scripts/docs-check.sh" activate auth-system "$PROJECT/docs"
+
+  # Branch should have exactly one new commit (beyond init)
+  local count
+  count=$(git -C "$PROJECT" log --oneline main..HEAD | wc -l | tr -d ' ')
+  [ "$count" -eq 1 ]
+
+  # That commit should contain both spec files
+  local files_in_commit
+  files_in_commit=$(git -C "$PROJECT" diff-tree --no-commit-id --name-only -r HEAD)
+  echo "$files_in_commit" | grep -q "docs/specs/auth-system.md"
+  echo "$files_in_commit" | grep -q "docs/spec.md"
+}
+
+@test "activate: auto-commit message follows convention (AC-5)" {
+  cat > "$PROJECT/docs/specs/auth-system.md" <<'EOF'
+# Feature: Auth System
+
+> Feature: auth-system
+> Created: 1774200000
+> Status: Ready
+
+## Summary
+Auth feature.
+EOF
+
+  "$PROJECT/scripts/docs-check.sh" activate auth-system "$PROJECT/docs"
+
+  local msg
+  msg=$(git -C "$PROJECT" log -1 --format=%s)
+  [ "$msg" = "docs(lifecycle): activate auth-system" ]
+}
+
+@test "activate: worktree is clean after activation (AC-6)" {
+  cat > "$PROJECT/docs/specs/auth-system.md" <<'EOF'
+# Feature: Auth System
+
+> Feature: auth-system
+> Created: 1774200000
+> Status: Ready
+
+## Summary
+Auth feature.
+EOF
+
+  "$PROJECT/scripts/docs-check.sh" activate auth-system "$PROJECT/docs"
+
+  local dirty
+  dirty=$(git -C "$PROJECT" status --porcelain)
+  [ -z "$dirty" ]
+}
+
+# ---------------------------------------------------------------------------
+# Step 3d: squash-merge simulation (BTS-28 AC-10)
+# ---------------------------------------------------------------------------
+
+@test "activate: no divergence after squash-merge (AC-10)" {
+  # 1. Create spec (uncommitted)
+  cat > "$PROJECT/docs/specs/auth-system.md" <<'EOF'
+# Feature: Auth System
+
+> Feature: auth-system
+> Created: 1774200000
+> Status: Ready
+
+## Summary
+Auth feature.
+EOF
+
+  # 2. Activate — creates branch, auto-commits spec
+  "$PROJECT/scripts/docs-check.sh" activate auth-system "$PROJECT/docs"
+
+  # 3. Simulate implementation work on the branch
+  echo "impl" > "$PROJECT/src.sh"
+  git -C "$PROJECT" add -A && git -C "$PROJECT" commit -q -m "feat: implement auth"
+
+  # 4. Switch to main and squash-merge
+  git -C "$PROJECT" checkout -q main
+  git -C "$PROJECT" merge --squash claude/feat/auth-system
+  git -C "$PROJECT" commit -q -m "feat: auth system (#1)"
+
+  # 5. Verify: main has clean linear history
+  # Main should have exactly 2 commits: init + squash
+  local main_count
+  main_count=$(git -C "$PROJECT" log --oneline | wc -l | tr -d ' ')
+  [ "$main_count" -eq 2 ]
+
+  # 6. Verify: no spec commit on main before the squash
+  # The first commit is "init", the second is the squash — no "add spec" commit
+  local first_msg
+  first_msg=$(git -C "$PROJECT" log --oneline --reverse | head -1)
+  echo "$first_msg" | grep -q "init"
+  local second_msg
+  second_msg=$(git -C "$PROJECT" log -1 --oneline)
+  echo "$second_msg" | grep -q "auth system"
+
+  # 7. Verify: spec file exists in the squash commit (came from branch)
+  git -C "$PROJECT" show HEAD:docs/specs/auth-system.md | grep -q "Status: In Progress"
+  git -C "$PROJECT" show HEAD:docs/spec.md | grep -q "auth-system"
 }
 
 # ---------------------------------------------------------------------------
@@ -483,7 +666,7 @@ EOF
   [ "$status" -eq 0 ]
 }
 
-@test "activate: fails on dirty worktree" {
+@test "activate: fails on dirty worktree with non-spec files" {
   cat > "$PROJECT/docs/specs/auth-system.md" <<'EOF'
 # Feature: Auth System
 
@@ -494,7 +677,9 @@ EOF
 ## Summary
 Auth feature.
 EOF
-  # Don't commit — leave dirty
+  git -C "$PROJECT" add -A && git -C "$PROJECT" commit -q -m "add spec"
+  # Create a non-spec dirty file
+  echo "dirty" > "$PROJECT/README.md"
   run "$PROJECT/scripts/docs-check.sh" activate auth-system "$PROJECT/docs"
   [ "$status" -eq 1 ]
 }

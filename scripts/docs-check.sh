@@ -680,8 +680,25 @@ cmd_activate() {
     fi
   done
 
-  # Check worktree is clean
-  if [[ -n "$(git -C "$repo_root" status --porcelain 2>/dev/null)" ]]; then
+  # Check worktree is clean (allow uncommitted spec-related files)
+  local dirty_non_spec=""
+  local docs_rel
+  docs_rel=$(cd "$docs_dir" 2>/dev/null && git rev-parse --show-prefix 2>/dev/null)
+  docs_rel="${docs_rel%/}"  # strip trailing slash → e.g. "docs"
+  # Build prefix: "docs/" when docs_dir is a subdirectory, "" when it's repo root
+  local docs_prefix="${docs_rel:+${docs_rel}/}"
+  while IFS= read -r line; do
+    [[ -z "$line" ]] && continue
+    # porcelain format: XY <path> or XY <path> -> <path>
+    # Note: only the source path is checked; rename destinations are not evaluated
+    local fpath="${line:3}"
+    fpath="${fpath%% -> *}"  # strip rename target
+    case "$fpath" in
+      "${docs_prefix}specs/"*|"${docs_prefix}spec.md") ;;  # allowed
+      *) dirty_non_spec="$fpath"; break ;;
+    esac
+  done < <(git -C "$repo_root" status --porcelain --untracked-files=all 2>/dev/null)
+  if [[ -n "$dirty_non_spec" ]]; then
     echo "ERROR: worktree has uncommitted changes. Commit or stash before activating." >&2
     exit 1
   fi
@@ -709,6 +726,13 @@ cmd_activate() {
 
   # Copy spec to docs/spec.md (after status update so it gets the new status)
   cp "$spec_file" "$docs_dir/spec.md"
+
+  # Auto-commit spec changes on the branch
+  git -C "$repo_root" add "$spec_file" "$docs_dir/spec.md"
+  git -C "$repo_root" commit -q -m "docs(lifecycle): activate $feature_id" || {
+    echo "ERROR: failed to commit spec changes on branch '$branch_name'" >&2
+    exit 1
+  }
 
   echo "Activated spec '$feature_id' on branch '$branch_name'"
 }

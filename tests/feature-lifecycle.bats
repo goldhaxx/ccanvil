@@ -407,7 +407,7 @@ EOF
   first_msg=$(git -C "$PROJECT" log --oneline --reverse | head -1)
   echo "$first_msg" | grep -q "init"
   local second_msg
-  second_msg=$(git -C "$PROJECT" log --oneline --reverse | tail -1)
+  second_msg=$(git -C "$PROJECT" log -1 --oneline)
   echo "$second_msg" | grep -q "auth system"
 
   # 7. Verify: spec file exists in the squash commit (came from branch)

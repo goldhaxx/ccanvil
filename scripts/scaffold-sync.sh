@@ -158,7 +158,7 @@ scan_scaffold_files() {
 # ---------------------------------------------------------------------------
 
 cmd_init() {
-  local scaffold_path="${1:-$HOME/projects/claude-code-scaffold}"
+  local scaffold_path="${1:-$HOME/projects/ccanvil}"
   scaffold_path="${scaffold_path/#\~/$HOME}"
 
   [[ -d "$scaffold_path" ]] || die "Scaffold not found at: $scaffold_path"

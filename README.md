@@ -62,10 +62,10 @@ mkdir -p ~/.claude
 mkdir -p ~/.claude/commands
 
 # Copy your personal preferences file — loads for every project
-cp ~/projects/claude-code-scaffold/GLOBAL_CLAUDE.md ~/.claude/CLAUDE.md
+cp ~/projects/ccanvil/GLOBAL_CLAUDE.md ~/.claude/CLAUDE.md
 
 # Copy the /init slash command — lets you type /init in any new project
-cp ~/projects/claude-code-scaffold/global-commands/init.md ~/.claude/commands/init.md
+cp ~/projects/ccanvil/global-commands/init.md ~/.claude/commands/init.md
 
 ```
 
@@ -127,7 +127,7 @@ Every file and directory in this scaffold is listed below, grouped by where it g
 | File in zip | Copy to | What it does | Customize? |
 |---|---|---|---|
 | `GLOBAL_CLAUDE.md` | `~/.claude/CLAUDE.md` | Your personal preferences — name, communication style, workflow defaults. Claude Code loads this for every project on your machine. | Yes. Edit after copying to match your preferences. |
-| `global-commands/init.md` | `~/.claude/commands/init.md` | The `/init` slash command. Type `/init` in any new project directory and Claude Code reads the scaffold README, copies the files, and asks about your stack to customize. Deterministic — fires exactly when you invoke it, not probabilistically like a skill. | No. Works out of the box as long as the scaffold lives at `~/projects/claude-code-scaffold`. If you store the scaffold elsewhere, update the paths in this file. |
+| `global-commands/init.md` | `~/.claude/commands/init.md` | The `/init` slash command. Type `/init` in any new project directory and Claude Code reads the scaffold README, copies the files, and asks about your stack to customize. Deterministic — fires exactly when you invoke it, not probabilistically like a skill. | No. Works out of the box as long as the scaffold lives at `~/projects/ccanvil`. If you store the scaffold elsewhere, update the paths in this file. |
 
 ### Files that go to your project root (per-project setup)
 
@@ -298,7 +298,7 @@ You:  "Fix the billing calculation bug: invoice totals are off by 1 cent
 ```
 You:  /scaffold-status
 
-Claude: "Scaffold: ~/projects/claude-code-scaffold @ a3f82c1
+Claude: "Scaffold: ~/projects/ccanvil @ a3f82c1
          Last synced: 2026-03-15
 
          CLEAN       .claude/rules/tdd.md

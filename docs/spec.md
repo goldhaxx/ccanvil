@@ -6,7 +6,7 @@
 
 ## Summary
 
-Rename the project from "claude-code-scaffold" to "ccanvil" and reorganize the repo so that hub-only artifacts (tests, specs, research) are cleanly separated from distributable artifacts (rules, commands, scripts, templates). Downstream projects receive a `.ccanvil/` directory for preset infrastructure, keeping project roots clean and preset artifacts clearly identifiable. All tech-stack opinions (bats, TLS/WARP) are removed from distributed config so downstream projects are never muddied by hub-specific tooling.
+Reorganize the repo so that hub-only artifacts (tests, specs, research) are cleanly separated from distributable artifacts (rules, commands, scripts, templates). Downstream projects receive a `.ccanvil/` directory for preset infrastructure, keeping project roots clean and preset artifacts clearly identifiable. All tech-stack opinions (bats, TLS/WARP) are removed from distributed config so downstream projects are never muddied by hub-specific tooling.
 
 ## Job To Be Done
 
@@ -20,7 +20,7 @@ Each criterion is independently testable. Binary pass/fail.
 
 ### Rename
 
-- [ ] **AC-1:** GitHub repo is renamed to `ccanvil`. README, CLAUDE.md, and all internal references use the name "ccanvil" (not "claude-code-scaffold" or "scaffold" as a project name).
+- [ ] **AC-1:** GitHub repo is renamed to `ccanvil`. README, CLAUDE.md, and all internal references use the name "ccanvil" (not "scaffold" as a project name).
 - [ ] **AC-2:** All sync script references, lockfile paths, and command docs use "ccanvil" terminology where referring to the project. The technical verb "scaffold" may be preserved where it describes the syncing concept (open question — see below).
 
 ### Hub vs preset separation
@@ -87,7 +87,7 @@ Each criterion is independently testable. Binary pass/fail.
 ## Out of Scope
 
 - **Packs system** — tech-specific extensions (bash, typescript, python) are a future feature.
-- **Renaming the local directory** — `~/projects/claude-code-scaffold/` → `~/projects/ccanvil/` is a separate manual step.
+- **Renaming the local directory** — done (moved to `~/projects/ccanvil/`).
 - **Migrating fucina** — updating fucina's lockfile and directory structure is a follow-up after this lands.
 - **`.claude/` vs `.ccanvil/` boundary refinement** — the exact split may evolve. This spec establishes the initial boundary. Future specs may adjust.
 

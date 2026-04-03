@@ -1,7 +1,7 @@
-Initialize a new project using the Claude Code development scaffold located at ~/projects/claude-code-scaffold.
+Initialize a new project using the Claude Code development scaffold located at ~/projects/ccanvil.
 
-1. Read ~/projects/claude-code-scaffold/README.md — it contains the complete file manifest and setup instructions.
-2. Read ~/projects/claude-code-scaffold/SCAFFOLD_SYSTEM_PROMPT.md for the full specification of constraints and formatting rules.
+1. Read ~/projects/ccanvil/README.md — it contains the complete file manifest and setup instructions.
+2. Read ~/projects/ccanvil/SCAFFOLD_SYSTEM_PROMPT.md for the full specification of constraints and formatting rules.
 3. Copy all project files from the scaffold into the current working directory following the Quick Start instructions. Skip Step 1 (global setup is already done). Make sure to copy:
    - `.claude/` directory (rules, commands, agents, skills, hooks, settings)
    - `docs/templates/` (persistent format guides, NOT the github/ subdirectory itself)
@@ -38,7 +38,7 @@ Initialize a new project using the Claude Code development scaffold located at ~
    - Scan `.claude/rules/`, `.claude/commands/`, `.claude/agents/`, `.claude/skills/` for any files that are NOT from the scaffold (pre-existing local files).
    - If found: add a summary listing each local file and its purpose below the `NODE-SPECIFIC-START` delimiter.
    - If the project is empty (fresh init): leave the placeholder as-is.
-9. Generate the scaffold lockfile by running: `./scripts/scaffold-sync.sh init ~/projects/claude-code-scaffold`
+9. Generate the scaffold lockfile by running: `./scripts/scaffold-sync.sh init ~/projects/ccanvil`
    This creates `.claude/scaffold.lock` which tracks the sync state between this project and the scaffold hub.
 10. Initialize git and install hooks:
    ```bash

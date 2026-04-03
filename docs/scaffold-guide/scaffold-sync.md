@@ -6,7 +6,7 @@ The scaffold is a hub with downstream project nodes. The sync system enables bi-
 
 ```mermaid
 graph TB
-    subgraph HUB["Scaffold Hub<br/>~/projects/claude-code-scaffold"]
+    subgraph HUB["Scaffold Hub<br/>~/projects/ccanvil"]
         H_RULES["rules/"]
         H_CMD["commands/"]
         H_AGENTS["agents/"]

@@ -4,7 +4,7 @@
 # Each test creates an isolated environment and pipes JSON to the hook.
 # The format hook always exits 0 — formatting failures never block writes.
 
-HOOK="$BATS_TEST_DIRNAME/../.claude/hooks/format-on-write.sh"
+HOOK="$BATS_TEST_DIRNAME/../../.claude/hooks/format-on-write.sh"
 
 setup() {
   REPO=$(mktemp -d)

@@ -1,7 +1,7 @@
 Initialize a new project using the Claude Code development scaffold located at ~/projects/ccanvil.
 
 1. Read ~/projects/ccanvil/README.md — it contains the complete file manifest and setup instructions.
-2. Read ~/projects/ccanvil/SCAFFOLD_SYSTEM_PROMPT.md for the full specification of constraints and formatting rules.
+2. Read ~/projects/ccanvil/hub/meta/SCAFFOLD_SYSTEM_PROMPT.md for the full specification of constraints and formatting rules.
 3. Copy all project files from the scaffold into the current working directory following the Quick Start instructions. Skip Step 1 (global setup is already done). Make sure to copy:
    - `.claude/` directory (rules, commands, agents, skills, hooks, settings)
    - `docs/templates/` (persistent format guides, NOT the github/ subdirectory itself)

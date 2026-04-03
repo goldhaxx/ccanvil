@@ -4,7 +4,7 @@
 # Each test creates isolated temp directories simulating hub + node repos.
 # No real git remotes — everything is local and deterministic.
 
-SCRIPT="$BATS_TEST_DIRNAME/../scripts/scaffold-sync.sh"
+SCRIPT="$BATS_TEST_DIRNAME/../../scripts/scaffold-sync.sh"
 
 # ---------------------------------------------------------------------------
 # Fixtures: create mock hub and node directories

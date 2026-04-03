@@ -4,7 +4,7 @@
 # Covers: scaffold config, list-specs, activate, complete, validate/recommend
 # multi-spec, hooks, and worktree compatibility.
 
-SCRIPT="$BATS_TEST_DIRNAME/../scripts/docs-check.sh"
+SCRIPT="$BATS_TEST_DIRNAME/../../scripts/docs-check.sh"
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -559,7 +559,7 @@ EOF
 # ---------------------------------------------------------------------------
 
 @test "branch-name-lint: warns on non-convention branch name" {
-  HOOK="$BATS_TEST_DIRNAME/../.claude/hooks/branch-name-lint.sh"
+  HOOK="$BATS_TEST_DIRNAME/../../.claude/hooks/branch-name-lint.sh"
   input='{"tool_name":"Bash","tool_input":{"command":"git checkout -b my-bad-branch"}}'
   run bash -c "echo '$input' | '$HOOK'"
   [ "$status" -eq 0 ]
@@ -567,7 +567,7 @@ EOF
 }
 
 @test "branch-name-lint: no warning on convention branch name" {
-  HOOK="$BATS_TEST_DIRNAME/../.claude/hooks/branch-name-lint.sh"
+  HOOK="$BATS_TEST_DIRNAME/../../.claude/hooks/branch-name-lint.sh"
   input='{"tool_name":"Bash","tool_input":{"command":"git checkout -b claude/feat/my-feature"}}'
   run bash -c "echo '$input' | '$HOOK'"
   [ "$status" -eq 0 ]
@@ -576,7 +576,7 @@ EOF
 }
 
 @test "branch-name-lint: ignores non-branch-creation commands" {
-  HOOK="$BATS_TEST_DIRNAME/../.claude/hooks/branch-name-lint.sh"
+  HOOK="$BATS_TEST_DIRNAME/../../.claude/hooks/branch-name-lint.sh"
   input='{"tool_name":"Bash","tool_input":{"command":"git status"}}'
   run bash -c "echo '$input' | '$HOOK'"
   [ "$status" -eq 0 ]
@@ -584,7 +584,7 @@ EOF
 }
 
 @test "branch-name-lint: handles git switch -c" {
-  HOOK="$BATS_TEST_DIRNAME/../.claude/hooks/branch-name-lint.sh"
+  HOOK="$BATS_TEST_DIRNAME/../../.claude/hooks/branch-name-lint.sh"
   input='{"tool_name":"Bash","tool_input":{"command":"git switch -c bad-name"}}'
   run bash -c "echo '$input' | '$HOOK'"
   [ "$status" -eq 0 ]
@@ -596,7 +596,7 @@ EOF
 # ---------------------------------------------------------------------------
 
 @test "commit-msg-lint: no warning on conventional commit" {
-  HOOK="$BATS_TEST_DIRNAME/../.claude/hooks/commit-msg-lint.sh"
+  HOOK="$BATS_TEST_DIRNAME/../../.claude/hooks/commit-msg-lint.sh"
   input='{"tool_name":"Bash","tool_input":{"command":"git commit -m \"feat(auth): add login flow\""}}'
   run bash -c "echo '$input' | '$HOOK'"
   [ "$status" -eq 0 ]
@@ -604,7 +604,7 @@ EOF
 }
 
 @test "commit-msg-lint: warns on non-conventional commit" {
-  HOOK="$BATS_TEST_DIRNAME/../.claude/hooks/commit-msg-lint.sh"
+  HOOK="$BATS_TEST_DIRNAME/../../.claude/hooks/commit-msg-lint.sh"
   input='{"tool_name":"Bash","tool_input":{"command":"git commit -m \"fixed some stuff\""}}'
   run bash -c "echo '$input' | '$HOOK'"
   [ "$status" -eq 0 ]
@@ -612,7 +612,7 @@ EOF
 }
 
 @test "commit-msg-lint: accepts type without scope" {
-  HOOK="$BATS_TEST_DIRNAME/../.claude/hooks/commit-msg-lint.sh"
+  HOOK="$BATS_TEST_DIRNAME/../../.claude/hooks/commit-msg-lint.sh"
   input='{"tool_name":"Bash","tool_input":{"command":"git commit -m \"docs: update README\""}}'
   run bash -c "echo '$input' | '$HOOK'"
   [ "$status" -eq 0 ]
@@ -620,7 +620,7 @@ EOF
 }
 
 @test "commit-msg-lint: ignores non-commit commands" {
-  HOOK="$BATS_TEST_DIRNAME/../.claude/hooks/commit-msg-lint.sh"
+  HOOK="$BATS_TEST_DIRNAME/../../.claude/hooks/commit-msg-lint.sh"
   input='{"tool_name":"Bash","tool_input":{"command":"git status"}}'
   run bash -c "echo '$input' | '$HOOK'"
   [ "$status" -eq 0 ]
@@ -628,7 +628,7 @@ EOF
 }
 
 @test "commit-msg-lint: handles heredoc commit messages" {
-  HOOK="$BATS_TEST_DIRNAME/../.claude/hooks/commit-msg-lint.sh"
+  HOOK="$BATS_TEST_DIRNAME/../../.claude/hooks/commit-msg-lint.sh"
   # Heredoc commits don't use -m, so hook should skip them
   input='{"tool_name":"Bash","tool_input":{"command":"git commit"}}'
   run bash -c "echo '$input' | '$HOOK'"
@@ -641,11 +641,11 @@ EOF
 # ---------------------------------------------------------------------------
 
 @test "worktree: .gitignore contains .claude/worktrees/" {
-  grep -q ".claude/worktrees/" "$BATS_TEST_DIRNAME/../.gitignore"
+  grep -q ".claude/worktrees/" "$BATS_TEST_DIRNAME/../../.gitignore"
 }
 
 @test "worktree: .claudeignore contains .claude/worktrees/" {
-  grep -q ".claude/worktrees/" "$BATS_TEST_DIRNAME/../.claudeignore"
+  grep -q ".claude/worktrees/" "$BATS_TEST_DIRNAME/../../.claudeignore"
 }
 
 @test "worktree: validate works from subdirectory" {

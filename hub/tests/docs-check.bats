@@ -4,7 +4,7 @@
 # Each test creates isolated temp directories with mock docs.
 # Metadata lives in blockquote lines (> Key: value) after the heading.
 
-SCRIPT="$BATS_TEST_DIRNAME/../scripts/docs-check.sh"
+SCRIPT="$BATS_TEST_DIRNAME/../../scripts/docs-check.sh"
 
 # ---------------------------------------------------------------------------
 # Fixtures: create mock docs directory
@@ -556,7 +556,7 @@ EOF
 # Step 6: template metadata fields
 # ===========================================================================
 
-TEMPLATES="$BATS_TEST_DIRNAME/../docs/templates"
+TEMPLATES="$BATS_TEST_DIRNAME/../../docs/templates"
 
 @test "template: spec.md has Feature placeholder" {
   run grep -c "^> Feature: \[" "$TEMPLATES/spec.md"
@@ -1019,7 +1019,7 @@ SCRIPT
 # Step 7: Workflow rule — checkpoint flow and checklist (AC-2, AC-3)
 # ===========================================================================
 
-RULES="$BATS_TEST_DIRNAME/../.claude/rules"
+RULES="$BATS_TEST_DIRNAME/../../.claude/rules"
 
 @test "workflow: has determinism review checkpoint flow" {
   run grep -c "Determinism Review" "$RULES/workflow.md"
@@ -1067,7 +1067,7 @@ RULES="$BATS_TEST_DIRNAME/../.claude/rules"
 # Step 9: /catchup integration (AC-10, AC-11)
 # ===========================================================================
 
-COMMANDS="$BATS_TEST_DIRNAME/../.claude/commands"
+COMMANDS="$BATS_TEST_DIRNAME/../../.claude/commands"
 
 @test "catchup: surfaces Determinism Review from checkpoint" {
   run grep -c "Determinism Review" "$COMMANDS/catchup.md"
@@ -1085,8 +1085,8 @@ COMMANDS="$BATS_TEST_DIRNAME/../.claude/commands"
 # Step 10: Documentation — README and GUIDE
 # ===========================================================================
 
-README="$BATS_TEST_DIRNAME/../README.md"
-GUIDE="$BATS_TEST_DIRNAME/../docs/scaffold-guide/command-reference.md"
+README="$BATS_TEST_DIRNAME/../../README.md"
+GUIDE="$BATS_TEST_DIRNAME/../../docs/scaffold-guide/command-reference.md"
 
 @test "readme: mentions audit-session in scripts description" {
   run grep -c "audit-session" "$README"

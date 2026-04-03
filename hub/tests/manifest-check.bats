@@ -3,7 +3,7 @@
 #
 # Each test creates isolated temp directories with mock README and files.
 
-SCRIPT="$BATS_TEST_DIRNAME/../scripts/manifest-check.sh"
+SCRIPT="$BATS_TEST_DIRNAME/../../scripts/manifest-check.sh"
 
 setup() {
   export TMPDIR="${BATS_TEST_TMPDIR}"
@@ -106,7 +106,7 @@ EOF
 }
 
 @test "parse works on the real README" {
-  run bash "$SCRIPT" parse "$BATS_TEST_DIRNAME/../README.md"
+  run bash "$SCRIPT" parse "$BATS_TEST_DIRNAME/../../README.md"
   [ "$status" -eq 0 ]
   # The real README has at least 30 entries across all tables
   count=$(echo "$output" | jq 'length')
@@ -200,7 +200,7 @@ EOF
 }
 
 @test "check-existence works on real README against real repo" {
-  cd "$BATS_TEST_DIRNAME/.."
+  cd "$BATS_TEST_DIRNAME/../.."
   run bash "$SCRIPT" check-existence README.md
   [ "$status" -eq 0 ]
   # All found entries should be real files

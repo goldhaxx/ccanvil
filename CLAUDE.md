@@ -9,10 +9,10 @@
 
 ## Commands
 ```bash
-bats tests/                          # Run all tests
-bats tests/scaffold-sync.bats        # Run scaffold sync tests only
-bats tests/security-audit.bats       # Run security audit tests only
-bats tests/feature-lifecycle.bats    # Run feature lifecycle tests only
+bats hub/tests/                          # Run all tests
+bats hub/tests/scaffold-sync.bats        # Run scaffold sync tests only
+bats hub/tests/security-audit.bats       # Run security audit tests only
+bats hub/tests/feature-lifecycle.bats    # Run feature lifecycle tests only
 bash scripts/security-audit.sh       # Run PII/secrets scan
 bash scripts/permissions-audit.sh check --settings-dir .claude  # Audit permissions
 bash scripts/permissions-audit.sh init --settings-dir .claude   # Init decision log

@@ -3,7 +3,7 @@
 #
 # Each test creates an isolated environment and pipes JSON to the hook.
 
-HOOK="$BATS_TEST_DIRNAME/../.claude/hooks/lint-on-write.sh"
+HOOK="$BATS_TEST_DIRNAME/../../.claude/hooks/lint-on-write.sh"
 
 setup() {
   REPO=$(mktemp -d)

@@ -12,7 +12,7 @@ Most of this workflow is deterministic. Claude's ONLY judgment call: checking fo
 
 4. **(DETERMINISTIC)** Run the full promote workflow:
 ```bash
-./.ccanvil/scripts/scaffold-sync.sh promote <file>
+./.ccanvil/scripts/ccanvil-sync.sh promote <file>
 ```
 
 This handles: status verification, copy to scaffold, lockfile update, logging, git commit, version bump — all in one call.

@@ -447,5 +447,5 @@ JSON
 }
 
 @test "scaffold.json is tracked in scaffold-sync TRACKED_PATTERNS" {
-  grep -q 'scaffold.json' "$BATS_TEST_DIRNAME/../../.ccanvil/scripts/scaffold-sync.sh"
+  grep -q 'scaffold.json' "$BATS_TEST_DIRNAME/../../.ccanvil/scripts/ccanvil-sync.sh"
 }

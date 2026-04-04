@@ -24,7 +24,7 @@ Each criterion is independently testable. Binary pass/fail.
 - [ ] **AC-4:** The Appendix ("Why Each Practice Exists") section is not present in any `docs/scaffold-guide/` file — it duplicates SCAFFOLD_FRAMEWORK.md
 - [ ] **AC-5:** `SCAFFOLD_FRAMEWORK.md` no longer exists at repository root; `docs/scaffold-guide/scaffold-framework.md` contains identical content
 - [ ] **AC-6:** `CLAUDE.md` references `docs/scaffold-guide/index.md` (not `@GUIDE.md`) in its Reference Documents section
-- [ ] **AC-7:** `scripts/scaffold-sync.sh` TRACKED_PATTERNS references `docs/scaffold-guide/*.md` instead of `GUIDE.md` and `SCAFFOLD_FRAMEWORK.md`
+- [ ] **AC-7:** `scripts/ccanvil-sync.sh` TRACKED_PATTERNS references `docs/scaffold-guide/*.md` instead of `GUIDE.md` and `SCAFFOLD_FRAMEWORK.md`
 - [ ] **AC-8:** `.claude/hooks/lint-on-write.sh` ALWAYS_LOADED_PATTERNS includes `docs/scaffold-guide/index.md` instead of `GUIDE.md`
 - [ ] **AC-9:** `.claude/hooks/protect-files.sh` blocks writes to `docs/scaffold-guide/scaffold-framework.md` (not root `SCAFFOLD_FRAMEWORK.md`)
 - [ ] **AC-10:** `scripts/security-audit.sh` whitelist references `docs/scaffold-guide/scaffold-framework.md`
@@ -50,7 +50,7 @@ Each criterion is independently testable. Binary pass/fail.
 | `docs/scaffold-guide/parallel-sessions.md` | New — worktree usage |
 | `docs/scaffold-guide/scaffold-framework.md` | New (moved from root) |
 | `CLAUDE.md` | Modified — update reference |
-| `scripts/scaffold-sync.sh` | Modified — update TRACKED_PATTERNS |
+| `scripts/ccanvil-sync.sh` | Modified — update TRACKED_PATTERNS |
 | `.claude/hooks/lint-on-write.sh` | Modified — update ALWAYS_LOADED_PATTERNS |
 | `.claude/hooks/protect-files.sh` | Modified — update blocked path |
 | `scripts/security-audit.sh` | Modified — update whitelist |
@@ -73,7 +73,7 @@ Each criterion is independently testable. Binary pass/fail.
 ## Out of Scope
 
 - Converting GUIDE.md content to a skill (wrong abstraction — it's reference, not a workflow)
-- Changing scaffold-sync.sh to support directory-level merge (per-file tracking with existing glob patterns is sufficient)
+- Changing ccanvil-sync.sh to support directory-level merge (per-file tracking with existing glob patterns is sufficient)
 - Rewriting GUIDE.md content (preserve as-is, just split)
 - Changing the `@` import semantics in Claude Code itself
 
@@ -81,7 +81,7 @@ Each criterion is independently testable. Binary pass/fail.
 
 - Split boundaries follow existing `##` headings — each top-level section becomes its own file
 - `docs/scaffold-guide/index.md` should contain the intro paragraph, system overview diagram, and a table of sections with file paths and "when to read" guidance
-- scaffold-sync.sh change is minimal: replace two literal entries in TRACKED_PATTERNS with one glob `"docs/scaffold-guide/*.md"`
+- ccanvil-sync.sh change is minimal: replace two literal entries in TRACKED_PATTERNS with one glob `"docs/scaffold-guide/*.md"`
 - SCAFFOLD_FRAMEWORK.md keeps its existing protection (hook block) — just update the path match
 - The `<!-- NODE-SPECIFIC-START -->` delimiter goes at the end of each section file, same pattern as rules/commands/agents
 - scaffold-framework.md does NOT get a delimiter (it's whole-file auto-update, read-only research)

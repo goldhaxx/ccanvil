@@ -153,7 +153,7 @@ EOF
 # =========================================================================
 
 @test "AC-8: pull-plan classifies scaffold.json as auto-update when local is clean" {
-  SYNC_SCRIPT="$BATS_TEST_DIRNAME/../../.ccanvil/scripts/scaffold-sync.sh"
+  SYNC_SCRIPT="$BATS_TEST_DIRNAME/../../.ccanvil/scripts/ccanvil-sync.sh"
 
   # Set up a "hub" scaffold with scaffold.json
   HUB=$(mktemp -d)

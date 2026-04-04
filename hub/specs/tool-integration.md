@@ -32,7 +32,7 @@ Each criterion is independently testable. Binary pass/fail.
 
 - [ ] **AC-7:** `.claude/commands/catchup.md` step 0c calls `operations.sh resolve backlog.list` instead of hardcoding `docs-check.sh list-specs`. Verified by: `grep -q "operations.sh resolve backlog.list" .claude/commands/catchup.md`.
 
-- [ ] **AC-8:** `.claude/scaffold.json` with a valid `integrations` object passes `jq empty` validation. `scaffold-sync.sh`'s `TRACKED_PATTERNS` array includes `.claude/scaffold.json` so the config file is tracked in the lockfile.
+- [ ] **AC-8:** `.claude/scaffold.json` with a valid `integrations` object passes `jq empty` validation. `ccanvil-sync.sh`'s `TRACKED_PATTERNS` array includes `.claude/scaffold.json` so the config file is tracked in the lockfile.
 
 - [ ] **AC-9 (error):** `operations.sh resolve backlog.list` when `.claude/scaffold.json` contains invalid JSON exits 1 with stderr: `ERROR: .claude/scaffold.json is not valid JSON`.
 
@@ -49,14 +49,14 @@ Each criterion is independently testable. Binary pass/fail.
 | `scripts/operations.sh` | New — routing layer, subcommand `resolve` |
 | `tests/operations.bats` | New — bats tests |
 | `.claude/scaffold.json` | Modified — add `integrations` schema |
-| `scripts/scaffold-sync.sh` | Modified — add `.claude/scaffold.json` to `TRACKED_PATTERNS` |
+| `scripts/ccanvil-sync.sh` | Modified — add `.claude/scaffold.json` to `TRACKED_PATTERNS` |
 | `.claude/commands/catchup.md` | Modified — call `operations.sh resolve backlog.list` in step 0c |
 | `CLAUDE.md` | Modified — add `operations.sh` to Commands section |
 | `GUIDE.md` | Modified — add to Command Reference table |
 
 ## Dependencies
 
-- **Requires:** `jq` (already used by `scaffold-sync.sh`, `docs-check.sh`, `context-budget.sh`)
+- **Requires:** `jq` (already used by `ccanvil-sync.sh`, `docs-check.sh`, `context-budget.sh`)
 - **Requires:** Linear MCP tools present in `settings.local.json` (already: `mcp__claude_ai_Linear__list_issues`, `mcp__claude_ai_Linear__get_issue`)
 - **Blocked by:** Nothing
 - **Research complete:** See `docs/research/tool-integration-landscape.md` for the full integration mechanism taxonomy (MCP, Agent SDK, plugins, CLIs, APIs, webhooks, gh-aw, A2A) that informed this design.

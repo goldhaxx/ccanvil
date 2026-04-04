@@ -48,7 +48,7 @@ Each criterion is independently testable. Binary pass/fail.
 ### Sync integrity
 
 - [ ] **AC-16:** Sync tracked patterns are updated to reflect the new directory structure (`.ccanvil/scripts/*.sh`, `.ccanvil/guide/*.md`, `.ccanvil/templates/*.md`).
-- [ ] **AC-17:** All commands that reference script paths (e.g., `scripts/scaffold-sync.sh`) are updated to use `.ccanvil/scripts/` paths.
+- [ ] **AC-17:** All commands that reference script paths (e.g., `scripts/ccanvil-sync.sh`) are updated to use `.ccanvil/scripts/` paths.
 - [ ] **AC-18:** All hooks that reference script paths are updated to the new `.ccanvil/` paths.
 
 ### Tests pass
@@ -70,7 +70,7 @@ Each criterion is independently testable. Binary pass/fail.
 | `hub/specs/` | Moved from `docs/specs/` |
 | `hub/research/` | Moved from `docs/research/` |
 | `hub/meta/` | HOW_TO_USE.md, INIT_PROMPT.md, SCAFFOLD_SYSTEM_PROMPT.md, GLOBAL_CLAUDE.md |
-| `scripts/scaffold-sync.sh` | Updated tracked patterns, paths, terminology |
+| `scripts/ccanvil-sync.sh` | Updated tracked patterns, paths, terminology |
 | `.claude/commands/*.md` | Updated script path references |
 | `.claude/hooks/*.sh` | Updated path references |
 | `.claude/settings.json` | Removed bats permission, updated hook paths |
@@ -94,7 +94,7 @@ Each criterion is independently testable. Binary pass/fail.
 ## Resolved Questions
 
 1. **Command naming:** Yes — `/scaffold-*` becomes `/ccanvil-*`.
-2. **Script naming:** Yes — `scaffold-sync.sh` becomes `ccanvil-sync.sh`.
+2. **Script naming:** Yes — `ccanvil-sync.sh` becomes `ccanvil-sync.sh`.
 3. **Lockfile location:** Yes — `.claude/scaffold.lock` moves to `.ccanvil/ccanvil.lock`.
 4. **Downstream migration:** Manual for now. Known downstream projects: **fucina**, **luxlook** (both still pointing at old hub path `~/projects/claude-code-scaffold`). Migration script is a follow-up — see future feature note below.
 

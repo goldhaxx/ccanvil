@@ -32,7 +32,7 @@ Each criterion is independently testable. Binary pass/fail.
 
 - [ ] **AC-7 (invalid local JSON):** When `scaffold.local.json` contains invalid JSON, scripts exit 1 with stderr: `ERROR: .claude/scaffold.local.json is not valid JSON`.
 
-- [ ] **AC-8 (pull safety):** `scaffold-sync.sh pull-plan` classifies `scaffold.json` as `auto-update` when the hub changes it and the local copy is clean (node overrides live in `scaffold.local.json`, not in `scaffold.json`). Verified by: hub changes `scaffold.json`, `pull-plan` output shows `"action": "auto-update"` for `.claude/scaffold.json`.
+- [ ] **AC-8 (pull safety):** `ccanvil-sync.sh pull-plan` classifies `scaffold.json` as `auto-update` when the hub changes it and the local copy is clean (node overrides live in `scaffold.local.json`, not in `scaffold.json`). Verified by: hub changes `scaffold.json`, `pull-plan` output shows `"action": "auto-update"` for `.claude/scaffold.json`.
 
 - [ ] **AC-9 (gitignore):** `.claude/scaffold.local.json` is listed in `.gitignore`. Verified with `grep`.
 
@@ -68,7 +68,7 @@ Each criterion is independently testable. Binary pass/fail.
 - Schema validation of scaffold.local.json structure.
 - Migration tooling for existing node-modified scaffold.json files.
 - Array merge strategies (no arrays in current schema; document the policy for when they're added).
-- `scaffold-sync.sh` changes to pull-plan action classification (scaffold.json already gets `auto-update` when local is clean; the design ensures local stays clean by moving overrides to the local file).
+- `ccanvil-sync.sh` changes to pull-plan action classification (scaffold.json already gets `auto-update` when local is clean; the design ensures local stays clean by moving overrides to the local file).
 
 ## Implementation Notes
 

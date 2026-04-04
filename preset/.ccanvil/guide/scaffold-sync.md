@@ -80,7 +80,7 @@ stateDiagram-v2
     clean --> node_only: /scaffold-ignore
     modified --> node_only: /scaffold-ignore
     local_only --> node_only: /scaffold-ignore
-    node_only --> clean: scaffold-sync.sh track
+    node_only --> clean: ccanvil-sync.sh track
 
     state clean {
         [*]: Auto-updated on pull
@@ -161,7 +161,7 @@ flowchart TD
     style USER fill:#e3f2fd,stroke:#333,stroke-width:2px
 ```
 
-**Bootstrap requirement:** The pull process uses `scaffold-sync.sh` itself. If the hub has a newer version of the script with new commands, the node's old script won't know them. When this happens, manually copy the new script first: `cp <hub>/scripts/scaffold-sync.sh scripts/scaffold-sync.sh`, then run `/scaffold-pull`.
+**Bootstrap requirement:** The pull process uses `ccanvil-sync.sh` itself. If the hub has a newer version of the script with new commands, the node's old script won't know them. When this happens, manually copy the new script first: `cp <hub>/scripts/ccanvil-sync.sh scripts/ccanvil-sync.sh`, then run `/scaffold-pull`.
 
 ## Push Flow (Project → Hub)
 
@@ -236,11 +236,11 @@ Demote is fully deterministic. Promote has one judgment call: checking for proje
 ```mermaid
 flowchart LR
     subgraph Promote ["/scaffold-promote file"]
-        P1["Claude: check for<br/>project-specific content"] --> P2["scaffold-sync.sh promote file<br/><i>verify + copy + lockfile + git + log</i>"]
+        P1["Claude: check for<br/>project-specific content"] --> P2["ccanvil-sync.sh promote file<br/><i>verify + copy + lockfile + git + log</i>"]
     end
 
     subgraph Demote ["/scaffold-demote file — fully deterministic"]
-        D1["scaffold-sync.sh demote file<br/><i>verify + lockfile + log</i>"]
+        D1["ccanvil-sync.sh demote file<br/><i>verify + lockfile + log</i>"]
     end
 
     style Promote fill:#c8e6c9

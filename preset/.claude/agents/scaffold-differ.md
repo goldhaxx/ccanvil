@@ -6,7 +6,7 @@ tools:
   - Grep
   - Glob
   - Bash(diff:*)
-  - Bash(./scripts/scaffold-sync.sh:*)
+  - Bash(./scripts/ccanvil-sync.sh:*)
   - Bash(git log:*)
   - Bash(git -C:*)
 model: sonnet
@@ -27,7 +27,7 @@ You receive:
 
 ### 1. Read the lockfile
 
-Run `./scripts/scaffold-sync.sh status` to see all tracked files and their states.
+Run `./scripts/ccanvil-sync.sh status` to see all tracked files and their states.
 
 ### 2. Identify candidates
 
@@ -58,7 +58,7 @@ For each file, read its content and classify:
 
 ### 4. For modified scaffold files
 
-Run `./scripts/scaffold-sync.sh diff <file>` to see exactly what changed. Identify:
+Run `./scripts/ccanvil-sync.sh diff <file>` to see exactly what changed. Identify:
 - Lines added that are generalizable
 - Lines added that are project-specific
 - Lines removed (check if the removal is intentional improvement or just local cleanup)

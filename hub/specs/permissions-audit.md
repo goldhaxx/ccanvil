@@ -53,7 +53,7 @@ Each criterion is independently testable. Binary pass/fail.
 
 ## Dependencies
 
-- **Requires:** `jq` (already used by scaffold-sync.sh)
+- **Requires:** `jq` (already used by ccanvil-sync.sh)
 - **Blocked by:** Nothing
 
 ## Out of Scope

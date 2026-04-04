@@ -5,18 +5,18 @@ All deterministic operations (copy, hash, lockfile, git commit, logging) are han
 ## Step 1: Pre-check and identify candidates (deterministic)
 
 ```bash
-./.ccanvil/scripts/scaffold-sync.sh pre-check
-./.ccanvil/scripts/scaffold-sync.sh push-candidates
+./.ccanvil/scripts/ccanvil-sync.sh pre-check
+./.ccanvil/scripts/ccanvil-sync.sh push-candidates
 ```
 
-If the user specified a file: `./.ccanvil/scripts/scaffold-sync.sh push-candidates <file>`
+If the user specified a file: `./.ccanvil/scripts/ccanvil-sync.sh push-candidates <file>`
 
 Read the JSON output: array of `{file, status, has_diff}` objects.
 
 ## Step 2: For each candidate (JUDGMENT CALL)
 
 1. Read the file content.
-2. If `has_diff` is true, show the diff: `./.ccanvil/scripts/scaffold-sync.sh diff <file>`
+2. If `has_diff` is true, show the diff: `./.ccanvil/scripts/ccanvil-sync.sh diff <file>`
 3. **Classify the change** — this is Claude's judgment call:
    - **Generalizable** — useful across projects (new rule, improved workflow, better agent prompt, utility script)
    - **Project-specific** — references project names, specific APIs, domain logic, tech stack details
@@ -28,7 +28,7 @@ Read the JSON output: array of `{file, status, has_diff}` objects.
 
 For each approved file:
 ```bash
-./.ccanvil/scripts/scaffold-sync.sh push-apply <file> "<brief description>"
+./.ccanvil/scripts/ccanvil-sync.sh push-apply <file> "<brief description>"
 ```
 
 For mixed files where only parts are generalizable: read the scaffold version, apply only the generalizable changes to a temp file, show the user for approval, then push the temp file content.
@@ -36,7 +36,7 @@ For mixed files where only parts are generalizable: read the scaffold version, a
 ## Step 4: Finalize (deterministic)
 
 ```bash
-./.ccanvil/scripts/scaffold-sync.sh push-finalize "chore(scaffold): upstream <description>"
+./.ccanvil/scripts/ccanvil-sync.sh push-finalize "chore(scaffold): upstream <description>"
 ```
 
 Report what was pushed.

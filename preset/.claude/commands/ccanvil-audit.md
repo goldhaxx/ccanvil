@@ -77,7 +77,7 @@ Output a structured audit:
 ```
 
 ## Rules
-- Be specific. "Could be more deterministic" is useless. "Claude manually runs `jq` to read lockfile status on line 42 of scaffold-pull.md — should call `scaffold-sync.sh lock-get <file>`" is useful.
+- Be specific. "Could be more deterministic" is useless. "Claude manually runs `jq` to read lockfile status on line 42 of scaffold-pull.md — should call `ccanvil-sync.sh lock-get <file>`" is useful.
 - Don't flag stochastic operations that genuinely require semantic understanding.
 - Prioritize by impact: operations that run frequently or consume many tokens first.
 - If no violations found, say so — don't invent problems.

@@ -54,11 +54,11 @@ The core challenge is that the hub needs to *use* the same scripts it *distribut
 - **Files:** All distributable artifacts
 - **Verify:** `ls -la .ccanvil/scripts/` resolves via symlink
 
-### Step 3: Rename scaffold-sync.sh → ccanvil-sync.sh (AC-2)
+### Step 3: Rename ccanvil-sync.sh → ccanvil-sync.sh (AC-2)
 
-- **Test:** Write bats test: `.ccanvil/scripts/ccanvil-sync.sh` exists and is executable. Old path `scripts/scaffold-sync.sh` does not exist.
+- **Test:** Write bats test: `.ccanvil/scripts/ccanvil-sync.sh` exists and is executable. Old path `scripts/ccanvil-sync.sh` does not exist.
 - **Implement:** Rename the script file. Update the shebang/header comments. Update internal self-references (e.g., usage strings, error messages that mention the script name).
-- **Files:** `preset/.ccanvil/scripts/ccanvil-sync.sh` (was `scripts/scaffold-sync.sh`)
+- **Files:** `preset/.ccanvil/scripts/ccanvil-sync.sh` (was `scripts/ccanvil-sync.sh`)
 - **Verify:** `bash -n .ccanvil/scripts/ccanvil-sync.sh` passes syntax check
 
 ### Step 4: Rename /scaffold-* commands → /ccanvil-* (AC-1, AC-2)
@@ -125,7 +125,7 @@ The core challenge is that the hub needs to *use* the same scripts it *distribut
 
 ### Step 8: Update commands and hooks for new paths (AC-17, AC-18)
 
-- **Test:** Grep all `.claude/commands/` and `.claude/hooks/` files for old paths (`scripts/scaffold-sync.sh`, `scripts/docs-check.sh`, `docs/scaffold-guide/`). Verify zero matches.
+- **Test:** Grep all `.claude/commands/` and `.claude/hooks/` files for old paths (`scripts/ccanvil-sync.sh`, `scripts/docs-check.sh`, `docs/scaffold-guide/`). Verify zero matches.
 - **Implement:** Update all path references in:
   - `preset/.claude/commands/*.md` — script paths to `.ccanvil/scripts/`
   - `preset/.claude/hooks/*.sh` — script paths to `.ccanvil/scripts/`
@@ -172,7 +172,7 @@ The core challenge is that the hub needs to *use* the same scripts it *distribut
 
 - **Test:** `bats hub/tests/` — all tests pass.
 - **Implement:** Update every `.bats` file in `hub/tests/`:
-  - Script paths: `scripts/scaffold-sync.sh` → `.ccanvil/scripts/ccanvil-sync.sh`
+  - Script paths: `scripts/ccanvil-sync.sh` → `.ccanvil/scripts/ccanvil-sync.sh`
   - Docs paths: `docs/scaffold-guide/` → `.ccanvil/guide/`
   - Template paths: `docs/templates/` → `.ccanvil/templates/`
   - Lockfile paths: `.claude/scaffold.lock` → `.ccanvil/ccanvil.lock`

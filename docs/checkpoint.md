@@ -31,7 +31,7 @@
 ## Next Steps
 
 1. **BTS-23:** CLAUDE.md content review — trim to 80-line budget (Medium, needs-spec)
-2. **BTS-27:** scaffold-sync.sh bootstrap hash auto-update (Low, needs-spec)
+2. **BTS-27:** ccanvil-sync.sh bootstrap hash auto-update (Low, needs-spec)
 3. **BTS-25:** operations.sh exec subcommand (Low, needs-spec)
 4. **BTS-22:** Docs directory strategy (Medium, needs-research)
 5. Sync BTS-28 changes to downstream nodes (fucina, luxlook)

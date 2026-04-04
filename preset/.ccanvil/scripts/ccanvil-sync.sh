@@ -1,15 +1,15 @@
 #!/usr/bin/env bash
-# scaffold-sync.sh — Bi-directional sync between a project and the scaffold hub.
+# ccanvil-sync.sh — Bi-directional sync between a project and the scaffold hub.
 #
 # Usage:
-#   scaffold-sync.sh init [scaffold-path]   Generate lockfile from current state
-#   scaffold-sync.sh status                 Show file provenance and sync state
-#   scaffold-sync.sh diff [file]            Show diff between local and scaffold versions
-#   scaffold-sync.sh hash <file>            Compute sha256 of a file
-#   scaffold-sync.sh lock-get <file>        Read a lockfile entry (JSON)
-#   scaffold-sync.sh lock-update <file> <field> <value>  Update a lockfile field
-#   scaffold-sync.sh section-merge <s> <l>  Merge hub/node sections of a delimited file
-#   scaffold-sync.sh scan                   List all trackable files in the project
+#   ccanvil-sync.sh init [scaffold-path]   Generate lockfile from current state
+#   ccanvil-sync.sh status                 Show file provenance and sync state
+#   ccanvil-sync.sh diff [file]            Show diff between local and scaffold versions
+#   ccanvil-sync.sh hash <file>            Compute sha256 of a file
+#   ccanvil-sync.sh lock-get <file>        Read a lockfile entry (JSON)
+#   ccanvil-sync.sh lock-update <file> <field> <value>  Update a lockfile field
+#   ccanvil-sync.sh section-merge <s> <l>  Merge hub/node sections of a delimited file
+#   ccanvil-sync.sh scan                   List all trackable files in the project
 
 set -euo pipefail
 
@@ -69,7 +69,7 @@ safe_lock_mv() {
 }
 
 require_lockfile() {
-  [[ -f "$LOCKFILE" ]] || die "No $LOCKFILE found. Run: scaffold-sync.sh init"
+  [[ -f "$LOCKFILE" ]] || die "No $LOCKFILE found. Run: ccanvil-sync.sh init"
 }
 
 get_scaffold_source_raw() {
@@ -324,7 +324,7 @@ cmd_status() {
   echo ""
   echo "Statuses: CLEAN=synced, MODIFIED=locally changed, MODIFIED*=changed since last sync,"
   echo "          LOCAL=project-only, PROMOTED=pushed to scaffold, SCAFFOLD-ONLY=not yet pulled,"
-  echo "          NODE-ONLY=excluded from sync (use /scaffold-ignore to set, scaffold-sync.sh track to undo)"
+  echo "          NODE-ONLY=excluded from sync (use /scaffold-ignore to set, ccanvil-sync.sh track to undo)"
 }
 
 cmd_diff() {
@@ -370,19 +370,19 @@ cmd_diff() {
 }
 
 cmd_hash() {
-  local file="${1:?Usage: scaffold-sync.sh hash <file>}"
+  local file="${1:?Usage: ccanvil-sync.sh hash <file>}"
   echo "$(file_hash "$file")  $file"
 }
 
 cmd_lock_get() {
   require_lockfile
-  local file="${1:?Usage: scaffold-sync.sh lock-get <file>}"
+  local file="${1:?Usage: ccanvil-sync.sh lock-get <file>}"
   jq --arg f "$file" '.files[$f] // "not found"' "$LOCKFILE"
 }
 
 cmd_lock_update() {
   require_lockfile
-  local file="${1:?Usage: scaffold-sync.sh lock-update <file> <field> <value>}"
+  local file="${1:?Usage: ccanvil-sync.sh lock-update <file> <field> <value>}"
   local field="${2:?}"
   local value="${3:?}"
 
@@ -398,7 +398,7 @@ cmd_lock_update() {
 
 cmd_lock_add() {
   require_lockfile
-  local file="${1:?Usage: scaffold-sync.sh lock-add <file> <origin> <scaffold_hash> <local_hash> <status>}"
+  local file="${1:?Usage: ccanvil-sync.sh lock-add <file> <origin> <scaffold_hash> <local_hash> <status>}"
   local origin="${2:?}"
   local scaffold_hash="${3}"
   local local_hash="${4}"
@@ -421,7 +421,7 @@ cmd_lock_add() {
 
 cmd_lock_remove() {
   require_lockfile
-  local file="${1:?Usage: scaffold-sync.sh lock-remove <file>}"
+  local file="${1:?Usage: ccanvil-sync.sh lock-remove <file>}"
 
   local tmp
   tmp=$(mktemp)
@@ -431,7 +431,7 @@ cmd_lock_remove() {
 
 cmd_lock_set_version() {
   require_lockfile
-  local version="${1:?Usage: scaffold-sync.sh lock-set-version <version>}"
+  local version="${1:?Usage: ccanvil-sync.sh lock-set-version <version>}"
 
   local tmp
   tmp=$(mktemp)
@@ -440,8 +440,8 @@ cmd_lock_set_version() {
 }
 
 cmd_section_merge() {
-  local scaffold_file="${1:?Usage: scaffold-sync.sh section-merge <scaffold-file> <local-file>}"
-  local local_file="${2:?Usage: scaffold-sync.sh section-merge <scaffold-file> <local-file>}"
+  local scaffold_file="${1:?Usage: ccanvil-sync.sh section-merge <scaffold-file> <local-file>}"
+  local local_file="${2:?Usage: ccanvil-sync.sh section-merge <scaffold-file> <local-file>}"
 
   [[ -f "$scaffold_file" ]] || die "Scaffold file not found: $scaffold_file"
   [[ -f "$local_file" ]] || die "Local file not found: $local_file"
@@ -506,7 +506,7 @@ cmd_section_merge() {
 # Node-only classification commands
 cmd_node_only() {
   require_lockfile
-  local file="${1:?Usage: scaffold-sync.sh node-only <file>}"
+  local file="${1:?Usage: ccanvil-sync.sh node-only <file>}"
 
   # Verify file exists in lockfile
   local exists
@@ -529,7 +529,7 @@ cmd_node_only() {
 
 cmd_track() {
   require_lockfile
-  local file="${1:?Usage: scaffold-sync.sh track <file>}"
+  local file="${1:?Usage: ccanvil-sync.sh track <file>}"
 
   local exists
   exists=$(jq -r --arg f "$file" '.files[$f] // "null"' "$LOCKFILE")
@@ -608,15 +608,15 @@ cmd_pre_check() {
   fi
 
   # Bootstrap: if the hub has a newer sync script, copy it before proceeding
-  local hub_script="$scaffold_source/.ccanvil/scripts/scaffold-sync.sh"
-  local local_script=".ccanvil/scripts/scaffold-sync.sh"
+  local hub_script="$scaffold_source/.ccanvil/scripts/ccanvil-sync.sh"
+  local local_script=".ccanvil/scripts/ccanvil-sync.sh"
   if [[ -f "$hub_script" && -f "$local_script" ]]; then
     local hub_hash local_hash
     hub_hash=$(file_hash "$hub_script")
     local_hash=$(file_hash "$local_script")
     if [[ "$hub_hash" != "$local_hash" ]]; then
       cp "$hub_script" "$local_script"
-      echo "BOOTSTRAPPED: Updated .ccanvil/scripts/scaffold-sync.sh from hub"
+      echo "BOOTSTRAPPED: Updated .ccanvil/scripts/ccanvil-sync.sh from hub"
       echo "  Re-run your command to use the updated script."
       exit 0
     fi
@@ -765,7 +765,7 @@ cmd_pull_auto() {
   # Skip this script itself to avoid replacing a running process mid-execution.
   # Bootstrap in pre-check handles sync script updates separately.
   echo "$plan" | jq -r '.[] | select(.action == "auto-update" or .action == "adopt-clean") | .file' | while IFS= read -r file; do
-    if [[ "$file" == ".ccanvil/scripts/scaffold-sync.sh" ]]; then
+    if [[ "$file" == ".ccanvil/scripts/ccanvil-sync.sh" ]]; then
       if $dry_run; then
         echo "DRY-RUN: would skip $file (updated via bootstrap)"
       else
@@ -816,7 +816,7 @@ cmd_pull_auto() {
 # Actions: take-scaffold, keep-local, section-merge, accept-new, adopt-conflict, delete, write-merged <path>
 cmd_pull_apply() {
   require_lockfile
-  local file="${1:?Usage: scaffold-sync.sh pull-apply <file> <action> [merged-content-file]}"
+  local file="${1:?Usage: ccanvil-sync.sh pull-apply <file> <action> [merged-content-file]}"
   local action="${2:?}"
   local merged_file=""
   local dry_run=false
@@ -1096,7 +1096,7 @@ cmd_push_candidates() {
 # Usage: push-apply <file> [description] [--dry-run]
 cmd_push_apply() {
   require_lockfile
-  local file="${1:?Usage: scaffold-sync.sh push-apply <file> [description]}"
+  local file="${1:?Usage: ccanvil-sync.sh push-apply <file> [description]}"
   local description=""
   local dry_run=false
 
@@ -1164,7 +1164,7 @@ cmd_push_finalize() {
       message="$arg"
     fi
   done
-  [[ -n "$message" ]] || die "Usage: scaffold-sync.sh push-finalize <commit-message>"
+  [[ -n "$message" ]] || die "Usage: ccanvil-sync.sh push-finalize <commit-message>"
 
   local scaffold_source
   scaffold_source=$(get_scaffold_source)
@@ -1207,7 +1207,7 @@ cmd_push_finalize() {
 # Usage: promote <file>
 cmd_promote() {
   require_lockfile
-  local file="${1:?Usage: scaffold-sync.sh promote <file>}"
+  local file="${1:?Usage: ccanvil-sync.sh promote <file>}"
 
   local status
   status=$(jq -r --arg f "$file" '.files[$f].status // "unknown"' "$LOCKFILE")
@@ -1257,7 +1257,7 @@ cmd_promote() {
 # Usage: demote <file>
 cmd_demote() {
   require_lockfile
-  local file="${1:?Usage: scaffold-sync.sh demote <file>}"
+  local file="${1:?Usage: ccanvil-sync.sh demote <file>}"
 
   local status
   status=$(jq -r --arg f "$file" '.files[$f].status // "unknown"' "$LOCKFILE")
@@ -1304,7 +1304,7 @@ cmd_scan() {
 
 require_jq
 
-# Allow sourcing for tests: `source scaffold-sync.sh --source-only`
+# Allow sourcing for tests: `source ccanvil-sync.sh --source-only`
 if [[ "${1:-}" == "--source-only" ]]; then
   return 0 2>/dev/null || exit 0
 fi
@@ -1341,7 +1341,7 @@ case "${1:-}" in
   demote)           shift; cmd_demote "$@" ;;
 
   *)
-    echo "Usage: scaffold-sync.sh <command> [args]"
+    echo "Usage: ccanvil-sync.sh <command> [args]"
     echo ""
     echo "Classification commands:"
     echo "  node-only <file>                      Mark file as node-only (exclude from sync)"

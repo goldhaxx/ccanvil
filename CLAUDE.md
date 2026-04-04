@@ -21,7 +21,7 @@ bash .ccanvil/scripts/docs-check.sh activate <id> # Activate a spec → create b
 bash .ccanvil/scripts/docs-check.sh complete <id> # Mark spec complete
 bash .ccanvil/scripts/operations.sh resolve <operation>   # Resolve operation routing
 bash .ccanvil/scripts/operations.sh merge-config          # Merged effective config (JSON)
-bash -n .ccanvil/scripts/scaffold-sync.sh                 # Syntax check the sync script
+bash -n .ccanvil/scripts/ccanvil-sync.sh                 # Syntax check the sync script
 ```
 
 ## Architecture

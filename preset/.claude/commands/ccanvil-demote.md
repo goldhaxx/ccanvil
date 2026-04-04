@@ -10,7 +10,7 @@ This is a fully deterministic operation. No Claude judgment needed.
 
 3. **(DETERMINISTIC)** Run the full demote workflow:
 ```bash
-./.ccanvil/scripts/scaffold-sync.sh demote <file>
+./.ccanvil/scripts/ccanvil-sync.sh demote <file>
 ```
 
 This handles: status verification, lockfile update, and logging — all in one call.

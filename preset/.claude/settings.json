@@ -37,7 +37,7 @@
       "Bash(npm run:*)",
       "Bash(pnpm:*)",
       "Bash(npx:*)",
-      "Bash(bats:*)",
+
       "Bash(bash -n:*)",
       "Bash(.ccanvil/scripts/docs-check.sh:*)",
       "Bash(.ccanvil/scripts/security-audit.sh:*)",

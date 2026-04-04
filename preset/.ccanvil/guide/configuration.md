@@ -55,8 +55,8 @@ Hook scripts live in `.claude/hooks/` and are referenced from `settings.json`. T
 | `workflow.md` | Sessions | One objective per session, checkpoint, delegate research, stop after 2 failures |
 | `code-quality.md` | Code | Follow existing patterns, typed errors, pin dependencies, intent-revealing names |
 | `tls-troubleshooting.md` | Certs | Auto-detect WARP cert errors, fix with CA bundle, never disable TLS |
-| `self-review.md` | Meta | Flag stochastic interventions during checkpoints/reviews; lightweight always-on version of `/scaffold-audit` |
+| `self-review.md` | Meta | Flag stochastic interventions during checkpoints/reviews; lightweight always-on version of `/ccanvil-audit` |
 
 <!-- NODE-SPECIFIC-START -->
 <!-- Add project-specific content below this line. -->
-<!-- Hub content above is updated via /scaffold-pull. -->
+<!-- Hub content above is updated via /ccanvil-pull. -->

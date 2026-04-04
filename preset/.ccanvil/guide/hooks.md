@@ -2,7 +2,7 @@
 
 Hooks are deterministic automation that runs at Claude Code lifecycle events — outside the reasoning loop, at zero context cost. They are the foundation of the deterministic-first principle.
 
-> **Reference:** See `docs/templates/hooks-reference.md` for the complete hook specification including JSON schemas, all event types, and writing conventions.
+> **Reference:** See `.ccanvil/templates/hooks-reference.md` for the complete hook specification including JSON schemas, all event types, and writing conventions.
 
 ## How Hooks Work
 
@@ -98,8 +98,8 @@ graph TD
 2. `chmod +x .claude/hooks/my-hook.sh`
 3. Add entry to `.claude/settings.json` under the appropriate event
 4. Test: `echo '{"tool_input":{"file_path":"test.env"}}' | .claude/hooks/my-hook.sh; echo "exit: $?"`
-5. Update this section and `docs/templates/hooks-reference.md`
+5. Update this section and `.ccanvil/templates/hooks-reference.md`
 
 <!-- NODE-SPECIFIC-START -->
 <!-- Add project-specific content below this line. -->
-<!-- Hub content above is updated via /scaffold-pull. -->
+<!-- Hub content above is updated via /ccanvil-pull. -->

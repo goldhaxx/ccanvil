@@ -27,14 +27,14 @@ graph TB
     end
 
     subgraph "Persistent Templates"
-        T1["docs/templates/spec.md"]
-        T2["docs/templates/plan.md"]
-        T3["docs/templates/checkpoint.md"]
+        T1[".ccanvil/templates/spec.md"]
+        T2[".ccanvil/templates/plan.md"]
+        T3[".ccanvil/templates/checkpoint.md"]
     end
 
     subgraph "Reference Documents (synced)"
-        GUIDE["docs/scaffold-guide/<br/><i>hub + node sections</i>"]
-        FRAMEWORK["docs/scaffold-guide/scaffold-framework.md<br/><i>research — read-only</i>"]
+        GUIDE[".ccanvil/guide/<br/><i>hub + node sections</i>"]
+        FRAMEWORK[".ccanvil/guide/scaffold-framework.md<br/><i>research — read-only</i>"]
     end
 
     GM --> PM
@@ -73,4 +73,4 @@ graph TB
 
 <!-- NODE-SPECIFIC-START -->
 <!-- Add project-specific content below this line. -->
-<!-- Hub content above is updated via /scaffold-pull. -->
+<!-- Hub content above is updated via /ccanvil-pull. -->

@@ -23,7 +23,7 @@ flowchart TD
     C --> D["Copies all scaffold files<br/>to current directory"]
     D --> E["Asks for project name<br/>and one-line description"]
     E --> F["Replaces placeholders<br/>in CLAUDE.md"]
-    F --> G["Generates .claude/scaffold.lock<br/><i>tracks sync state</i>"]
+    F --> G["Generates .claude/ccanvil.lock<br/><i>tracks sync state</i>"]
     G --> H["git init && git add -A<br/>&& git commit"]
     H --> I["Ready to build"]
 
@@ -34,4 +34,4 @@ flowchart TD
 
 <!-- NODE-SPECIFIC-START -->
 <!-- Add project-specific content below this line. -->
-<!-- Hub content above is updated via /scaffold-pull. -->
+<!-- Hub content above is updated via /ccanvil-pull. -->

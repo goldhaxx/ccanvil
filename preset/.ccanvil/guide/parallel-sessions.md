@@ -6,7 +6,7 @@ Claude Code supports running multiple agents in parallel via git worktrees (`cla
 
 - **Worktrees share `.git`:** All scaffold configuration (CLAUDE.md, rules, hooks, settings.json) is inherited automatically. No duplication needed.
 - **Branch-local docs:** `docs/spec.md`, `docs/plan.md`, `docs/checkpoint.md` are branch-specific. Each worktree operates on its own branch, so parallel agents get isolated doc state.
-- **Lockfile is shared:** `.claude/scaffold.lock` lives in `.git`-tracked state. Avoid running `/scaffold-pull` from multiple worktrees simultaneously.
+- **Lockfile is shared:** `.claude/ccanvil.lock` lives in `.git`-tracked state. Avoid running `/ccanvil-pull` from multiple worktrees simultaneously.
 
 ## Usage pattern
 
@@ -27,7 +27,7 @@ claude
 | Port conflicts | Each worktree may try to start dev servers on the same port. Use different ports per worktree. |
 | Database locks | Multiple agents writing to the same SQLite/local DB will conflict. Use separate DB files or a shared server. |
 | File locks | Lock files (`.lock`, `*.pid`) in the repo root are shared. Ensure they're branch-specific or gitignored. |
-| Scaffold sync | Don't run `/scaffold-pull` from multiple worktrees simultaneously — lockfile mutations will conflict. |
+| Scaffold sync | Don't run `/ccanvil-pull` from multiple worktrees simultaneously — lockfile mutations will conflict. |
 
 ## `.gitignore` and `.claudeignore`
 
@@ -35,4 +35,4 @@ Both files include `.claude/worktrees/` to prevent worktree contents from being 
 
 <!-- NODE-SPECIFIC-START -->
 <!-- Add project-specific content below this line. -->
-<!-- Hub content above is updated via /scaffold-pull. -->
+<!-- Hub content above is updated via /ccanvil-pull. -->

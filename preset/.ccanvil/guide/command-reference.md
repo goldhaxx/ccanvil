@@ -25,18 +25,18 @@
 
 | Command | Direction | What it does |
 |---------|-----------|-------------|
-| `/scaffold-status` | Read-only | Shows sync state of all tracked files |
-| `/scaffold-pull` | Hub → Project | Pulls updates, resolves conflicts |
-| `/scaffold-push` | Project → Hub | Pushes generalizable changes upstream |
-| `/scaffold-promote <file>` | Project → Hub | Promotes a local file to the scaffold |
-| `/scaffold-demote <file>` | Local | Marks a scaffold file as local override |
-| `/scaffold-ignore <file>` | Local | Marks file as node-only (permanently excluded from sync) |
+| `/ccanvil-status` | Read-only | Shows sync state of all tracked files |
+| `/ccanvil-pull` | Hub → Project | Pulls updates, resolves conflicts |
+| `/ccanvil-push` | Project → Hub | Pushes generalizable changes upstream |
+| `/ccanvil-promote <file>` | Project → Hub | Promotes a local file to the scaffold |
+| `/ccanvil-demote <file>` | Local | Marks a scaffold file as local override |
+| `/ccanvil-ignore <file>` | Local | Marks file as node-only (permanently excluded from sync) |
 
 ## Utility Commands
 
 | Command | What it does |
 |---------|-------------|
-| `/scaffold-audit` | Analyzes scaffold for stochastic-to-deterministic improvement opportunities. Calls `manifest-check.sh check` for deterministic README verification. Includes permissions audit and context budget check. |
+| `/ccanvil-audit` | Analyzes scaffold for stochastic-to-deterministic improvement opportunities. Calls `manifest-check.sh check` for deterministic README verification. Includes permissions audit and context budget check. |
 | `/fix-certs` | Diagnoses and repairs Cloudflare WARP TLS certificate issues |
 | `/init` | Initializes a new project from the scaffold (global command) |
 
@@ -96,4 +96,4 @@
 
 <!-- NODE-SPECIFIC-START -->
 <!-- Add project-specific content below this line. -->
-<!-- Hub content above is updated via /scaffold-pull. -->
+<!-- Hub content above is updated via /ccanvil-pull. -->

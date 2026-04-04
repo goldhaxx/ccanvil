@@ -199,9 +199,7 @@ EOF
   echo "$output" | jq -e '.missing_from_manifest | length == 0'
 }
 
-# TODO: Re-enable after README file manifest is updated for preset/.ccanvil/ structure
 @test "check-existence works on real README against real repo" {
-  skip "README manifest tables need updating for new directory structure"
   cd "$BATS_TEST_DIRNAME/../.."
   run bash "$SCRIPT" check-existence README.md
   [ "$status" -eq 0 ]

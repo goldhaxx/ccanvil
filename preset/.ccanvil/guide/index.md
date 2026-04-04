@@ -28,4 +28,4 @@ A visual, browsable guide to the scaffold system: how it works, when to use each
 
 <!-- NODE-SPECIFIC-START -->
 <!-- Add project-specific content below this line. -->
-<!-- Hub content above is updated via /scaffold-pull. -->
+<!-- Hub content above is updated via /ccanvil-pull. -->

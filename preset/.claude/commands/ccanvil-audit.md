@@ -1,6 +1,6 @@
 Analyze the scaffold for opportunities to reduce stochastic surface area and increase deterministic automation.
 
-This is a self-review process. Run it on demand (`/scaffold-audit`) or as part of checkpoints and reviews.
+This is a self-review process. Run it on demand (`/ccanvil-audit`) or as part of checkpoints and reviews.
 
 ## Step 1: Collect evidence
 
@@ -84,4 +84,4 @@ Output a structured audit:
 
 <!-- NODE-SPECIFIC-START -->
 <!-- Add project-specific content below this line. -->
-<!-- Hub content above is updated via /scaffold-pull. -->
+<!-- Hub content above is updated via /ccanvil-pull. -->

@@ -34,8 +34,8 @@ The `docs-check.sh audit-session` script provides a post-hoc safety net — it s
 
 ## Full Audit
 
-For a comprehensive analysis, run `/scaffold-audit`. This rule is the lightweight, always-on version.
+For a comprehensive analysis, run `/ccanvil-audit`. This rule is the lightweight, always-on version.
 
 <!-- NODE-SPECIFIC-START -->
 <!-- Add project-specific content below this line. -->
-<!-- Hub content above is updated via /scaffold-pull. -->
+<!-- Hub content above is updated via /ccanvil-pull. -->

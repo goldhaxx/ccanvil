@@ -6,9 +6,9 @@ This is a fully deterministic operation. No Claude judgment needed.
 
 ## Steps
 
-1. The user provides a file path as an argument: `/scaffold-ignore .claude/rules/sketches.md`
+1. The user provides a file path as an argument: `/ccanvil-ignore .claude/rules/sketches.md`
 
-2. Confirm with the user: "This will mark `<file>` as node-only. It will be permanently excluded from `/scaffold-pull` and `/scaffold-push`. You can undo this with `./.ccanvil/scripts/scaffold-sync.sh track <file>`. Proceed?"
+2. Confirm with the user: "This will mark `<file>` as node-only. It will be permanently excluded from `/ccanvil-pull` and `/ccanvil-push`. You can undo this with `./.ccanvil/scripts/scaffold-sync.sh track <file>`. Proceed?"
 
 3. **(DETERMINISTIC)** Run:
 ```bash
@@ -23,4 +23,4 @@ This is a fully deterministic operation. No Claude judgment needed.
 
 <!-- NODE-SPECIFIC-START -->
 <!-- Add project-specific content below this line. -->
-<!-- Hub content above is updated via /scaffold-pull. -->
+<!-- Hub content above is updated via /ccanvil-pull. -->

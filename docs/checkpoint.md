@@ -42,17 +42,16 @@
 
 ## Current State
 
-- **Branch:** `main` (no feature branch yet — spec is Draft, not activated)
+- **Branch:** `claude/feat/scaffold-terminology-eradication`
 - **Hub tests:** 352/352 passing
 - **Working tree:** clean
 - **Downstream:** Both fucina and luxlook migrated to new structure
-- **Spec status:** Draft — ready to activate
+- **Spec status:** In Progress — activated on feature branch
 
 ## Next Steps
 
-1. Activate the spec: `bash .ccanvil/scripts/docs-check.sh activate scaffold-terminology-eradication`
-2. Run `/plan` to create the implementation plan
-3. Begin TDD implementation starting with `ccanvil-sync.sh` (most complex, all lockfile key changes ripple from there)
+1. Run `/plan` to create the implementation plan
+2. Begin TDD implementation starting with `ccanvil-sync.sh` (most complex, all lockfile key changes ripple from there)
 
 ## Determinism Review
 

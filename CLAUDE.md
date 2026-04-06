@@ -80,7 +80,7 @@ docs/
 **Read when:** Writing tests or debugging test failures.
 
 ## Do Not
-- Do not modify `.ccanvil/guide/scaffold-framework.md` without explicit user approval — it is foundational research source material.
+- Do not modify `.ccanvil/guide/foundations.md` without explicit user approval — it is foundational research source material.
 - Do not modify files in `generated/`, `dist/`, or dependency directories.
 - Do not install new dependencies without stating the reason and alternatives considered.
 - Do not suppress type errors — fix the types.

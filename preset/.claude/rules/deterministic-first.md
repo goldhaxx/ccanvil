@@ -22,7 +22,7 @@ Use this decision ladder for every operation:
 
 ## How to Apply
 
-When adding or modifying ANY scaffold automation:
+When adding or modifying ANY preset automation:
 
 - **Ask:** "Can this step produce a wrong answer?" If no → script/hook, not Claude.
 - **Ask:** "Does this step require reading and understanding code semantics?" If no → script/hook, not Claude.

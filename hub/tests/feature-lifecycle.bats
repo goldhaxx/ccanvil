@@ -39,7 +39,7 @@ teardown() {
 }
 
 # ---------------------------------------------------------------------------
-# Step 1: Scaffold config (AC-14, AC-15)
+# Step 1: Preset config (AC-14, AC-15)
 # ---------------------------------------------------------------------------
 
 @test "config-get: reads feature toggle from ccanvil.json" {

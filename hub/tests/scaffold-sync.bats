@@ -98,7 +98,7 @@ HUBEOF
   # Create SCAFFOLD_CHANGELOG.md in hub (required by push-apply and promote)
   echo "# Scaffold Changelog" > "$HUB/SCAFFOLD_CHANGELOG.md"
 
-  # Initialize a git repo in hub (needed for scaffold_version)
+  # Initialize a git repo in hub (needed for hub_version)
   git -C "$HUB" init -q
   git -C "$HUB" add -A
   git -C "$HUB" commit -q -m "init"
@@ -577,9 +577,9 @@ EOF
   status=$(jq -r '.files[".claude/rules/tdd.md"].status' "$NODE/.ccanvil/ccanvil.lock")
   [ "$status" = "clean" ]
 
-  scaffold_hash=$(jq -r '.files[".claude/rules/tdd.md"].hub_hash' "$NODE/.ccanvil/ccanvil.lock")
+  hub_hash=$(jq -r '.files[".claude/rules/tdd.md"].hub_hash' "$NODE/.ccanvil/ccanvil.lock")
   local_hash=$(jq -r '.files[".claude/rules/tdd.md"].local_hash' "$NODE/.ccanvil/ccanvil.lock")
-  [ "$scaffold_hash" = "$local_hash" ]
+  [ "$hub_hash" = "$local_hash" ]
 }
 
 

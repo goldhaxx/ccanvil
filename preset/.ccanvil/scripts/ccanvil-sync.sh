@@ -147,19 +147,19 @@ scan_tracked_files() {
 # If the hub has a preset/ directory, distributable files live there.
 # Otherwise (legacy or non-hub), scan from the path directly.
 hub_dist_root() {
-  local scaffold_path="$1"
-  if [[ -d "$scaffold_path/preset" ]]; then
-    echo "$scaffold_path/preset"
+  local hub_path="$1"
+  if [[ -d "$hub_path/preset" ]]; then
+    echo "$hub_path/preset"
   else
-    echo "$scaffold_path"
+    echo "$hub_path"
   fi
 }
 
 # Scan scaffold for all files matching tracked patterns
 scan_hub_files() {
-  local scaffold_path="$1"
+  local hub_path="$1"
   local dist_root
-  dist_root=$(hub_dist_root "$scaffold_path")
+  dist_root=$(hub_dist_root "$hub_path")
   local files=()
   for pattern in "${TRACKED_PATTERNS[@]}"; do
     local matches
@@ -180,19 +180,19 @@ scan_hub_files() {
 # ---------------------------------------------------------------------------
 
 cmd_init() {
-  local scaffold_path="${1:-$HOME/projects/ccanvil}"
-  scaffold_path="${scaffold_path/#\~/$HOME}"
+  local hub_path="${1:-$HOME/projects/ccanvil}"
+  hub_path="${hub_path/#\~/$HOME}"
 
-  [[ -d "$scaffold_path" ]] || die "Scaffold not found at: $scaffold_path"
+  [[ -d "$hub_path" ]] || die "Scaffold not found at: $hub_path"
 
-  # Resolve dist root (preset/ if hub, scaffold_path if downstream)
+  # Resolve dist root (preset/ if hub, hub_path if downstream)
   local dist_root
-  dist_root=$(hub_dist_root "$scaffold_path")
+  dist_root=$(hub_dist_root "$hub_path")
 
   # Get scaffold git version
-  local scaffold_version="unknown"
-  if git -C "$scaffold_path" rev-parse HEAD >/dev/null 2>&1; then
-    scaffold_version=$(git -C "$scaffold_path" rev-parse --short HEAD)
+  local hub_version="unknown"
+  if git -C "$hub_path" rev-parse HEAD >/dev/null 2>&1; then
+    hub_version=$(git -C "$hub_path" rev-parse --short HEAD)
   fi
 
   # Build the files object
@@ -200,21 +200,21 @@ cmd_init() {
 
   # Find all trackable files in the project
   while IFS= read -r file; do
-    local scaffold_file="$dist_root/$file"
+    local hub_file="$dist_root/$file"
     local local_h
     local_h=$(file_hash "$file")
 
-    if [[ -f "$scaffold_file" ]]; then
-      local scaffold_h
-      scaffold_h=$(file_hash "$scaffold_file")
+    if [[ -f "$hub_file" ]]; then
+      local hub_h
+      hub_h=$(file_hash "$hub_file")
 
-      if [[ "$local_h" == "$scaffold_h" ]]; then
+      if [[ "$local_h" == "$hub_h" ]]; then
         local status="clean"
       else
         local status="modified"
       fi
 
-      files_json=$(echo "$files_json" | jq --arg f "$file" --arg sh "$scaffold_h" --arg lh "$local_h" --arg st "$status" \
+      files_json=$(echo "$files_json" | jq --arg f "$file" --arg sh "$hub_h" --arg lh "$local_h" --arg st "$status" \
         '. + {($f): {"origin": "hub", "hub_hash": $sh, "local_hash": $lh, "status": $st, "sync": "tracked"}}')
     else
       # File exists locally but not in scaffold
@@ -226,54 +226,54 @@ cmd_init() {
   # Check for files in scaffold that are NOT in the project
   while IFS= read -r file; do
     if ! echo "$files_json" | jq -e --arg f "$file" '.[$f]' >/dev/null 2>&1; then
-      local scaffold_h
-      scaffold_h=$(file_hash "$dist_root/$file")
-      files_json=$(echo "$files_json" | jq --arg f "$file" --arg sh "$scaffold_h" \
+      local hub_h
+      hub_h=$(file_hash "$dist_root/$file")
+      files_json=$(echo "$files_json" | jq --arg f "$file" --arg sh "$hub_h" \
         '. + {($f): {"origin": "hub", "hub_hash": $sh, "local_hash": null, "status": "hub-only", "sync": "tracked"}}')
     fi
-  done < <(scan_hub_files "$scaffold_path")
+  done < <(scan_hub_files "$hub_path")
 
   # Write lockfile (store ~ instead of absolute home path to avoid PII in tracked files)
-  local display_path="${scaffold_path/#$HOME/~}"
-  jq -n --arg src "$display_path" --arg ver "$scaffold_version" --arg ts "$(timestamp)" --argjson files "$files_json" \
+  local display_path="${hub_path/#$HOME/~}"
+  jq -n --arg src "$display_path" --arg ver "$hub_version" --arg ts "$(timestamp)" --argjson files "$files_json" \
     '{hub_source: $src, hub_version: $ver, synced_at: $ts, files: $files}' > "$LOCKFILE"
 
   local total
   total=$(echo "$files_json" | jq 'length')
-  local clean modified local_only scaffold_only
+  local clean modified local_only hub_only
   clean=$(echo "$files_json" | jq '[.[] | select(.status == "clean")] | length')
   modified=$(echo "$files_json" | jq '[.[] | select(.status == "modified")] | length')
   local_only=$(echo "$files_json" | jq '[.[] | select(.status == "local-only")] | length')
-  scaffold_only=$(echo "$files_json" | jq '[.[] | select(.status == "hub-only")] | length')
+  hub_only=$(echo "$files_json" | jq '[.[] | select(.status == "hub-only")] | length')
 
   echo "Scaffold lockfile generated: $LOCKFILE"
-  echo "  Scaffold: $display_path @ $scaffold_version"
+  echo "  Scaffold: $display_path @ $hub_version"
   echo "  Total files: $total"
-  echo "  Clean: $clean | Modified: $modified | Local: $local_only | Scaffold-only: $scaffold_only"
+  echo "  Clean: $clean | Modified: $modified | Local: $local_only | Scaffold-only: $hub_only"
 }
 
 cmd_status() {
   require_lockfile
 
-  local scaffold_source
-  scaffold_source=$(get_hub_source)
-  local scaffold_hub
-  scaffold_hub=$(get_hub_source_raw)
-  local scaffold_version
-  scaffold_version=$(jq -r '.hub_version' "$LOCKFILE")
+  local hub_source
+  hub_source=$(get_hub_source)
+  local hub_root
+  hub_root=$(get_hub_source_raw)
+  local hub_version
+  hub_version=$(jq -r '.hub_version' "$LOCKFILE")
   local synced_at
   synced_at=$(jq -r '.synced_at' "$LOCKFILE")
 
-  echo "Scaffold: $(get_hub_source_display) @ $scaffold_version"
+  echo "Scaffold: $(get_hub_source_display) @ $hub_version"
   echo "Last synced: $synced_at"
   echo ""
 
   # Check if scaffold has new commits since last sync
-  if git -C "$scaffold_hub" rev-parse HEAD >/dev/null 2>&1; then
-    local current_scaffold_version
-    current_scaffold_version=$(git -C "$scaffold_hub" rev-parse --short HEAD)
-    if [[ "$current_scaffold_version" != "$scaffold_version" ]]; then
-      echo "NOTE: Scaffold has new commits ($scaffold_version → $current_scaffold_version)"
+  if git -C "$hub_root" rev-parse HEAD >/dev/null 2>&1; then
+    local current_hub_version
+    current_hub_version=$(git -C "$hub_root" rev-parse --short HEAD)
+    if [[ "$current_hub_version" != "$hub_version" ]]; then
+      echo "NOTE: Scaffold has new commits ($hub_version → $current_hub_version)"
       echo ""
     fi
   fi
@@ -281,7 +281,7 @@ cmd_status() {
   # Print each file's status
   local has_output=false
   while IFS= read -r file; do
-    local status origin scaffold_hash local_hash
+    local status origin hub_hash local_hash
     status=$(jq -r --arg f "$file" '.files[$f].status' "$LOCKFILE")
     origin=$(jq -r --arg f "$file" '.files[$f].origin' "$LOCKFILE")
 
@@ -334,13 +334,13 @@ cmd_status() {
 cmd_diff() {
   require_lockfile
   local file="${1:-}"
-  local scaffold_source
-  scaffold_source=$(get_hub_source)
+  local hub_source
+  hub_source=$(get_hub_source)
 
   if [[ -n "$file" ]]; then
     # Diff a specific file
-    local scaffold_file="$scaffold_source/$file"
-    if [[ ! -f "$scaffold_file" ]]; then
+    local hub_file="$hub_source/$file"
+    if [[ ! -f "$hub_file" ]]; then
       echo "File not in scaffold: $file"
       [[ -f "$file" ]] && echo "(exists locally as local-only file)"
       return 0
@@ -352,7 +352,7 @@ cmd_diff() {
     fi
     echo "--- scaffold: $file"
     echo "+++ local: $file"
-    diff --unified "$scaffold_source/$file" "$file" || true
+    diff --unified "$hub_source/$file" "$file" || true
   else
     # Diff all modified files
     while IFS= read -r f; do
@@ -361,11 +361,11 @@ cmd_diff() {
       if [[ "$status" == "modified" || "$status" == "clean" ]]; then
         local current_hash
         current_hash=$(file_hash "$f")
-        local scaffold_hash
-        scaffold_hash=$(jq -r --arg f "$f" '.files[$f].hub_hash // "null"' "$LOCKFILE")
-        if [[ "$current_hash" != "$scaffold_hash" && -f "$scaffold_source/$f" ]]; then
+        local hub_hash
+        hub_hash=$(jq -r --arg f "$f" '.files[$f].hub_hash // "null"' "$LOCKFILE")
+        if [[ "$current_hash" != "$hub_hash" && -f "$hub_source/$f" ]]; then
           echo "=== $f ==="
-          diff --unified "$scaffold_source/$f" "$f" || true
+          diff --unified "$hub_source/$f" "$f" || true
           echo ""
         fi
       fi
@@ -402,22 +402,22 @@ cmd_lock_update() {
 
 cmd_lock_add() {
   require_lockfile
-  local file="${1:?Usage: ccanvil-sync.sh lock-add <file> <origin> <scaffold_hash> <local_hash> <status>}"
+  local file="${1:?Usage: ccanvil-sync.sh lock-add <file> <origin> <hub_hash> <local_hash> <status>}"
   local origin="${2:?}"
-  local scaffold_hash="${3}"
+  local hub_hash="${3}"
   local local_hash="${4}"
   local status="${5:?}"
 
   local tmp
   tmp=$(mktemp)
-  if [[ "$scaffold_hash" == "null" ]]; then
+  if [[ "$hub_hash" == "null" ]]; then
     jq --arg f "$file" --arg o "$origin" --arg lh "$local_hash" --arg st "$status" \
       '.files[$f] = {"origin": $o, "hub_hash": null, "local_hash": $lh, "status": $st}' "$LOCKFILE" > "$tmp" || true
   elif [[ "$local_hash" == "null" ]]; then
-    jq --arg f "$file" --arg o "$origin" --arg sh "$scaffold_hash" --arg st "$status" \
+    jq --arg f "$file" --arg o "$origin" --arg sh "$hub_hash" --arg st "$status" \
       '.files[$f] = {"origin": $o, "hub_hash": $sh, "local_hash": null, "status": $st}' "$LOCKFILE" > "$tmp" || true
   else
-    jq --arg f "$file" --arg o "$origin" --arg sh "$scaffold_hash" --arg lh "$local_hash" --arg st "$status" \
+    jq --arg f "$file" --arg o "$origin" --arg sh "$hub_hash" --arg lh "$local_hash" --arg st "$status" \
       '.files[$f] = {"origin": $o, "hub_hash": $sh, "local_hash": $lh, "status": $st}' "$LOCKFILE" > "$tmp" || true
   fi
   safe_lock_mv "$tmp" "$LOCKFILE" "lock-add $file"
@@ -444,17 +444,17 @@ cmd_lock_set_version() {
 }
 
 cmd_section_merge() {
-  local scaffold_file="${1:?Usage: ccanvil-sync.sh section-merge <scaffold-file> <local-file>}"
+  local hub_file="${1:?Usage: ccanvil-sync.sh section-merge <scaffold-file> <local-file>}"
   local local_file="${2:?Usage: ccanvil-sync.sh section-merge <scaffold-file> <local-file>}"
 
-  [[ -f "$scaffold_file" ]] || die "Scaffold file not found: $scaffold_file"
+  [[ -f "$hub_file" ]] || die "Scaffold file not found: $hub_file"
   [[ -f "$local_file" ]] || die "Local file not found: $local_file"
 
   # Detect which delimiter the scaffold file uses
   local delimiter=""
-  if grep -q '<!-- NODE-SPECIFIC-START -->' "$scaffold_file"; then
+  if grep -q '<!-- NODE-SPECIFIC-START -->' "$hub_file"; then
     delimiter="<!-- NODE-SPECIFIC-START -->"
-  elif grep -q '<!-- HUB-MANAGED-START -->' "$scaffold_file"; then
+  elif grep -q '<!-- HUB-MANAGED-START -->' "$hub_file"; then
     delimiter="<!-- HUB-MANAGED-START -->"
   else
     # No delimiter in scaffold file — not a section-merge file
@@ -467,7 +467,7 @@ cmd_section_merge() {
     # Take ABOVE delimiter from scaffold, BELOW delimiter from local
 
     # Get hub content (everything before delimiter) from scaffold
-    sed -n "/$delimiter/q;p" "$scaffold_file"
+    sed -n "/$delimiter/q;p" "$hub_file"
 
     # Get node content (delimiter + everything after) from local
     if grep -q "$delimiter" "$local_file"; then
@@ -499,7 +499,7 @@ cmd_section_merge() {
     fi
 
     # Get hub content (delimiter + everything after) from scaffold
-    sed -n "/$delimiter/,\$p" "$scaffold_file"
+    sed -n "/$delimiter/,\$p" "$hub_file"
   fi
 }
 
@@ -578,22 +578,22 @@ cmd_classify() {
 # Pre-check: verify scaffold repo is clean and accessible
 cmd_pre_check() {
   require_lockfile
-  local scaffold_source
-  scaffold_source=$(get_hub_source)
-  local scaffold_hub
-  scaffold_hub=$(get_hub_source_raw)
+  local hub_source
+  hub_source=$(get_hub_source)
+  local hub_root
+  hub_root=$(get_hub_source_raw)
 
-  [[ -d "$scaffold_source" ]] || die "Scaffold not found at: $scaffold_source"
+  [[ -d "$hub_source" ]] || die "Scaffold not found at: $hub_source"
 
   # Check hub (scaffold) is clean
-  if git -C "$scaffold_hub" rev-parse HEAD >/dev/null 2>&1; then
+  if git -C "$hub_root" rev-parse HEAD >/dev/null 2>&1; then
     local dirty
-    dirty=$(git -C "$scaffold_hub" status --porcelain 2>/dev/null)
+    dirty=$(git -C "$hub_root" status --porcelain 2>/dev/null)
     if [[ -n "$dirty" ]]; then
       echo "ERROR: Scaffold repo has uncommitted changes:" >&2
       echo "$dirty" >&2
       echo "" >&2
-      echo "Commit or stash changes in $scaffold_source before syncing." >&2
+      echo "Commit or stash changes in $hub_source before syncing." >&2
       exit 1
     fi
   fi
@@ -612,7 +612,7 @@ cmd_pre_check() {
   fi
 
   # Bootstrap: if the hub has a newer sync script, copy it before proceeding
-  local hub_script="$scaffold_source/.ccanvil/scripts/ccanvil-sync.sh"
+  local hub_script="$hub_source/.ccanvil/scripts/ccanvil-sync.sh"
   local local_script=".ccanvil/scripts/ccanvil-sync.sh"
   if [[ -f "$hub_script" && -f "$local_script" ]]; then
     local hub_hash local_hash
@@ -634,17 +634,17 @@ cmd_pre_check() {
 # Actions: auto-update, section-merge, conflict, new, removed, skip
 cmd_pull_plan() {
   require_lockfile
-  local scaffold_source
-  scaffold_source=$(get_hub_source)
+  local hub_source
+  hub_source=$(get_hub_source)
 
   local plan="[]"
 
   # Check each tracked file in the lockfile
   while IFS= read -r file; do
-    local status origin scaffold_hash local_hash
+    local status origin hub_hash local_hash
     status=$(jq -r --arg f "$file" '.files[$f].status' "$LOCKFILE")
     origin=$(jq -r --arg f "$file" '.files[$f].origin' "$LOCKFILE")
-    scaffold_hash=$(jq -r --arg f "$file" '.files[$f].hub_hash // "null"' "$LOCKFILE")
+    hub_hash=$(jq -r --arg f "$file" '.files[$f].hub_hash // "null"' "$LOCKFILE")
     local_hash=$(jq -r --arg f "$file" '.files[$f].local_hash // "null"' "$LOCKFILE")
 
     # Skip node-only files (permanently excluded from sync)
@@ -657,10 +657,10 @@ cmd_pull_plan() {
       continue
     fi
 
-    local scaffold_file="$scaffold_source/$file"
+    local hub_file="$hub_source/$file"
 
     # Check if file was removed from scaffold
-    if [[ ! -f "$scaffold_file" ]]; then
+    if [[ ! -f "$hub_file" ]]; then
       local clh
       clh=$(file_hash "$file" 2>/dev/null || echo "MISSING")
       plan=$(echo "$plan" | jq --arg f "$file" --arg lh "$clh" \
@@ -669,14 +669,14 @@ cmd_pull_plan() {
     fi
 
     # Compute current hashes
-    local current_scaffold_h current_local_h
-    current_scaffold_h=$(file_hash "$scaffold_file")
+    local current_hub_h current_local_h
+    current_hub_h=$(file_hash "$hub_file")
     current_local_h=$(file_hash "$file" 2>/dev/null || echo "MISSING")
 
     # Has scaffold changed since last sync?
-    local scaffold_changed=false
-    if [[ "$current_scaffold_h" != "$scaffold_hash" ]]; then
-      scaffold_changed=true
+    local hub_changed=false
+    if [[ "$current_hub_h" != "$hub_hash" ]]; then
+      hub_changed=true
     fi
 
     # Has local file changed since last sync?
@@ -685,7 +685,7 @@ cmd_pull_plan() {
       local_changed=true
     fi
 
-    if [[ "$scaffold_changed" == "false" ]]; then
+    if [[ "$hub_changed" == "false" ]]; then
       # Scaffold hasn't changed — nothing to pull
       continue
     fi
@@ -708,8 +708,8 @@ cmd_pull_plan() {
       # in scripts that contain delimiter strings as literals)
       local has_delimiter=false
       if [[ "$file" == *.md ]] && \
-         (grep -qx '<!-- NODE-SPECIFIC-START -->' "$scaffold_file" 2>/dev/null || \
-          grep -qx '<!-- HUB-MANAGED-START -->' "$scaffold_file" 2>/dev/null); then
+         (grep -qx '<!-- NODE-SPECIFIC-START -->' "$hub_file" 2>/dev/null || \
+          grep -qx '<!-- HUB-MANAGED-START -->' "$hub_file" 2>/dev/null); then
         has_delimiter=true
       fi
 
@@ -728,10 +728,10 @@ cmd_pull_plan() {
     if ! jq -e --arg f "$file" '.files[$f]' "$LOCKFILE" >/dev/null 2>&1; then
       if [[ -f "$file" ]]; then
         # File exists locally but isn't in lockfile (e.g., manual copy)
-        local scaffold_h local_h
-        scaffold_h=$(file_hash "$scaffold_source/$file")
+        local hub_h local_h
+        hub_h=$(file_hash "$hub_source/$file")
         local_h=$(file_hash "$file")
-        if [[ "$scaffold_h" == "$local_h" ]]; then
+        if [[ "$hub_h" == "$local_h" ]]; then
           plan=$(echo "$plan" | jq --arg f "$file" --arg lh "$local_h" \
             '. + [{"file": $f, "action": "adopt-clean", "reason": "New in scaffold, identical local copy exists — will track as clean", "local_hash": $lh}]')
         else
@@ -743,7 +743,7 @@ cmd_pull_plan() {
           '. + [{"file": $f, "action": "new", "reason": "New file in scaffold, not yet tracked", "local_hash": "MISSING"}]')
       fi
     fi
-  done < <(scan_hub_files "$scaffold_source")
+  done < <(scan_hub_files "$hub_source")
 
   echo "$plan" | jq '.'
 }
@@ -758,8 +758,8 @@ cmd_pull_auto() {
   fi
 
   require_lockfile
-  local scaffold_source
-  scaffold_source=$(get_hub_source)
+  local hub_source
+  hub_source=$(get_hub_source)
 
   local count=0
   local plan
@@ -784,15 +784,15 @@ cmd_pull_auto() {
       continue
     fi
 
-    local scaffold_file="$scaffold_source/$file"
+    local hub_file="$hub_source/$file"
     local new_hash
-    new_hash=$(file_hash "$scaffold_file")
+    new_hash=$(file_hash "$hub_file")
 
     # Ensure target directory exists
     mkdir -p "$(dirname "$file")"
 
     # Copy scaffold version
-    cp "$scaffold_file" "$file"
+    cp "$hub_file" "$file"
 
     # Update lockfile in one pass (works for both existing and new entries)
     local tmp
@@ -835,9 +835,9 @@ cmd_pull_apply() {
     fi
   done
 
-  local scaffold_source
-  scaffold_source=$(get_hub_source)
-  local scaffold_file="$scaffold_source/$file"
+  local hub_source
+  hub_source=$(get_hub_source)
+  local hub_file="$hub_source/$file"
 
   # Guard: if PLAN_LOCAL_HASH is set, verify file hasn't changed since plan
   if [[ -n "${PLAN_LOCAL_HASH:-}" && -f "$file" ]]; then
@@ -856,9 +856,9 @@ cmd_pull_apply() {
 
   case "$action" in
     take-scaffold)
-      [[ -f "$scaffold_file" ]] || die "Scaffold file not found: $scaffold_file"
+      [[ -f "$hub_file" ]] || die "Scaffold file not found: $hub_file"
       mkdir -p "$(dirname "$file")"
-      cp "$scaffold_file" "$file"
+      cp "$hub_file" "$file"
       local new_hash
       new_hash=$(file_hash "$file")
       local tmp; tmp=$(mktemp)
@@ -870,13 +870,13 @@ cmd_pull_apply() {
       ;;
 
     keep-local)
-      # Update scaffold_hash to acknowledge we've seen the change, keep local as-is
-      local new_scaffold_hash
-      new_scaffold_hash=$(file_hash "$scaffold_file")
+      # Update hub_hash to acknowledge we've seen the change, keep local as-is
+      local new_hub_hash
+      new_hub_hash=$(file_hash "$hub_file")
       local current_local_hash
       current_local_hash=$(file_hash "$file")
       local tmp; tmp=$(mktemp)
-      jq --arg f "$file" --arg sh "$new_scaffold_hash" --arg lh "$current_local_hash" \
+      jq --arg f "$file" --arg sh "$new_hub_hash" --arg lh "$current_local_hash" \
         '.files[$f].hub_hash = $sh | .files[$f].local_hash = $lh | .files[$f].status = "modified"' \
         "$LOCKFILE" > "$tmp" || true
       safe_lock_mv "$tmp" "$LOCKFILE" "pull-apply keep-local $file"
@@ -884,17 +884,17 @@ cmd_pull_apply() {
       ;;
 
     section-merge)
-      [[ -f "$scaffold_file" ]] || die "Scaffold file not found: $scaffold_file"
+      [[ -f "$hub_file" ]] || die "Scaffold file not found: $hub_file"
       [[ -f "$file" ]] || die "Local file not found: $file"
       local merged
-      merged=$(cmd_section_merge "$scaffold_file" "$file")
+      merged=$(cmd_section_merge "$hub_file" "$file")
       echo "$merged" > "$file"
       local new_hash
       new_hash=$(file_hash "$file")
-      local new_scaffold_hash
-      new_scaffold_hash=$(file_hash "$scaffold_file")
+      local new_hub_hash
+      new_hub_hash=$(file_hash "$hub_file")
       local tmp; tmp=$(mktemp)
-      jq --arg f "$file" --arg sh "$new_scaffold_hash" --arg lh "$new_hash" \
+      jq --arg f "$file" --arg sh "$new_hub_hash" --arg lh "$new_hash" \
         '.files[$f].hub_hash = $sh | .files[$f].local_hash = $lh | .files[$f].status = "clean"' \
         "$LOCKFILE" > "$tmp" || true
       safe_lock_mv "$tmp" "$LOCKFILE" "pull-apply section-merge $file"
@@ -904,9 +904,9 @@ cmd_pull_apply() {
     adopt-conflict)
       # File exists locally with different content and isn't in lockfile yet.
       # Same as take-scaffold but adds a new lockfile entry.
-      [[ -f "$scaffold_file" ]] || die "Scaffold file not found: $scaffold_file"
+      [[ -f "$hub_file" ]] || die "Scaffold file not found: $hub_file"
       mkdir -p "$(dirname "$file")"
-      cp "$scaffold_file" "$file"
+      cp "$hub_file" "$file"
       local new_hash
       new_hash=$(file_hash "$file")
       cmd_lock_add "$file" "hub" "$new_hash" "$new_hash" "clean"
@@ -914,13 +914,13 @@ cmd_pull_apply() {
       ;;
 
     accept-new)
-      [[ -f "$scaffold_file" ]] || die "Scaffold file not found: $scaffold_file"
+      [[ -f "$hub_file" ]] || die "Scaffold file not found: $hub_file"
       if [[ -f "$file" ]]; then
         echo "WARNING: $file already exists locally. Use 'take-scaffold', 'adopt-conflict', or 'section-merge' instead." >&2
         die "Refusing to overwrite existing file with accept-new. File: $file"
       fi
       mkdir -p "$(dirname "$file")"
-      cp "$scaffold_file" "$file"
+      cp "$hub_file" "$file"
       local new_hash
       new_hash=$(file_hash "$file")
       # Add new lockfile entry
@@ -951,10 +951,10 @@ cmd_pull_apply() {
       cp "$merged_file" "$file"
       local new_hash
       new_hash=$(file_hash "$file")
-      local new_scaffold_hash
-      new_scaffold_hash=$(file_hash "$scaffold_file")
+      local new_hub_hash
+      new_hub_hash=$(file_hash "$hub_file")
       local tmp; tmp=$(mktemp)
-      jq --arg f "$file" --arg sh "$new_scaffold_hash" --arg lh "$new_hash" \
+      jq --arg f "$file" --arg sh "$new_hub_hash" --arg lh "$new_hash" \
         '.files[$f].hub_hash = $sh | .files[$f].local_hash = $lh | .files[$f].status = "modified"' \
         "$LOCKFILE" > "$tmp" || true
       safe_lock_mv "$tmp" "$LOCKFILE" "pull-apply write-merged $file"
@@ -976,14 +976,14 @@ cmd_pull_finalize() {
   fi
 
   require_lockfile
-  local scaffold_source
-  scaffold_source=$(get_hub_source)
-  local scaffold_hub
-  scaffold_hub=$(get_hub_source_raw)
+  local hub_source
+  hub_source=$(get_hub_source)
+  local hub_root
+  hub_root=$(get_hub_source_raw)
 
   local new_version
-  if git -C "$scaffold_hub" rev-parse HEAD >/dev/null 2>&1; then
-    new_version=$(git -C "$scaffold_hub" rev-parse --short HEAD)
+  if git -C "$hub_root" rev-parse HEAD >/dev/null 2>&1; then
+    new_version=$(git -C "$hub_root" rev-parse --short HEAD)
   else
     new_version="unknown"
   fi
@@ -1054,8 +1054,8 @@ cmd_pull_finalize() {
 # Output: JSON array of {file, status, has_diff, first_lines}
 cmd_push_candidates() {
   require_lockfile
-  local scaffold_source
-  scaffold_source=$(get_hub_source)
+  local hub_source
+  hub_source=$(get_hub_source)
   local specific_file="${1:-}"
 
   local candidates="[]"
@@ -1082,9 +1082,9 @@ cmd_push_candidates() {
     [[ -f "$file" ]] || continue
 
     local has_diff="false"
-    local scaffold_file="$scaffold_source/$file"
-    if [[ -f "$scaffold_file" ]]; then
-      if ! diff -q "$scaffold_file" "$file" >/dev/null 2>&1; then
+    local hub_file="$hub_source/$file"
+    if [[ -f "$hub_file" ]]; then
+      if ! diff -q "$hub_file" "$file" >/dev/null 2>&1; then
         has_diff="true"
       fi
     fi
@@ -1115,8 +1115,8 @@ cmd_push_apply() {
   done
   [[ -n "$description" ]] || description="updated $file"
 
-  local scaffold_source
-  scaffold_source=$(get_hub_source)
+  local hub_source
+  hub_source=$(get_hub_source)
   local status
   status=$(jq -r --arg f "$file" '.files[$f].status // "unknown"' "$LOCKFILE")
 
@@ -1128,10 +1128,10 @@ cmd_push_apply() {
   fi
 
   # Ensure target directory exists in scaffold
-  mkdir -p "$(dirname "$scaffold_source/$file")"
+  mkdir -p "$(dirname "$hub_source/$file")"
 
   # Copy to scaffold
-  cp "$file" "$scaffold_source/$file"
+  cp "$file" "$hub_source/$file"
 
   # Update lockfile based on current status
   local new_hash
@@ -1170,10 +1170,10 @@ cmd_push_finalize() {
   done
   [[ -n "$message" ]] || die "Usage: ccanvil-sync.sh push-finalize <commit-message>"
 
-  local scaffold_source
-  scaffold_source=$(get_hub_source)
-  local scaffold_hub
-  scaffold_hub=$(get_hub_source_raw)
+  local hub_source
+  hub_source=$(get_hub_source)
+  local hub_root
+  hub_root=$(get_hub_source_raw)
 
   if $dry_run; then
     echo "DRY-RUN: would commit in scaffold with message: $message"
@@ -1183,21 +1183,21 @@ cmd_push_finalize() {
 
   # Stage and commit in scaffold
   local head_before
-  head_before=$(git -C "$scaffold_hub" rev-parse HEAD)
-  git -C "$scaffold_hub" add -A
-  git -C "$scaffold_hub" commit -m "$message" || true
+  head_before=$(git -C "$hub_root" rev-parse HEAD)
+  git -C "$hub_root" add -A
+  git -C "$hub_root" commit -m "$message" || true
   local head_after
-  head_after=$(git -C "$scaffold_hub" rev-parse HEAD)
+  head_after=$(git -C "$hub_root" rev-parse HEAD)
   if [[ "$head_before" != "$head_after" ]]; then
-    echo "Committed in scaffold: $(git -C "$scaffold_hub" rev-parse --short HEAD)"
+    echo "Committed in scaffold: $(git -C "$hub_root" rev-parse --short HEAD)"
   else
     echo "WARNING: git commit in scaffold produced no new commit." >&2
   fi
 
   # Update version
   local new_version
-  if git -C "$scaffold_hub" rev-parse HEAD >/dev/null 2>&1; then
-    new_version=$(git -C "$scaffold_hub" rev-parse --short HEAD)
+  if git -C "$hub_root" rev-parse HEAD >/dev/null 2>&1; then
+    new_version=$(git -C "$hub_root" rev-parse --short HEAD)
   else
     new_version="unknown"
   fi
@@ -1227,14 +1227,14 @@ cmd_promote() {
 
   [[ -f "$file" ]] || die "File not found: $file"
 
-  local scaffold_source
-  scaffold_source=$(get_hub_source)
-  local scaffold_hub
-  scaffold_hub=$(get_hub_source_raw)
+  local hub_source
+  hub_source=$(get_hub_source)
+  local hub_root
+  hub_root=$(get_hub_source_raw)
 
   # Copy to scaffold
-  mkdir -p "$(dirname "$scaffold_source/$file")"
-  cp "$file" "$scaffold_source/$file"
+  mkdir -p "$(dirname "$hub_source/$file")"
+  cp "$file" "$hub_source/$file"
 
   # Update lockfile
   local new_hash
@@ -1246,12 +1246,12 @@ cmd_promote() {
   safe_lock_mv "$tmp" "$LOCKFILE" "promote $file"
 
   # Commit in scaffold
-  git -C "$scaffold_hub" add -A
-  git -C "$scaffold_hub" commit -m "chore(scaffold): add $(basename "$file") from $(basename "$(pwd)")"
+  git -C "$hub_root" add -A
+  git -C "$hub_root" commit -m "chore(scaffold): add $(basename "$file") from $(basename "$(pwd)")"
 
   # Update version
   local new_version
-  new_version=$(git -C "$scaffold_hub" rev-parse --short HEAD 2>/dev/null || echo "unknown")
+  new_version=$(git -C "$hub_root" rev-parse --short HEAD 2>/dev/null || echo "unknown")
   cmd_lock_set_version "$new_version"
 
   echo "PROMOTED: $file → scaffold @ $new_version"
@@ -1292,11 +1292,11 @@ cmd_scan() {
   done
 
   if [[ -f "$LOCKFILE" ]]; then
-    local scaffold_source
-    scaffold_source=$(get_hub_source)
+    local hub_source
+    hub_source=$(get_hub_source)
     echo ""
-    echo "Tracked files in scaffold ($scaffold_source):"
-    scan_hub_files "$scaffold_source" | while IFS= read -r f; do
+    echo "Tracked files in scaffold ($hub_source):"
+    scan_hub_files "$hub_source" | while IFS= read -r f; do
       echo "  $f"
     done
   fi

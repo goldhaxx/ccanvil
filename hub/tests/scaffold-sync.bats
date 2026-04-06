@@ -556,8 +556,8 @@ EOF
   [ -f "$NODE/.ccanvil/ccanvil.lock" ]
 
   # Check required top-level fields
-  jq -e '.scaffold_source' "$NODE/.ccanvil/ccanvil.lock"
-  jq -e '.scaffold_version' "$NODE/.ccanvil/ccanvil.lock"
+  jq -e '.hub_source' "$NODE/.ccanvil/ccanvil.lock"
+  jq -e '.hub_version' "$NODE/.ccanvil/ccanvil.lock"
   jq -e '.synced_at' "$NODE/.ccanvil/ccanvil.lock"
   jq -e '.files' "$NODE/.ccanvil/ccanvil.lock"
 }
@@ -577,7 +577,7 @@ EOF
   status=$(jq -r '.files[".claude/rules/tdd.md"].status' "$NODE/.ccanvil/ccanvil.lock")
   [ "$status" = "clean" ]
 
-  scaffold_hash=$(jq -r '.files[".claude/rules/tdd.md"].scaffold_hash' "$NODE/.ccanvil/ccanvil.lock")
+  scaffold_hash=$(jq -r '.files[".claude/rules/tdd.md"].hub_hash' "$NODE/.ccanvil/ccanvil.lock")
   local_hash=$(jq -r '.files[".claude/rules/tdd.md"].local_hash' "$NODE/.ccanvil/ccanvil.lock")
   [ "$scaffold_hash" = "$local_hash" ]
 }
@@ -874,7 +874,7 @@ EOF
   h=$(shasum -a 256 "$NODE/.claude/rules/local-rule.md" | awk '{print $1}')
   local tmp; tmp=$(mktemp)
   jq --arg f ".claude/rules/local-rule.md" --arg h "$h" \
-    '.files[$f] = {"origin": "local", "scaffold_hash": null, "local_hash": $h, "status": "local-only", "sync": "tracked"}' \
+    '.files[$f] = {"origin": "local", "hub_hash": null, "local_hash": $h, "status": "local-only", "sync": "tracked"}' \
     "$NODE/.ccanvil/ccanvil.lock" > "$tmp"
   mv "$tmp" "$NODE/.ccanvil/ccanvil.lock"
 
@@ -985,7 +985,7 @@ EOF
   cd "$NODE"
   # Create a file that we'll plan to delete
   echo "# Extra rule" > "$NODE/.claude/rules/extra.md"
-  bash "$NODE/.ccanvil/scripts/ccanvil-sync.sh" lock-add ".claude/rules/extra.md" "scaffold" "abc123" "$(shasum -a 256 "$NODE/.claude/rules/extra.md" | awk '{print $1}')" "clean"
+  bash "$NODE/.ccanvil/scripts/ccanvil-sync.sh" lock-add ".claude/rules/extra.md" "hub" "abc123" "$(shasum -a 256 "$NODE/.claude/rules/extra.md" | awk '{print $1}')" "clean"
   git -C "$NODE" add -A && git -C "$NODE" commit -q -m "add extra rule"
 
   # Simulate: plan says file is "clean" at plan time, but between plan and apply

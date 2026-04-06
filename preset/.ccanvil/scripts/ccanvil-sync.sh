@@ -74,7 +74,7 @@ require_lockfile() {
 
 get_scaffold_source_raw() {
   # Returns absolute path to the hub root (for git operations on the hub)
-  jq -r '.scaffold_source' "$LOCKFILE" | sed "s|^~|$HOME|"
+  jq -r '.hub_source' "$LOCKFILE" | sed "s|^~|$HOME|"
 }
 
 get_scaffold_source() {
@@ -87,7 +87,7 @@ get_scaffold_source() {
 
 get_scaffold_source_display() {
   # Returns path with ~ (for commit messages, output — no PII)
-  jq -r '.scaffold_source' "$LOCKFILE"
+  jq -r '.hub_source' "$LOCKFILE"
 }
 
 file_hash() {
@@ -215,11 +215,11 @@ cmd_init() {
       fi
 
       files_json=$(echo "$files_json" | jq --arg f "$file" --arg sh "$scaffold_h" --arg lh "$local_h" --arg st "$status" \
-        '. + {($f): {"origin": "scaffold", "scaffold_hash": $sh, "local_hash": $lh, "status": $st, "sync": "tracked"}}')
+        '. + {($f): {"origin": "hub", "hub_hash": $sh, "local_hash": $lh, "status": $st, "sync": "tracked"}}')
     else
       # File exists locally but not in scaffold
       files_json=$(echo "$files_json" | jq --arg f "$file" --arg lh "$local_h" \
-        '. + {($f): {"origin": "local", "scaffold_hash": null, "local_hash": $lh, "status": "local-only", "sync": "tracked"}}')
+        '. + {($f): {"origin": "local", "hub_hash": null, "local_hash": $lh, "status": "local-only", "sync": "tracked"}}')
     fi
   done < <(scan_tracked_files)
 
@@ -229,14 +229,14 @@ cmd_init() {
       local scaffold_h
       scaffold_h=$(file_hash "$dist_root/$file")
       files_json=$(echo "$files_json" | jq --arg f "$file" --arg sh "$scaffold_h" \
-        '. + {($f): {"origin": "scaffold", "scaffold_hash": $sh, "local_hash": null, "status": "scaffold-only", "sync": "tracked"}}')
+        '. + {($f): {"origin": "hub", "hub_hash": $sh, "local_hash": null, "status": "hub-only", "sync": "tracked"}}')
     fi
   done < <(scan_scaffold_files "$scaffold_path")
 
   # Write lockfile (store ~ instead of absolute home path to avoid PII in tracked files)
   local display_path="${scaffold_path/#$HOME/~}"
   jq -n --arg src "$display_path" --arg ver "$scaffold_version" --arg ts "$(timestamp)" --argjson files "$files_json" \
-    '{scaffold_source: $src, scaffold_version: $ver, synced_at: $ts, files: $files}' > "$LOCKFILE"
+    '{hub_source: $src, hub_version: $ver, synced_at: $ts, files: $files}' > "$LOCKFILE"
 
   local total
   total=$(echo "$files_json" | jq 'length')
@@ -244,7 +244,7 @@ cmd_init() {
   clean=$(echo "$files_json" | jq '[.[] | select(.status == "clean")] | length')
   modified=$(echo "$files_json" | jq '[.[] | select(.status == "modified")] | length')
   local_only=$(echo "$files_json" | jq '[.[] | select(.status == "local-only")] | length')
-  scaffold_only=$(echo "$files_json" | jq '[.[] | select(.status == "scaffold-only")] | length')
+  scaffold_only=$(echo "$files_json" | jq '[.[] | select(.status == "hub-only")] | length')
 
   echo "Scaffold lockfile generated: $LOCKFILE"
   echo "  Scaffold: $display_path @ $scaffold_version"
@@ -260,7 +260,7 @@ cmd_status() {
   local scaffold_hub
   scaffold_hub=$(get_scaffold_source_raw)
   local scaffold_version
-  scaffold_version=$(jq -r '.scaffold_version' "$LOCKFILE")
+  scaffold_version=$(jq -r '.hub_version' "$LOCKFILE")
   local synced_at
   synced_at=$(jq -r '.synced_at' "$LOCKFILE")
 
@@ -312,7 +312,7 @@ cmd_status() {
         modified)     display_status="MODIFIED" ;;
         local-only)   display_status="LOCAL" ;;
         promoted)     display_status="PROMOTED" ;;
-        scaffold-only) display_status="SCAFFOLD-ONLY" ;;
+        hub-only) display_status="HUB-ONLY" ;;
         *)            display_status="UNKNOWN" ;;
       esac
     fi
@@ -362,7 +362,7 @@ cmd_diff() {
         local current_hash
         current_hash=$(file_hash "$f")
         local scaffold_hash
-        scaffold_hash=$(jq -r --arg f "$f" '.files[$f].scaffold_hash // "null"' "$LOCKFILE")
+        scaffold_hash=$(jq -r --arg f "$f" '.files[$f].hub_hash // "null"' "$LOCKFILE")
         if [[ "$current_hash" != "$scaffold_hash" && -f "$scaffold_source/$f" ]]; then
           echo "=== $f ==="
           diff --unified "$scaffold_source/$f" "$f" || true
@@ -412,13 +412,13 @@ cmd_lock_add() {
   tmp=$(mktemp)
   if [[ "$scaffold_hash" == "null" ]]; then
     jq --arg f "$file" --arg o "$origin" --arg lh "$local_hash" --arg st "$status" \
-      '.files[$f] = {"origin": $o, "scaffold_hash": null, "local_hash": $lh, "status": $st}' "$LOCKFILE" > "$tmp" || true
+      '.files[$f] = {"origin": $o, "hub_hash": null, "local_hash": $lh, "status": $st}' "$LOCKFILE" > "$tmp" || true
   elif [[ "$local_hash" == "null" ]]; then
     jq --arg f "$file" --arg o "$origin" --arg sh "$scaffold_hash" --arg st "$status" \
-      '.files[$f] = {"origin": $o, "scaffold_hash": $sh, "local_hash": null, "status": $st}' "$LOCKFILE" > "$tmp" || true
+      '.files[$f] = {"origin": $o, "hub_hash": $sh, "local_hash": null, "status": $st}' "$LOCKFILE" > "$tmp" || true
   else
     jq --arg f "$file" --arg o "$origin" --arg sh "$scaffold_hash" --arg lh "$local_hash" --arg st "$status" \
-      '.files[$f] = {"origin": $o, "scaffold_hash": $sh, "local_hash": $lh, "status": $st}' "$LOCKFILE" > "$tmp" || true
+      '.files[$f] = {"origin": $o, "hub_hash": $sh, "local_hash": $lh, "status": $st}' "$LOCKFILE" > "$tmp" || true
   fi
   safe_lock_mv "$tmp" "$LOCKFILE" "lock-add $file"
 }
@@ -439,7 +439,7 @@ cmd_lock_set_version() {
 
   local tmp
   tmp=$(mktemp)
-  jq --arg v "$version" --arg ts "$(timestamp)" '.scaffold_version = $v | .synced_at = $ts' "$LOCKFILE" > "$tmp" || true
+  jq --arg v "$version" --arg ts "$(timestamp)" '.hub_version = $v | .synced_at = $ts' "$LOCKFILE" > "$tmp" || true
   safe_lock_mv "$tmp" "$LOCKFILE" "lock-set-version"
 }
 
@@ -644,7 +644,7 @@ cmd_pull_plan() {
     local status origin scaffold_hash local_hash
     status=$(jq -r --arg f "$file" '.files[$f].status' "$LOCKFILE")
     origin=$(jq -r --arg f "$file" '.files[$f].origin' "$LOCKFILE")
-    scaffold_hash=$(jq -r --arg f "$file" '.files[$f].scaffold_hash // "null"' "$LOCKFILE")
+    scaffold_hash=$(jq -r --arg f "$file" '.files[$f].hub_hash // "null"' "$LOCKFILE")
     local_hash=$(jq -r --arg f "$file" '.files[$f].local_hash // "null"' "$LOCKFILE")
 
     # Skip node-only files (permanently excluded from sync)
@@ -798,7 +798,7 @@ cmd_pull_auto() {
     local tmp
     tmp=$(mktemp)
     jq --arg f "$file" --arg h "$new_hash" \
-      '.files[$f].scaffold_hash = $h | .files[$f].local_hash = $h | .files[$f].status = "clean" | .files[$f].origin = "scaffold" | .files[$f].sync = "tracked"' \
+      '.files[$f].hub_hash = $h | .files[$f].local_hash = $h | .files[$f].status = "clean" | .files[$f].origin = "hub" | .files[$f].sync = "tracked"' \
       "$LOCKFILE" > "$tmp" || true
     safe_lock_mv "$tmp" "$LOCKFILE" "pull-auto $file"
 
@@ -863,7 +863,7 @@ cmd_pull_apply() {
       new_hash=$(file_hash "$file")
       local tmp; tmp=$(mktemp)
       jq --arg f "$file" --arg h "$new_hash" \
-        '.files[$f].scaffold_hash = $h | .files[$f].local_hash = $h | .files[$f].status = "clean"' \
+        '.files[$f].hub_hash = $h | .files[$f].local_hash = $h | .files[$f].status = "clean"' \
         "$LOCKFILE" > "$tmp" || true
       safe_lock_mv "$tmp" "$LOCKFILE" "pull-apply take-scaffold $file"
       echo "APPLIED: $file (took scaffold)"
@@ -877,7 +877,7 @@ cmd_pull_apply() {
       current_local_hash=$(file_hash "$file")
       local tmp; tmp=$(mktemp)
       jq --arg f "$file" --arg sh "$new_scaffold_hash" --arg lh "$current_local_hash" \
-        '.files[$f].scaffold_hash = $sh | .files[$f].local_hash = $lh | .files[$f].status = "modified"' \
+        '.files[$f].hub_hash = $sh | .files[$f].local_hash = $lh | .files[$f].status = "modified"' \
         "$LOCKFILE" > "$tmp" || true
       safe_lock_mv "$tmp" "$LOCKFILE" "pull-apply keep-local $file"
       echo "APPLIED: $file (kept local)"
@@ -895,7 +895,7 @@ cmd_pull_apply() {
       new_scaffold_hash=$(file_hash "$scaffold_file")
       local tmp; tmp=$(mktemp)
       jq --arg f "$file" --arg sh "$new_scaffold_hash" --arg lh "$new_hash" \
-        '.files[$f].scaffold_hash = $sh | .files[$f].local_hash = $lh | .files[$f].status = "clean"' \
+        '.files[$f].hub_hash = $sh | .files[$f].local_hash = $lh | .files[$f].status = "clean"' \
         "$LOCKFILE" > "$tmp" || true
       safe_lock_mv "$tmp" "$LOCKFILE" "pull-apply section-merge $file"
       echo "APPLIED: $file (section-merged)"
@@ -909,7 +909,7 @@ cmd_pull_apply() {
       cp "$scaffold_file" "$file"
       local new_hash
       new_hash=$(file_hash "$file")
-      cmd_lock_add "$file" "scaffold" "$new_hash" "$new_hash" "clean"
+      cmd_lock_add "$file" "hub" "$new_hash" "$new_hash" "clean"
       echo "APPLIED: $file (adopted — took scaffold)"
       ;;
 
@@ -924,7 +924,7 @@ cmd_pull_apply() {
       local new_hash
       new_hash=$(file_hash "$file")
       # Add new lockfile entry
-      cmd_lock_add "$file" "scaffold" "$new_hash" "$new_hash" "clean"
+      cmd_lock_add "$file" "hub" "$new_hash" "$new_hash" "clean"
       echo "APPLIED: $file (accepted new)"
       ;;
 
@@ -955,7 +955,7 @@ cmd_pull_apply() {
       new_scaffold_hash=$(file_hash "$scaffold_file")
       local tmp; tmp=$(mktemp)
       jq --arg f "$file" --arg sh "$new_scaffold_hash" --arg lh "$new_hash" \
-        '.files[$f].scaffold_hash = $sh | .files[$f].local_hash = $lh | .files[$f].status = "modified"' \
+        '.files[$f].hub_hash = $sh | .files[$f].local_hash = $lh | .files[$f].status = "modified"' \
         "$LOCKFILE" > "$tmp" || true
       safe_lock_mv "$tmp" "$LOCKFILE" "pull-apply write-merged $file"
       echo "APPLIED: $file (merged)"
@@ -1141,12 +1141,12 @@ cmd_push_apply() {
   if [[ "$status" == "local-only" ]]; then
     # Promoting: update origin and status
     jq --arg f "$file" --arg h "$new_hash" \
-      '.files[$f].origin = "scaffold" | .files[$f].scaffold_hash = $h | .files[$f].local_hash = $h | .files[$f].status = "promoted"' \
+      '.files[$f].origin = "hub" | .files[$f].hub_hash = $h | .files[$f].local_hash = $h | .files[$f].status = "promoted"' \
       "$LOCKFILE" > "$tmp" || true
   else
     # Modified → synced: update hashes and status
     jq --arg f "$file" --arg h "$new_hash" \
-      '.files[$f].scaffold_hash = $h | .files[$f].local_hash = $h | .files[$f].status = "clean"' \
+      '.files[$f].hub_hash = $h | .files[$f].local_hash = $h | .files[$f].status = "clean"' \
       "$LOCKFILE" > "$tmp" || true
   fi
   safe_lock_mv "$tmp" "$LOCKFILE" "push-apply $file"
@@ -1241,7 +1241,7 @@ cmd_promote() {
   new_hash=$(file_hash "$file")
   local tmp; tmp=$(mktemp)
   jq --arg f "$file" --arg h "$new_hash" \
-    '.files[$f].origin = "scaffold" | .files[$f].scaffold_hash = $h | .files[$f].local_hash = $h | .files[$f].status = "promoted"' \
+    '.files[$f].origin = "hub" | .files[$f].hub_hash = $h | .files[$f].local_hash = $h | .files[$f].status = "promoted"' \
     "$LOCKFILE" > "$tmp" || true
   safe_lock_mv "$tmp" "$LOCKFILE" "promote $file"
 

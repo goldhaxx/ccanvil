@@ -2,7 +2,7 @@
 
 > Feature: scaffold-terminology-eradication
 > Created: 1775450355
-> Status: Draft
+> Status: In Progress
 
 ## Summary
 

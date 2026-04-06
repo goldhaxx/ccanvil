@@ -72,20 +72,20 @@ require_lockfile() {
   [[ -f "$LOCKFILE" ]] || die "No $LOCKFILE found. Run: ccanvil-sync.sh init"
 }
 
-get_scaffold_source_raw() {
+get_hub_source_raw() {
   # Returns absolute path to the hub root (for git operations on the hub)
   jq -r '.hub_source' "$LOCKFILE" | sed "s|^~|$HOME|"
 }
 
-get_scaffold_source() {
+get_hub_source() {
   # Returns absolute path to the distributable root within the hub.
   # If hub has preset/, distributable files live there; otherwise hub root.
   local src
-  src=$(get_scaffold_source_raw)
-  scaffold_dist_root "$src"
+  src=$(get_hub_source_raw)
+  hub_dist_root "$src"
 }
 
-get_scaffold_source_display() {
+get_hub_source_display() {
   # Returns path with ~ (for commit messages, output — no PII)
   jq -r '.hub_source' "$LOCKFILE"
 }
@@ -146,7 +146,7 @@ scan_tracked_files() {
 # Resolve the distributable root within a scaffold hub.
 # If the hub has a preset/ directory, distributable files live there.
 # Otherwise (legacy or non-hub), scan from the path directly.
-scaffold_dist_root() {
+hub_dist_root() {
   local scaffold_path="$1"
   if [[ -d "$scaffold_path/preset" ]]; then
     echo "$scaffold_path/preset"
@@ -156,10 +156,10 @@ scaffold_dist_root() {
 }
 
 # Scan scaffold for all files matching tracked patterns
-scan_scaffold_files() {
+scan_hub_files() {
   local scaffold_path="$1"
   local dist_root
-  dist_root=$(scaffold_dist_root "$scaffold_path")
+  dist_root=$(hub_dist_root "$scaffold_path")
   local files=()
   for pattern in "${TRACKED_PATTERNS[@]}"; do
     local matches
@@ -187,7 +187,7 @@ cmd_init() {
 
   # Resolve dist root (preset/ if hub, scaffold_path if downstream)
   local dist_root
-  dist_root=$(scaffold_dist_root "$scaffold_path")
+  dist_root=$(hub_dist_root "$scaffold_path")
 
   # Get scaffold git version
   local scaffold_version="unknown"
@@ -231,7 +231,7 @@ cmd_init() {
       files_json=$(echo "$files_json" | jq --arg f "$file" --arg sh "$scaffold_h" \
         '. + {($f): {"origin": "hub", "hub_hash": $sh, "local_hash": null, "status": "hub-only", "sync": "tracked"}}')
     fi
-  done < <(scan_scaffold_files "$scaffold_path")
+  done < <(scan_hub_files "$scaffold_path")
 
   # Write lockfile (store ~ instead of absolute home path to avoid PII in tracked files)
   local display_path="${scaffold_path/#$HOME/~}"
@@ -256,15 +256,15 @@ cmd_status() {
   require_lockfile
 
   local scaffold_source
-  scaffold_source=$(get_scaffold_source)
+  scaffold_source=$(get_hub_source)
   local scaffold_hub
-  scaffold_hub=$(get_scaffold_source_raw)
+  scaffold_hub=$(get_hub_source_raw)
   local scaffold_version
   scaffold_version=$(jq -r '.hub_version' "$LOCKFILE")
   local synced_at
   synced_at=$(jq -r '.synced_at' "$LOCKFILE")
 
-  echo "Scaffold: $(get_scaffold_source_display) @ $scaffold_version"
+  echo "Scaffold: $(get_hub_source_display) @ $scaffold_version"
   echo "Last synced: $synced_at"
   echo ""
 
@@ -335,7 +335,7 @@ cmd_diff() {
   require_lockfile
   local file="${1:-}"
   local scaffold_source
-  scaffold_source=$(get_scaffold_source)
+  scaffold_source=$(get_hub_source)
 
   if [[ -n "$file" ]]; then
     # Diff a specific file
@@ -579,9 +579,9 @@ cmd_classify() {
 cmd_pre_check() {
   require_lockfile
   local scaffold_source
-  scaffold_source=$(get_scaffold_source)
+  scaffold_source=$(get_hub_source)
   local scaffold_hub
-  scaffold_hub=$(get_scaffold_source_raw)
+  scaffold_hub=$(get_hub_source_raw)
 
   [[ -d "$scaffold_source" ]] || die "Scaffold not found at: $scaffold_source"
 
@@ -635,7 +635,7 @@ cmd_pre_check() {
 cmd_pull_plan() {
   require_lockfile
   local scaffold_source
-  scaffold_source=$(get_scaffold_source)
+  scaffold_source=$(get_hub_source)
 
   local plan="[]"
 
@@ -743,7 +743,7 @@ cmd_pull_plan() {
           '. + [{"file": $f, "action": "new", "reason": "New file in scaffold, not yet tracked", "local_hash": "MISSING"}]')
       fi
     fi
-  done < <(scan_scaffold_files "$scaffold_source")
+  done < <(scan_hub_files "$scaffold_source")
 
   echo "$plan" | jq '.'
 }
@@ -759,7 +759,7 @@ cmd_pull_auto() {
 
   require_lockfile
   local scaffold_source
-  scaffold_source=$(get_scaffold_source)
+  scaffold_source=$(get_hub_source)
 
   local count=0
   local plan
@@ -836,7 +836,7 @@ cmd_pull_apply() {
   done
 
   local scaffold_source
-  scaffold_source=$(get_scaffold_source)
+  scaffold_source=$(get_hub_source)
   local scaffold_file="$scaffold_source/$file"
 
   # Guard: if PLAN_LOCAL_HASH is set, verify file hasn't changed since plan
@@ -977,9 +977,9 @@ cmd_pull_finalize() {
 
   require_lockfile
   local scaffold_source
-  scaffold_source=$(get_scaffold_source)
+  scaffold_source=$(get_hub_source)
   local scaffold_hub
-  scaffold_hub=$(get_scaffold_source_raw)
+  scaffold_hub=$(get_hub_source_raw)
 
   local new_version
   if git -C "$scaffold_hub" rev-parse HEAD >/dev/null 2>&1; then
@@ -1008,7 +1008,7 @@ cmd_pull_finalize() {
       file_count=$(echo "$all_changes" | wc -l | tr -d ' ')
 
       local display_source
-      display_source=$(get_scaffold_source_display)
+      display_source=$(get_hub_source_display)
 
       if $dry_run; then
         echo "DRY-RUN: would commit $file_count files"
@@ -1055,7 +1055,7 @@ cmd_pull_finalize() {
 cmd_push_candidates() {
   require_lockfile
   local scaffold_source
-  scaffold_source=$(get_scaffold_source)
+  scaffold_source=$(get_hub_source)
   local specific_file="${1:-}"
 
   local candidates="[]"
@@ -1116,7 +1116,7 @@ cmd_push_apply() {
   [[ -n "$description" ]] || description="updated $file"
 
   local scaffold_source
-  scaffold_source=$(get_scaffold_source)
+  scaffold_source=$(get_hub_source)
   local status
   status=$(jq -r --arg f "$file" '.files[$f].status // "unknown"' "$LOCKFILE")
 
@@ -1171,9 +1171,9 @@ cmd_push_finalize() {
   [[ -n "$message" ]] || die "Usage: ccanvil-sync.sh push-finalize <commit-message>"
 
   local scaffold_source
-  scaffold_source=$(get_scaffold_source)
+  scaffold_source=$(get_hub_source)
   local scaffold_hub
-  scaffold_hub=$(get_scaffold_source_raw)
+  scaffold_hub=$(get_hub_source_raw)
 
   if $dry_run; then
     echo "DRY-RUN: would commit in scaffold with message: $message"
@@ -1228,9 +1228,9 @@ cmd_promote() {
   [[ -f "$file" ]] || die "File not found: $file"
 
   local scaffold_source
-  scaffold_source=$(get_scaffold_source)
+  scaffold_source=$(get_hub_source)
   local scaffold_hub
-  scaffold_hub=$(get_scaffold_source_raw)
+  scaffold_hub=$(get_hub_source_raw)
 
   # Copy to scaffold
   mkdir -p "$(dirname "$scaffold_source/$file")"
@@ -1293,10 +1293,10 @@ cmd_scan() {
 
   if [[ -f "$LOCKFILE" ]]; then
     local scaffold_source
-    scaffold_source=$(get_scaffold_source)
+    scaffold_source=$(get_hub_source)
     echo ""
     echo "Tracked files in scaffold ($scaffold_source):"
-    scan_scaffold_files "$scaffold_source" | while IFS= read -r f; do
+    scan_hub_files "$scaffold_source" | while IFS= read -r f; do
       echo "  $f"
     done
   fi

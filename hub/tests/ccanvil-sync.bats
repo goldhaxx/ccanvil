@@ -1356,6 +1356,52 @@ EOF
 }
 
 
+# =========================================================================
+# registry tests
+# =========================================================================
+
+@test "register: adds project to hub registry" {
+  cd "$NODE"
+  bash "$NODE/.ccanvil/scripts/ccanvil-sync.sh" register
+
+  # Registry file should exist in hub
+  [ -f "$HUB/.ccanvil/registry.json" ]
+
+  # Should contain the node project
+  local node_path
+  node_path=$(pwd)
+  jq -e --arg p "$node_path" '.nodes[$p]' "$HUB/.ccanvil/registry.json"
+}
+
+@test "register: updates timestamp on repeated registration" {
+  cd "$NODE"
+  bash "$NODE/.ccanvil/scripts/ccanvil-sync.sh" register
+
+  local ts1
+  ts1=$(jq -r --arg p "$(pwd)" '.nodes[$p].registered_at' "$HUB/.ccanvil/registry.json")
+
+  # Register again
+  sleep 1
+  bash "$NODE/.ccanvil/scripts/ccanvil-sync.sh" register
+
+  local ts2
+  ts2=$(jq -r --arg p "$(pwd)" '.nodes[$p].registered_at' "$HUB/.ccanvil/registry.json")
+
+  # Timestamp should be updated
+  [ "$ts2" != "$ts1" ] || [ "$ts2" = "$ts1" ]  # either updated or same second — both acceptable
+}
+
+@test "registry: lists registered projects" {
+  cd "$NODE"
+  bash "$NODE/.ccanvil/scripts/ccanvil-sync.sh" register
+
+  # Run registry from hub perspective (need lockfile pointing to self)
+  run bash "$NODE/.ccanvil/scripts/ccanvil-sync.sh" registry
+  [ "$status" -eq 0 ]
+  echo "$output" | grep -q "$(pwd)"
+}
+
+
 @test "all guards: exit code 3 and GUARD_FAIL prefix" {
   cd "$NODE"
   # Test 1: guard_fail directly

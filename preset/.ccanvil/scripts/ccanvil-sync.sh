@@ -1407,6 +1407,58 @@ cmd_migrate() {
   echo "MIGRATE complete. Run 'git add -A && git commit' to finalize."
 }
 
+# register: Add the current project to the hub's registry.
+# Run from a downstream project. Reads hub path from lockfile.
+cmd_register() {
+  require_lockfile
+  local hub_root
+  hub_root=$(get_hub_source_raw)
+  local registry="$hub_root/.ccanvil/registry.json"
+  local node_path
+  node_path=$(pwd)
+  local node_name
+  node_name=$(basename "$node_path")
+  local ts
+  ts=$(timestamp)
+
+  # Create registry file if it doesn't exist
+  if [[ ! -f "$registry" ]]; then
+    mkdir -p "$(dirname "$registry")"
+    echo '{"nodes":{}}' > "$registry"
+  fi
+
+  # Add or update this project's entry
+  local tmp; tmp=$(mktemp)
+  jq --arg p "$node_path" --arg n "$node_name" --arg t "$ts" \
+    '.nodes[$p] = {"name": $n, "registered_at": $t}' "$registry" > "$tmp" || true
+  if [[ -s "$tmp" ]] && jq empty "$tmp" 2>/dev/null; then
+    mv "$tmp" "$registry"
+  else
+    rm -f "$tmp"
+    die "Failed to update registry"
+  fi
+
+  echo "REGISTERED: $node_name ($node_path)"
+}
+
+# registry: List all registered downstream projects.
+# Can be run from anywhere with a lockfile.
+cmd_registry() {
+  require_lockfile
+  local hub_root
+  hub_root=$(get_hub_source_raw)
+  local registry="$hub_root/.ccanvil/registry.json"
+
+  if [[ ! -f "$registry" ]]; then
+    echo "No registry found. Run 'ccanvil-sync.sh register' from a downstream project."
+    return 0
+  fi
+
+  echo "Registered downstream projects:"
+  echo ""
+  jq -r '.nodes | to_entries[] | "  \(.value.name) — \(.key) (registered: \(.value.registered_at))"' "$registry"
+}
+
 # ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
@@ -1449,6 +1501,8 @@ case "${1:-}" in
   promote)          shift; cmd_promote "$@" ;;
   demote)           shift; cmd_demote "$@" ;;
   migrate)          shift; cmd_migrate "$@" ;;
+  register)         cmd_register ;;
+  registry)         cmd_registry ;;
 
   *)
     echo "Usage: ccanvil-sync.sh <command> [args]"

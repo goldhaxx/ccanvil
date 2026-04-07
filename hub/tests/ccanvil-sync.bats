@@ -1284,6 +1284,78 @@ EOF
   [ "$hub_head_before" = "$hub_head_after" ]
 }
 
+# =========================================================================
+# migrate tests
+# =========================================================================
+
+@test "migrate: copies hub files and re-inits lockfile" {
+  # Create a fresh empty project (simulating a stale downstream)
+  local FRESH
+  FRESH=$(mktemp -d)
+  mkdir -p "$FRESH/.ccanvil/scripts" "$FRESH/.claude/rules"
+  # Copy just the sync script so migrate can run
+  cp "$SCRIPT" "$FRESH/.ccanvil/scripts/ccanvil-sync.sh"
+  # Create a stale rule (different from hub)
+  echo "# Old content" > "$FRESH/.claude/rules/tdd.md"
+  git -C "$FRESH" init -q && git -C "$FRESH" add -A && git -C "$FRESH" commit -q -m "init"
+
+  cd "$FRESH"
+  run bash "$FRESH/.ccanvil/scripts/ccanvil-sync.sh" migrate "$HUB"
+  [ "$status" -eq 0 ]
+  echo "$output" | grep -q "MIGRATE"
+
+  # Lockfile should exist with new keys
+  jq -e '.hub_source' "$FRESH/.ccanvil/ccanvil.lock"
+  jq -e '.hub_version' "$FRESH/.ccanvil/ccanvil.lock"
+
+  # Hub-managed files should be copied
+  [ -f "$FRESH/.claude/rules/tdd.md" ]
+  [ -f "$FRESH/.claude/commands/catchup.md" ]
+
+  rm -rf "$FRESH"
+}
+
+@test "migrate --dry-run: shows plan without modifying files" {
+  local FRESH
+  FRESH=$(mktemp -d)
+  mkdir -p "$FRESH/.ccanvil/scripts" "$FRESH/.claude/rules"
+  cp "$SCRIPT" "$FRESH/.ccanvil/scripts/ccanvil-sync.sh"
+  echo "# Old" > "$FRESH/.claude/rules/tdd.md"
+  git -C "$FRESH" init -q && git -C "$FRESH" add -A && git -C "$FRESH" commit -q -m "init"
+
+  cd "$FRESH"
+  run bash "$FRESH/.ccanvil/scripts/ccanvil-sync.sh" migrate "$HUB" --dry-run
+  [ "$status" -eq 0 ]
+  echo "$output" | grep -q "DRY-RUN"
+
+  # No lockfile should have been created
+  [ ! -f "$FRESH/.ccanvil/ccanvil.lock" ]
+
+  rm -rf "$FRESH"
+}
+
+@test "migrate: handles stale file renames" {
+  local FRESH
+  FRESH=$(mktemp -d)
+  mkdir -p "$FRESH/.ccanvil/scripts" "$FRESH/.ccanvil/guide" "$FRESH/.claude"
+  cp "$SCRIPT" "$FRESH/.ccanvil/scripts/ccanvil-sync.sh"
+  # Create stale-named files
+  echo "# Old sync guide" > "$FRESH/.ccanvil/guide/scaffold-sync.md"
+  echo "# Old framework" > "$FRESH/.ccanvil/guide/scaffold-framework.md"
+  git -C "$FRESH" init -q && git -C "$FRESH" add -A && git -C "$FRESH" commit -q -m "init"
+
+  cd "$FRESH"
+  bash "$FRESH/.ccanvil/scripts/ccanvil-sync.sh" migrate "$HUB"
+
+  # Old files should be gone, new files should exist
+  [ ! -f "$FRESH/.ccanvil/guide/scaffold-sync.md" ]
+  [ ! -f "$FRESH/.ccanvil/guide/scaffold-framework.md" ]
+  [ -f "$FRESH/.ccanvil/guide/sync.md" ] || [ -f "$FRESH/.ccanvil/guide/index.md" ]
+
+  rm -rf "$FRESH"
+}
+
+
 @test "all guards: exit code 3 and GUARD_FAIL prefix" {
   cd "$NODE"
   # Test 1: guard_fail directly

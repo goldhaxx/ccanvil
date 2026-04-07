@@ -1320,6 +1320,93 @@ cmd_scan() {
   fi
 }
 
+# migrate: Copy all hub-managed files to the current project, handle renames, re-init lockfile.
+# Usage: migrate <hub-path> [--dry-run]
+cmd_migrate() {
+  local hub_path="${1:?Usage: ccanvil-sync.sh migrate <hub-path> [--dry-run]}"
+  hub_path="${hub_path/#\~/$HOME}"
+  local dry_run=false
+  [[ "${2:-}" == "--dry-run" ]] && dry_run=true
+
+  [[ -d "$hub_path" ]] || die "Hub not found at: $hub_path"
+
+  local dist_root
+  dist_root=$(hub_dist_root "$hub_path")
+
+  # Remove stale-named files from previous structure
+  local stale_files=(
+    ".ccanvil/guide/scaffold-sync.md"
+    ".ccanvil/guide/scaffold-framework.md"
+    ".ccanvil/templates/scaffold.json.md"
+  )
+  for stale in "${stale_files[@]}"; do
+    if [[ -f "$stale" ]]; then
+      if $dry_run; then
+        echo "DRY-RUN: would remove stale file $stale"
+      else
+        rm "$stale"
+        echo "REMOVED: $stale (stale name)"
+      fi
+    fi
+  done
+
+  # Rename scaffold.json → ccanvil.json if present
+  if [[ -f ".claude/scaffold.json" ]]; then
+    if $dry_run; then
+      echo "DRY-RUN: would rename .claude/scaffold.json → .claude/ccanvil.json"
+    else
+      mv ".claude/scaffold.json" ".claude/ccanvil.json"
+      echo "RENAMED: .claude/scaffold.json → .claude/ccanvil.json"
+    fi
+  fi
+
+  # Copy all hub-managed files
+  local count=0
+  while IFS= read -r file; do
+    local hub_file="$dist_root/$file"
+    [[ -f "$hub_file" ]] || continue
+
+    if $dry_run; then
+      echo "DRY-RUN: would copy $file"
+      count=$((count + 1))
+      continue
+    fi
+
+    # For delimited markdown files, use section-merge to preserve node content
+    if [[ "$file" == *.md ]] && [[ -f "$file" ]] && \
+       (grep -qx '<!-- NODE-SPECIFIC-START -->' "$hub_file" 2>/dev/null || \
+        grep -qx '<!-- HUB-MANAGED-START -->' "$hub_file" 2>/dev/null); then
+      local merged
+      merged=$(cmd_section_merge "$hub_file" "$file" 2>/dev/null) && {
+        echo "$merged" > "$file"
+        echo "MERGED: $file (section-merge)"
+        count=$((count + 1))
+        continue
+      }
+    fi
+
+    # Plain copy for non-delimited files or new files
+    mkdir -p "$(dirname "$file")"
+    cp "$hub_file" "$file"
+    echo "COPIED: $file"
+    count=$((count + 1))
+  done < <(scan_hub_files "$hub_path")
+
+  if $dry_run; then
+    echo ""
+    echo "DRY-RUN: would copy $count files. No changes made."
+    return 0
+  fi
+
+  echo ""
+  echo "MIGRATE: copied $count files from hub."
+
+  # Re-init lockfile
+  cmd_init "$hub_path"
+  echo ""
+  echo "MIGRATE complete. Run 'git add -A && git commit' to finalize."
+}
+
 # ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
@@ -1361,6 +1448,7 @@ case "${1:-}" in
   push-finalize)    shift; cmd_push_finalize "$@" ;;
   promote)          shift; cmd_promote "$@" ;;
   demote)           shift; cmd_demote "$@" ;;
+  migrate)          shift; cmd_migrate "$@" ;;
 
   *)
     echo "Usage: ccanvil-sync.sh <command> [args]"

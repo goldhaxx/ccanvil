@@ -1,37 +1,31 @@
-# Feature: Bootstrap hash auto-update
+# Feature: operations.sh exec subcommand
 
-> Feature: bootstrap-hash-update
-> Created: 1775601007
-> Status: Complete
+> Feature: operations-exec
+> Created: 1775601660
+> Status: Draft
 
 ## Summary
 
-When `pre-check` bootstraps a newer `ccanvil-sync.sh` from the hub, it copies the file but doesn't update the lockfile hashes. This leaves the sync script permanently showing as "modified" in `status` output and appearing in every `pull-plan` (where it gets skipped with a special-case check). The fix: update lockfile hashes after the bootstrap copy.
+Add an `exec` subcommand to operations.sh that resolves an operation AND executes it in one call (for bash-mechanism operations). This eliminates the resolve→parse→dispatch pattern that currently requires Claude to read JSON, check the mechanism, and conditionally run the command — a stochastic sequence for a deterministic operation.
 
 ## Job To Be Done
 
-**When** the hub has a newer sync script and pre-check bootstraps it,
-**I want** the lockfile to reflect the new hash automatically,
-**So that** `status` shows "clean" and `pull-plan` doesn't include a skip entry.
+**When** a slash command needs to execute a routed operation (e.g., `/catchup` listing the backlog),
+**I want** a single script call that resolves and executes,
+**So that** Claude doesn't spend context on JSON parsing and conditional dispatch.
 
 ## Acceptance Criteria
 
-- [ ] **AC-1:** After bootstrap copy in `pre-check`, the lockfile's `hub_hash` and `local_hash` for `.ccanvil/scripts/ccanvil-sync.sh` are updated to the new file's hash.
-- [ ] **AC-2:** After bootstrap, `ccanvil-sync.sh status` shows the sync script as CLEAN (not MODIFIED).
-- [ ] **AC-3:** After bootstrap, `ccanvil-sync.sh pull-plan` does not include the sync script in its output.
-- [ ] **AC-4:** The special-case skip in `pull-auto` (lines 772-778) can be removed since bootstrap now handles the lockfile update.
-- [ ] **AC-5:** All hub bats tests pass (352+).
-- [ ] **AC-6:** A new test verifies the bootstrap + lockfile update behavior.
+- [ ] **AC-1:** `operations.sh exec <operation>` resolves the operation and, if mechanism is `bash`, executes the command and outputs its result directly.
+- [ ] **AC-2:** If mechanism is `mcp`, `exec` outputs the resolution JSON (same as `resolve`) so Claude can call the MCP tool. Exit code 0.
+- [ ] **AC-3:** If mechanism is `bash` and the command fails, `exec` propagates the exit code.
+- [ ] **AC-4:** `exec` with an unknown operation exits with error (same as `resolve`).
+- [ ] **AC-5:** All hub bats tests pass (354+).
+- [ ] **AC-6:** New tests cover exec with bash mechanism, exec with MCP mechanism, and exec with invalid operation.
 
 ## Affected Files
 
 | File | Change |
 |------|--------|
-| `preset/.ccanvil/scripts/ccanvil-sync.sh` | Add lockfile update after bootstrap copy in `cmd_pre_check`, remove pull-auto skip |
-| `hub/tests/ccanvil-sync.bats` | New test for bootstrap lockfile behavior |
-
-## Implementation Notes
-
-- Use `cmd_lock_update` or direct jq to update both `hub_hash` and `local_hash` after the copy.
-- The `hub_version` should also be updated since the hub has new commits (the bootstrap implies the hub is ahead).
-- The pull-auto skip (lines 772-778) becomes dead code after this fix — remove it to simplify.
+| `preset/.ccanvil/scripts/operations.sh` | Add `cmd_exec` function and dispatch case |
+| `hub/tests/operations.bats` | New tests for exec subcommand |

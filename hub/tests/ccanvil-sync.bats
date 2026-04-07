@@ -584,6 +584,56 @@ EOF
 
 
 # =========================================================================
+# status --json tests
+# =========================================================================
+
+@test "status --json: outputs valid JSON with required fields" {
+  cd "$NODE"
+  run bash "$NODE/.ccanvil/scripts/ccanvil-sync.sh" status --json
+  [ "$status" -eq 0 ]
+  echo "$output" | jq -e '.hub_source'
+  echo "$output" | jq -e '.hub_version'
+  echo "$output" | jq -e '.synced_at'
+  echo "$output" | jq -e '.files | type == "array"'
+}
+
+@test "status --json: files array has correct structure" {
+  cd "$NODE"
+  run bash "$NODE/.ccanvil/scripts/ccanvil-sync.sh" status --json
+  [ "$status" -eq 0 ]
+  # Each file entry should have file, origin, status, sync fields
+  echo "$output" | jq -e '.files[0].file'
+  echo "$output" | jq -e '.files[0].origin'
+  echo "$output" | jq -e '.files[0].status'
+  echo "$output" | jq -e '.files[0].sync'
+}
+
+@test "status --json --filter modified: returns only modified files" {
+  cd "$NODE"
+  # Modify a tracked file to create a "modified" entry
+  echo "# Modified" >> "$NODE/.claude/rules/tdd.md"
+  bash "$NODE/.ccanvil/scripts/ccanvil-sync.sh" lock-update ".claude/rules/tdd.md" status modified
+
+  run bash "$NODE/.ccanvil/scripts/ccanvil-sync.sh" status --json --filter modified
+  [ "$status" -eq 0 ]
+  local count
+  count=$(echo "$output" | jq '.files | length')
+  [ "$count" -eq 1 ]
+  echo "$output" | jq -e '.files[0].status == "modified"'
+}
+
+@test "status --json --filter non-clean: excludes clean files" {
+  cd "$NODE"
+  # All files should be clean after init — non-clean should be empty
+  run bash "$NODE/.ccanvil/scripts/ccanvil-sync.sh" status --json --filter non-clean
+  [ "$status" -eq 0 ]
+  local count
+  count=$(echo "$output" | jq '.files | length')
+  [ "$count" -eq 0 ]
+}
+
+
+# =========================================================================
 # hash helper tests
 # =========================================================================
 

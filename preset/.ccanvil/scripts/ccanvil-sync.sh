@@ -255,6 +255,17 @@ cmd_init() {
 cmd_status() {
   require_lockfile
 
+  # Parse flags
+  local json_mode=false
+  local filter_status=""
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --json) json_mode=true; shift ;;
+      --filter) filter_status="${2:-}"; shift 2 ;;
+      *) shift ;;
+    esac
+  done
+
   local hub_source
   hub_source=$(get_hub_source)
   local hub_root
@@ -264,6 +275,39 @@ cmd_status() {
   local synced_at
   synced_at=$(jq -r '.synced_at' "$LOCKFILE")
 
+  # Build files array (shared by both output modes)
+  local files_json="[]"
+  while IFS= read -r file; do
+    local status origin hub_hash local_hash sync_field
+    status=$(jq -r --arg f "$file" '.files[$f].status' "$LOCKFILE")
+    origin=$(jq -r --arg f "$file" '.files[$f].origin' "$LOCKFILE")
+    hub_hash=$(jq -r --arg f "$file" '.files[$f].hub_hash // "null"' "$LOCKFILE")
+    local_hash=$(jq -r --arg f "$file" '.files[$f].local_hash // "null"' "$LOCKFILE")
+    sync_field=$(get_sync_field "$file")
+
+    # Apply filter
+    if [[ -n "$filter_status" ]]; then
+      if [[ "$filter_status" == "non-clean" ]]; then
+        [[ "$status" == "clean" && "$sync_field" != "node-only" ]] && continue
+      else
+        [[ "$status" != "$filter_status" ]] && continue
+      fi
+    fi
+
+    files_json=$(echo "$files_json" | jq --arg f "$file" --arg o "$origin" --arg s "$status" \
+      --arg sy "$sync_field" --arg hh "$hub_hash" --arg lh "$local_hash" \
+      '. + [{"file": $f, "origin": $o, "status": $s, "sync": $sy, "hub_hash": $hh, "local_hash": $lh}]')
+  done < <(jq -r '.files | keys[]' "$LOCKFILE" | sort)
+
+  # JSON output mode
+  if $json_mode; then
+    jq -n --arg hs "$(get_hub_source_display)" --arg hv "$hub_version" \
+      --arg sa "$synced_at" --argjson files "$files_json" \
+      '{"hub_source": $hs, "hub_version": $hv, "synced_at": $sa, "files": $files}'
+    return 0
+  fi
+
+  # Human-readable output mode (original behavior)
   echo "Hub: $(get_hub_source_display) @ $hub_version"
   echo "Last synced: $synced_at"
   echo ""
@@ -280,46 +324,23 @@ cmd_status() {
 
   # Print each file's status
   local has_output=false
-  while IFS= read -r file; do
-    local status origin hub_hash local_hash
-    status=$(jq -r --arg f "$file" '.files[$f].status' "$LOCKFILE")
-    origin=$(jq -r --arg f "$file" '.files[$f].origin' "$LOCKFILE")
-
-    # Check if local file has changed since lockfile was written
-    local current_hash=""
-    if [[ -f "$file" ]]; then
-      current_hash=$(file_hash "$file")
-    fi
-    local recorded_local_hash
-    recorded_local_hash=$(jq -r --arg f "$file" '.files[$f].local_hash // "null"' "$LOCKFILE")
-
-    # Check node-only classification
-    local sync_field
-    sync_field=$(get_sync_field "$file")
-
+  echo "$files_json" | jq -r '.[] | "\(.status)\t\(.sync)\t\(.file)"' | while IFS=$'\t' read -r status sync_field file; do
     local display_status
     if [[ "$sync_field" == "node-only" ]]; then
       display_status="NODE-ONLY"
     else
       case "$status" in
-        clean)
-          if [[ -n "$current_hash" && "$current_hash" != "$recorded_local_hash" ]]; then
-            display_status="MODIFIED*"  # Changed since last sync
-          else
-            display_status="CLEAN"
-          fi
-          ;;
+        clean)        display_status="CLEAN" ;;
         modified)     display_status="MODIFIED" ;;
         local-only)   display_status="LOCAL" ;;
         promoted)     display_status="PROMOTED" ;;
-        hub-only) display_status="HUB-ONLY" ;;
+        hub-only)     display_status="HUB-ONLY" ;;
         *)            display_status="UNKNOWN" ;;
       esac
     fi
-
     printf "  %-16s %s\n" "$display_status" "$file"
     has_output=true
-  done < <(jq -r '.files | keys[]' "$LOCKFILE" | sort)
+  done
 
   if [[ "$has_output" == "false" ]]; then
     echo "  No tracked files."
@@ -1313,7 +1334,7 @@ fi
 case "${1:-}" in
   # --- Atomic commands (building blocks) ---
   init)             shift; cmd_init "$@" ;;
-  status)           cmd_status ;;
+  status)           shift; cmd_status "$@" ;;
   diff)             shift; cmd_diff "${1:-}" ;;
   hash)             shift; cmd_hash "$@" ;;
   lock-get)         shift; cmd_lock_get "$@" ;;

@@ -2,8 +2,10 @@
 # ccanvil-sync.sh — Bi-directional sync between a project and the hub.
 #
 # Usage:
-#   ccanvil-sync.sh init [hub-path]   Generate lockfile from current state
-#   ccanvil-sync.sh status                 Show file provenance and sync state
+#   ccanvil-sync.sh init [hub-path]          Generate lockfile from current state
+#   ccanvil-sync.sh init-preflight <hub>       Scan for conflicts, output merge plan
+#   ccanvil-sync.sh init-apply <hub> <plan>    Execute an approved merge plan
+#   ccanvil-sync.sh status                     Show file provenance and sync state
 #   ccanvil-sync.sh diff [file]            Show diff between local and hub versions
 #   ccanvil-sync.sh hash <file>            Compute sha256 of a file
 #   ccanvil-sync.sh lock-get <file>        Read a lockfile entry (JSON)
@@ -36,6 +38,22 @@ TRACKED_PATTERNS=(
 # Files to never track
 EXCLUDED_FILES=(
   ".ccanvil/ccanvil.lock"
+)
+
+# Extra files copied during init that aren't in TRACKED_PATTERNS
+INIT_EXTRA_FILES=(
+  ".claudeignore"
+  ".claude/lint.json"
+)
+
+# GitHub template mappings: hub_source_path:destination_path
+# Source paths are relative to dist_root/.ccanvil/templates/github/
+# Destination paths are relative to project root
+INIT_GITHUB_TEMPLATES=(
+  "README.md:README.md"
+  "CONTRIBUTING.md:CONTRIBUTING.md"
+  "PULL_REQUEST_TEMPLATE.md:.github/PULL_REQUEST_TEMPLATE.md"
+  "workflows/ci.yml:.github/workflows/ci.yml"
 )
 
 # ---------------------------------------------------------------------------
@@ -262,6 +280,200 @@ cmd_init() {
     echo "  Register to enable project tracking and discovery."
     echo "  Run: ccanvil-sync.sh register"
   fi
+}
+
+cmd_init_preflight() {
+  local hub_path="${1:?Usage: ccanvil-sync.sh init-preflight <hub-path>}"
+  hub_path="${hub_path/#\~/$HOME}"
+
+  [[ -d "$hub_path" ]] || die "Hub not found at: $hub_path"
+
+  local dist_root
+  dist_root=$(hub_dist_root "$hub_path")
+  local github_tpl_root="$dist_root/.ccanvil/templates/github"
+
+  local plan="[]"
+  local seen_files=()
+
+  # Helper: classify a single file
+  # Args: hub_file_abs local_file_rel
+  classify_file() {
+    local hub_file="$1"
+    local local_file="$2"
+
+    if [[ ! -f "$local_file" ]]; then
+      # Hub-only: no local file exists
+      plan=$(echo "$plan" | jq --arg f "$local_file" \
+        '. + [{"file": $f, "source": "hub-only", "recommended_action": "copy", "reason": "New file from hub"}]')
+    else
+      local hub_h local_h
+      hub_h=$(file_hash "$hub_file")
+      local_h=$(file_hash "$local_file")
+
+      if [[ "$hub_h" == "$local_h" ]]; then
+        # Identical — skip
+        plan=$(echo "$plan" | jq --arg f "$local_file" \
+          '. + [{"file": $f, "source": "both", "recommended_action": "skip", "reason": "Already matches hub"}]')
+      else
+        # Different — check for section-merge delimiter
+        local has_delimiter=false
+        if [[ "$local_file" == *.md ]] && \
+           (grep -qx '<!-- NODE-SPECIFIC-START -->' "$hub_file" 2>/dev/null || \
+            grep -qx '<!-- HUB-MANAGED-START -->' "$hub_file" 2>/dev/null); then
+          has_delimiter=true
+        fi
+
+        if [[ "$has_delimiter" == "true" ]]; then
+          plan=$(echo "$plan" | jq --arg f "$local_file" \
+            '. + [{"file": $f, "source": "both", "recommended_action": "section-merge", "reason": "Both versions exist; can merge hub and local sections"}]')
+        else
+          plan=$(echo "$plan" | jq --arg f "$local_file" \
+            '. + [{"file": $f, "source": "both", "recommended_action": "review", "reason": "Local differs from hub; needs user decision"}]')
+        fi
+      fi
+    fi
+    seen_files+=("$local_file")
+  }
+
+  # 1. Scan hub tracked files
+  while IFS= read -r file; do
+    classify_file "$dist_root/$file" "$file"
+  done < <(scan_hub_files "$hub_path")
+
+  # 2. Scan init extra files
+  for file in "${INIT_EXTRA_FILES[@]}"; do
+    if [[ -f "$dist_root/$file" ]]; then
+      classify_file "$dist_root/$file" "$file"
+    fi
+  done
+
+  # 3. Scan GitHub templates (source:destination mapping)
+  for mapping in "${INIT_GITHUB_TEMPLATES[@]}"; do
+    local src="${mapping%%:*}"
+    local dst="${mapping#*:}"
+    local hub_file="$github_tpl_root/$src"
+    if [[ -f "$hub_file" ]]; then
+      classify_file "$hub_file" "$dst"
+    fi
+  done
+
+  # 4. Scan local tracked files for local-only entries
+  if compgen -G ".claude/rules/*.md" >/dev/null 2>&1 || \
+     compgen -G ".claude/commands/*.md" >/dev/null 2>&1 || \
+     compgen -G ".claude/agents/*.md" >/dev/null 2>&1 || \
+     compgen -G ".claude/skills/*/SKILL.md" >/dev/null 2>&1 || \
+     compgen -G ".claude/hooks/*.sh" >/dev/null 2>&1; then
+    while IFS= read -r file; do
+      # Skip if already seen
+      local already_seen=false
+      for s in "${seen_files[@]}"; do
+        [[ "$s" == "$file" ]] && already_seen=true && break
+      done
+      $already_seen && continue
+
+      plan=$(echo "$plan" | jq --arg f "$file" \
+        '. + [{"file": $f, "source": "local-only", "recommended_action": "skip", "reason": "Local file, not in hub"}]')
+    done < <(scan_tracked_files)
+  fi
+
+  # Compute summary
+  local conflicts auto total
+  conflicts=$(echo "$plan" | jq '[.[] | select(.recommended_action == "review")] | length')
+  auto=$(echo "$plan" | jq '[.[] | select(.recommended_action != "review")] | length')
+  total=$(echo "$plan" | jq 'length')
+
+  jq -n --argjson conflicts "$conflicts" --argjson auto "$auto" --argjson total "$total" --argjson plan "$plan" \
+    '{"summary": {"conflicts": $conflicts, "auto": $auto, "total": $total}, "plan": $plan}'
+}
+
+cmd_init_apply() {
+  local hub_path="${1:?Usage: ccanvil-sync.sh init-apply <hub-path> <plan-file>}"
+  local plan_file="${2:?Usage: ccanvil-sync.sh init-apply <hub-path> <plan-file>}"
+  hub_path="${hub_path/#\~/$HOME}"
+
+  [[ -d "$hub_path" ]] || die "Hub not found at: $hub_path"
+  [[ -f "$plan_file" ]] || die "Plan file not found: $plan_file"
+
+  local dist_root
+  dist_root=$(hub_dist_root "$hub_path")
+  local github_tpl_root="$dist_root/.ccanvil/templates/github"
+
+  local copied=0 skipped=0 merged=0 errors=0
+
+  # Process each entry in the plan
+  local entry_count
+  entry_count=$(jq 'length' "$plan_file")
+
+  local i=0
+  while [[ $i -lt $entry_count ]]; do
+    local file action
+    file=$(jq -r ".[$i].file" "$plan_file")
+    action=$(jq -r ".[$i].recommended_action" "$plan_file")
+
+    # Resolve hub source file path
+    # Check GitHub template mappings first, then tracked patterns
+    local hub_file=""
+    for mapping in "${INIT_GITHUB_TEMPLATES[@]}"; do
+      local tpl_src="${mapping%%:*}"
+      local tpl_dst="${mapping#*:}"
+      if [[ "$tpl_dst" == "$file" ]]; then
+        hub_file="$github_tpl_root/$tpl_src"
+        break
+      fi
+    done
+    if [[ -z "$hub_file" && -f "$dist_root/$file" ]]; then
+      hub_file="$dist_root/$file"
+    fi
+
+    case "$action" in
+      copy|overwrite)
+        if [[ -z "$hub_file" || ! -f "$hub_file" ]]; then
+          echo "ERROR: Hub source not found for $file" >&2
+          errors=$((errors + 1))
+          i=$((i + 1)); continue
+        fi
+        mkdir -p "$(dirname "$file")"
+        cp "$hub_file" "$file"
+        copied=$((copied + 1))
+        echo "COPIED: $file"
+        ;;
+      skip)
+        skipped=$((skipped + 1))
+        ;;
+      section-merge)
+        if [[ -z "$hub_file" || ! -f "$hub_file" ]]; then
+          echo "ERROR: Hub source not found for $file" >&2
+          errors=$((errors + 1))
+          i=$((i + 1)); continue
+        fi
+        if [[ ! -f "$file" ]]; then
+          # Local doesn't exist — just copy
+          mkdir -p "$(dirname "$file")"
+          cp "$hub_file" "$file"
+          copied=$((copied + 1))
+          echo "COPIED: $file (no local to merge)"
+        else
+          local merge_result
+          merge_result=$(cmd_section_merge "$hub_file" "$file" 2>/dev/null) && {
+            echo "$merge_result" > "$file"
+            merged=$((merged + 1))
+            echo "MERGED: $file"
+          } || {
+            echo "ERROR: Section-merge failed for $file" >&2
+            errors=$((errors + 1))
+          }
+        fi
+        ;;
+      *)
+        echo "UNKNOWN ACTION: $action for $file — skipping" >&2
+        skipped=$((skipped + 1))
+        ;;
+    esac
+    i=$((i + 1))
+  done
+
+  jq -n --argjson copied "$copied" --argjson skipped "$skipped" --argjson merged "$merged" --argjson errors "$errors" \
+    '{"copied": $copied, "skipped": $skipped, "merged": $merged, "errors": $errors}'
 }
 
 cmd_status() {
@@ -1501,6 +1713,10 @@ case "${1:-}" in
   track)            shift; cmd_track "$@" ;;
   classify)         cmd_classify ;;
 
+  # --- Init preflight/apply ---
+  init-preflight)   shift; cmd_init_preflight "$@" ;;
+  init-apply)       shift; cmd_init_apply "$@" ;;
+
   # --- Compound commands (replace manual orchestration) ---
   pre-check)        cmd_pre_check ;;
   pull-plan)        cmd_pull_plan ;;
@@ -1535,6 +1751,10 @@ case "${1:-}" in
     echo "  push-finalize <commit-message>        Commit in hub and update version"
     echo "  promote <file>                        Full promote workflow"
     echo "  demote <file>                         Full demote workflow"
+    echo ""
+    echo "Init commands (use for project initialization):"
+    echo "  init-preflight <hub-path>             Scan for conflicts, output merge plan as JSON"
+    echo "  init-apply <hub-path> <plan-file>     Execute an approved merge plan"
     echo ""
     echo "Atomic commands (building blocks — prefer compound commands):"
     echo "  init [hub-path]                  Generate lockfile from current state"

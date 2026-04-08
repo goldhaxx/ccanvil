@@ -823,6 +823,70 @@ cmd_complete() {
 }
 
 # ---------------------------------------------------------------------------
+# cmd_land — Switch to main, sync with remote, delete feature branch.
+#
+# Usage:
+#   docs-check.sh land [--force]
+#
+# Requires: the current branch is NOT main/master.
+# --force skips the merged-PR check (for local merges or when gh is unavailable).
+# ---------------------------------------------------------------------------
+
+cmd_land() {
+  local force=false
+  [[ "${1:-}" == "--force" ]] && force=true
+
+  local branch
+  branch=$(git branch --show-current 2>/dev/null)
+
+  # Must not be on main
+  if [[ "$branch" == "main" || "$branch" == "master" ]]; then
+    echo "ERROR: Already on main. Nothing to land." >&2
+    exit 1
+  fi
+
+  # Check if PR is merged (unless --force)
+  if ! $force && command -v gh >/dev/null 2>&1; then
+    local pr_state
+    pr_state=$(gh pr view --json state -q '.state' 2>/dev/null || echo "NONE")
+    if [[ "$pr_state" != "MERGED" ]]; then
+      echo "ERROR: No merged PR found for branch '$branch'. Merge the PR first, or use --force." >&2
+      exit 1
+    fi
+  fi
+
+  # Switch to main
+  git checkout main 2>/dev/null || git checkout master 2>/dev/null || {
+    echo "ERROR: Could not switch to main/master." >&2
+    exit 1
+  }
+  echo "Switched to main."
+
+  # Fetch and reset (if remote exists)
+  if git remote get-url origin >/dev/null 2>&1; then
+    git fetch origin 2>/dev/null
+    echo "Fetched origin."
+    local sha
+    sha=$(git rev-parse --short origin/main 2>/dev/null || git rev-parse --short origin/master 2>/dev/null || echo "unknown")
+    git reset --hard "origin/main" 2>/dev/null || git reset --hard "origin/master" 2>/dev/null || true
+    echo "Main updated to $sha."
+  fi
+
+  # Delete local branch
+  git branch -d "$branch" 2>/dev/null || git branch -D "$branch" 2>/dev/null || true
+  echo "Deleted local branch '$branch'."
+
+  # Delete remote branch (if remote exists)
+  if git remote get-url origin >/dev/null 2>&1; then
+    git push origin --delete "$branch" 2>/dev/null && \
+      echo "Deleted remote branch '$branch'." || \
+      echo "Remote branch '$branch' already deleted."
+  fi
+
+  echo "Land complete."
+}
+
+# ---------------------------------------------------------------------------
 # merge_config — Merge ccanvil.json (hub) with ccanvil.local.json (node).
 # Duplicated from operations.sh (both scripts need it; keeping small and tested).
 merge_config() {
@@ -896,8 +960,9 @@ case "$cmd" in
   list-specs)    cmd_list_specs "$@" ;;
   activate)      cmd_activate "$@" ;;
   complete)      cmd_complete "$@" ;;
+  land)          cmd_land "$@" ;;
   *)
-    echo "Usage: docs-check.sh {status|validate|recommend|audit-session|config-get|list-specs|activate|complete} [args...]" >&2
+    echo "Usage: docs-check.sh {status|validate|recommend|audit-session|config-get|list-specs|activate|complete|land} [args...]" >&2
     exit 1
     ;;
 esac

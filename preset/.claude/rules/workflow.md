@@ -5,7 +5,7 @@
 Every feature follows this sequence from idea to merge:
 
 ```
-Spec → Activate → Plan → Implement → Complete → Merge
+Spec → Activate → Plan → Implement → Complete → Merge → Land
 ```
 
 | Step | What happens | Command |
@@ -16,10 +16,12 @@ Spec → Activate → Plan → Implement → Complete → Merge
 | **Implement** | TDD cycle: red → green → refactor → commit. Checkpoint as needed. | Manual |
 | **Complete** | Mark spec Complete, remove lifecycle docs, commit, mark PR ready | `docs-check.sh complete <id>` |
 | **Merge** | Squash merge to main | GitHub or `gh pr merge --squash` |
+| **Land** | Switch to main, sync with remote, delete branch | `docs-check.sh land` |
 
 - The draft PR is created at activation time, signaling intent. It tracks progress via commits.
 - Lifecycle docs (`docs/spec.md`, `docs/plan.md`, `docs/checkpoint.md`) exist only on the feature branch. They are removed by `complete` before merge.
 - `/pr` is a finalize command: run it if `complete` wasn't used, or to re-check tests and mark the PR ready.
+- **Main is protected:** A PreToolUse hook blocks direct commits to main/master. This guarantees `land` can always fast-forward safely.
 
 ## Session Discipline
 

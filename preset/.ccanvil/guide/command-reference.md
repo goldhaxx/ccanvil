@@ -71,6 +71,7 @@
 | `docs-check.sh list-specs [docs-dir]` | List all specs in `docs/specs/` with feature_id, status, created → JSON array |
 | `docs-check.sh activate <feature-id> [docs-dir]` | Create branch `claude/<type>/<id>`, copy spec to `docs/spec.md`, set status to In Progress, push branch, create draft PR |
 | `docs-check.sh complete <feature-id> [docs-dir]` | Set spec status to Complete, remove lifecycle docs (spec/plan/checkpoint), commit cleanup, mark PR ready |
+| `docs-check.sh land [--force]` | Switch to main, fetch, reset to origin, delete local and remote feature branch. `--force` skips PR-merged check |
 | `docs-check.sh config-get <key> [project-dir]` | Read feature toggle from `.claude/ccanvil.json` (returns `true`/`false`) |
 
 ## Manifest Verification Scripts

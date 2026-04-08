@@ -32,10 +32,15 @@ setup() {
   touch "$PROJECT/.gitkeep"
   git -C "$PROJECT" add -A
   git -C "$PROJECT" commit -q -m "init"
+
+  # Add a bare remote so push/PR tests work
+  REMOTE=$(mktemp -d)
+  git -C "$REMOTE" init -q --bare
+  git -C "$PROJECT" remote add origin "$REMOTE"
 }
 
 teardown() {
-  rm -rf "$PROJECT"
+  rm -rf "$PROJECT" "$REMOTE"
 }
 
 # ---------------------------------------------------------------------------
@@ -680,4 +685,176 @@ EOF
   echo "dirty" > "$PROJECT/README.md"
   run "$PROJECT/.ccanvil/scripts/docs-check.sh" activate auth-system "$PROJECT/docs"
   [ "$status" -eq 1 ]
+}
+
+# ---------------------------------------------------------------------------
+# Enhanced activate: draft PR (AC-1, AC-2, AC-3)
+# ---------------------------------------------------------------------------
+
+@test "activate: pushes branch to remote" {
+  cat > "$PROJECT/docs/specs/auth-system.md" <<'EOF'
+# Feature: Auth System
+
+> Feature: auth-system
+> Created: 1774200000
+> Status: Ready
+
+## Summary
+Add authentication system with JWT tokens.
+EOF
+  git -C "$PROJECT" add -A && git -C "$PROJECT" commit -q -m "add spec"
+
+  "$PROJECT/.ccanvil/scripts/docs-check.sh" activate auth-system "$PROJECT/docs"
+
+  # Branch should exist on remote
+  run git -C "$REMOTE" branch --list "claude/feat/auth-system"
+  [[ "$output" == *"claude/feat/auth-system"* ]]
+}
+
+@test "activate: warns when gh is not available" {
+  cat > "$PROJECT/docs/specs/auth-system.md" <<'EOF'
+# Feature: Auth System
+
+> Feature: auth-system
+> Created: 1774200000
+> Status: Ready
+
+## Summary
+Add authentication system.
+EOF
+  git -C "$PROJECT" add -A && git -C "$PROJECT" commit -q -m "add spec"
+
+  # Use a PATH that excludes gh
+  run env PATH="/usr/bin:/bin" "$PROJECT/.ccanvil/scripts/docs-check.sh" activate auth-system "$PROJECT/docs"
+  [ "$status" -eq 0 ]
+  echo "$output" | grep -q "Draft PR not created"
+}
+
+@test "activate: skips push when no remote" {
+  # Remove the remote
+  git -C "$PROJECT" remote remove origin
+
+  cat > "$PROJECT/docs/specs/auth-system.md" <<'EOF'
+# Feature: Auth System
+
+> Feature: auth-system
+> Created: 1774200000
+> Status: Ready
+
+## Summary
+Add authentication system.
+EOF
+  git -C "$PROJECT" add -A && git -C "$PROJECT" commit -q -m "add spec"
+
+  run "$PROJECT/.ccanvil/scripts/docs-check.sh" activate auth-system "$PROJECT/docs"
+  [ "$status" -eq 0 ]
+  echo "$output" | grep -q "Activated spec"
+}
+
+# ---------------------------------------------------------------------------
+# Enhanced complete: doc cleanup (AC-4, AC-5, AC-6)
+# ---------------------------------------------------------------------------
+
+@test "complete: removes lifecycle docs" {
+  cat > "$PROJECT/docs/specs/auth-system.md" <<'EOF'
+# Feature: Auth System
+
+> Feature: auth-system
+> Created: 1774200000
+> Status: In Progress
+
+## Summary
+Auth feature.
+EOF
+  echo "spec content" > "$PROJECT/docs/spec.md"
+  echo "plan content" > "$PROJECT/docs/plan.md"
+  echo "checkpoint content" > "$PROJECT/docs/checkpoint.md"
+  git -C "$PROJECT" add -A && git -C "$PROJECT" commit -q -m "add spec and docs"
+
+  "$PROJECT/.ccanvil/scripts/docs-check.sh" complete auth-system "$PROJECT/docs"
+
+  # Lifecycle docs should be gone
+  [ ! -f "$PROJECT/docs/spec.md" ]
+  [ ! -f "$PROJECT/docs/plan.md" ]
+  [ ! -f "$PROJECT/docs/checkpoint.md" ]
+  # Archived spec should still exist
+  [ -f "$PROJECT/docs/specs/auth-system.md" ]
+}
+
+@test "complete: commits the cleanup" {
+  cat > "$PROJECT/docs/specs/auth-system.md" <<'EOF'
+# Feature: Auth System
+
+> Feature: auth-system
+> Created: 1774200000
+> Status: In Progress
+
+## Summary
+Auth feature.
+EOF
+  echo "spec content" > "$PROJECT/docs/spec.md"
+  git -C "$PROJECT" add -A && git -C "$PROJECT" commit -q -m "add spec"
+
+  "$PROJECT/.ccanvil/scripts/docs-check.sh" complete auth-system "$PROJECT/docs"
+
+  # Should have a commit with the cleanup message
+  run git -C "$PROJECT" log --oneline -1
+  echo "$output" | grep -q "complete auth-system"
+  # Working tree should be clean
+  run git -C "$PROJECT" status --porcelain
+  [ -z "$output" ]
+}
+
+@test "complete: handles missing lifecycle docs gracefully" {
+  cat > "$PROJECT/docs/specs/auth-system.md" <<'EOF'
+# Feature: Auth System
+
+> Feature: auth-system
+> Created: 1774200000
+> Status: In Progress
+
+## Summary
+Auth feature.
+EOF
+  git -C "$PROJECT" add -A && git -C "$PROJECT" commit -q -m "add spec"
+
+  # No docs/spec.md, plan.md, or checkpoint.md exist
+  run "$PROJECT/.ccanvil/scripts/docs-check.sh" complete auth-system "$PROJECT/docs"
+  [ "$status" -eq 0 ]
+}
+
+# ---------------------------------------------------------------------------
+# CI lifecycle docs check (AC-9)
+# ---------------------------------------------------------------------------
+
+@test "ci-check: detects stale lifecycle docs" {
+  echo "stale" > "$PROJECT/docs/spec.md"
+  run bash -c '
+    cd "'"$PROJECT"'"
+    stale=""
+    [ -f docs/spec.md ] && stale="$stale docs/spec.md"
+    [ -f docs/plan.md ] && stale="$stale docs/plan.md"
+    [ -f docs/checkpoint.md ] && stale="$stale docs/checkpoint.md"
+    if [ -n "$stale" ]; then
+      echo "Lifecycle docs must be cleaned up:$stale"
+      exit 1
+    fi
+  '
+  [ "$status" -eq 1 ]
+  echo "$output" | grep -q "docs/spec.md"
+}
+
+@test "ci-check: passes when no lifecycle docs" {
+  run bash -c '
+    cd "'"$PROJECT"'"
+    stale=""
+    [ -f docs/spec.md ] && stale="$stale docs/spec.md"
+    [ -f docs/plan.md ] && stale="$stale docs/plan.md"
+    [ -f docs/checkpoint.md ] && stale="$stale docs/checkpoint.md"
+    if [ -n "$stale" ]; then
+      echo "Lifecycle docs must be cleaned up:$stale"
+      exit 1
+    fi
+  '
+  [ "$status" -eq 0 ]
 }

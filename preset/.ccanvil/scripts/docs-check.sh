@@ -735,6 +735,24 @@ cmd_activate() {
   }
 
   echo "Activated spec '$feature_id' on branch '$branch_name'"
+
+  # Push branch and create draft PR (if remote exists and gh available)
+  if git -C "$repo_root" remote get-url origin >/dev/null 2>&1; then
+    git -C "$repo_root" push -u origin "$branch_name" 2>/dev/null || true
+    if command -v gh >/dev/null 2>&1; then
+      local first_line
+      first_line=$(sed -n '/^## Summary$/,/^## /{ /^## /d; /^$/d; p; }' "$spec_file" | head -1 | sed 's/^[[:space:]]*//')
+      local pr_title="${spec_type}(${feature_id}): ${first_line:-activate feature}"
+      local spec_body
+      spec_body=$(cat "$spec_file")
+      gh pr create --draft \
+        --title "$pr_title" \
+        --body "$(printf '## Spec\n\n%s\n\n---\n🤖 Generated with [Claude Code](https://claude.com/claude-code)' "$spec_body")" \
+        2>/dev/null && echo "Draft PR created." || echo "NOTE: Draft PR not created — gh pr create failed." >&2
+    else
+      echo "NOTE: Draft PR not created — gh CLI not available. Run /pr to create manually."
+    fi
+  fi
 }
 
 # ---------------------------------------------------------------------------
@@ -784,6 +802,21 @@ cmd_complete() {
   local assumptions_file="$docs_dir/assumptions.md"
   if [[ -f "$assumptions_file" ]]; then
     : > "$assumptions_file"
+  fi
+
+  # Remove lifecycle docs (they're preserved in git history on the branch)
+  rm -f "$docs_dir/spec.md" "$docs_dir/plan.md" "$docs_dir/checkpoint.md"
+
+  # Commit completion + cleanup
+  local repo_root
+  repo_root=$(cd "$docs_dir" 2>/dev/null && git rev-parse --show-toplevel 2>/dev/null) || repo_root="."
+  # Use -- to separate paths; paths must be relative to repo root or absolute
+  (cd "$repo_root" && git add -A "$docs_dir/" "$spec_file" 2>/dev/null || true)
+  git -C "$repo_root" commit -q -m "docs(lifecycle): complete $feature_id — clean up lifecycle docs" 2>/dev/null || true
+
+  # Mark PR as ready (if gh available and PR exists)
+  if command -v gh >/dev/null 2>&1; then
+    gh pr ready 2>/dev/null || true
   fi
 
   echo "Completed spec '$feature_id'"

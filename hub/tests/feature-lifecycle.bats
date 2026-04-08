@@ -688,6 +688,44 @@ EOF
 }
 
 # ---------------------------------------------------------------------------
+# protect-main hook (AC-1, AC-2, AC-3, AC-4)
+# ---------------------------------------------------------------------------
+
+@test "protect-main: blocks git commit on main" {
+  HOOK="$BATS_TEST_DIRNAME/../../.claude/hooks/protect-main.sh"
+  input='{"tool_name":"Bash","tool_input":{"command":"git commit -m test"}}'
+  cd "$PROJECT"  # on main branch
+  run bash -c "echo '$input' | '$HOOK'"
+  [ "$status" -eq 2 ]
+  echo "$output" | grep -q "BLOCKED"
+}
+
+@test "protect-main: allows git commit on feature branch" {
+  HOOK="$BATS_TEST_DIRNAME/../../.claude/hooks/protect-main.sh"
+  input='{"tool_name":"Bash","tool_input":{"command":"git commit -m test"}}'
+  cd "$PROJECT"
+  git checkout -b claude/feat/test-feature 2>/dev/null
+  run bash -c "echo '$input' | '$HOOK'"
+  [ "$status" -eq 0 ]
+}
+
+@test "protect-main: allows non-commit git commands on main" {
+  HOOK="$BATS_TEST_DIRNAME/../../.claude/hooks/protect-main.sh"
+  input='{"tool_name":"Bash","tool_input":{"command":"git status"}}'
+  cd "$PROJECT"  # on main
+  run bash -c "echo '$input' | '$HOOK'"
+  [ "$status" -eq 0 ]
+}
+
+@test "protect-main: bypass with --allow-main" {
+  HOOK="$BATS_TEST_DIRNAME/../../.claude/hooks/protect-main.sh"
+  input='{"tool_name":"Bash","tool_input":{"command":"git commit --allow-main -m init"}}'
+  cd "$PROJECT"  # on main
+  run bash -c "echo '$input' | '$HOOK'"
+  [ "$status" -eq 0 ]
+}
+
+# ---------------------------------------------------------------------------
 # Enhanced activate: draft PR (AC-1, AC-2, AC-3)
 # ---------------------------------------------------------------------------
 
@@ -857,4 +895,67 @@ EOF
     fi
   '
   [ "$status" -eq 0 ]
+}
+
+# ---------------------------------------------------------------------------
+# land command (AC-5 through AC-10)
+# ---------------------------------------------------------------------------
+
+@test "land: fails when already on main" {
+  cd "$PROJECT"
+  run "$PROJECT/.ccanvil/scripts/docs-check.sh" land
+  [ "$status" -eq 1 ]
+  echo "$output" | grep -q "Already on main"
+}
+
+@test "land: switches to main and deletes feature branch" {
+  cd "$PROJECT"
+  git checkout -b claude/feat/test-land
+  echo "change" > "$PROJECT/test-file.txt"
+  git -C "$PROJECT" add -A && git -C "$PROJECT" commit -q -m "feat: test change"
+  git -C "$PROJECT" push -u origin claude/feat/test-land 2>/dev/null
+
+  run "$PROJECT/.ccanvil/scripts/docs-check.sh" land --force
+  [ "$status" -eq 0 ]
+  echo "$output" | grep -q "Land complete"
+
+  # Should be on main
+  local branch
+  branch=$(git -C "$PROJECT" branch --show-current)
+  [ "$branch" = "main" ]
+
+  # Feature branch should be deleted locally
+  run git -C "$PROJECT" branch --list "claude/feat/test-land"
+  [ -z "$output" ]
+}
+
+@test "land: handles no remote gracefully" {
+  cd "$PROJECT"
+  git remote remove origin
+  git checkout -b claude/feat/test-no-remote
+  echo "change" > "$PROJECT/test-file.txt"
+  git -C "$PROJECT" add -A && git -C "$PROJECT" commit -q -m "feat: test"
+
+  run "$PROJECT/.ccanvil/scripts/docs-check.sh" land --force
+  [ "$status" -eq 0 ]
+  echo "$output" | grep -q "Land complete"
+
+  local branch
+  branch=$(git -C "$PROJECT" branch --show-current)
+  [ "$branch" = "main" ]
+}
+
+@test "land: handles already-deleted remote branch" {
+  cd "$PROJECT"
+  git checkout -b claude/feat/test-deleted-remote
+  echo "change" > "$PROJECT/test-file.txt"
+  git -C "$PROJECT" add -A && git -C "$PROJECT" commit -q -m "feat: test"
+  git -C "$PROJECT" push -u origin claude/feat/test-deleted-remote 2>/dev/null
+
+  # Delete remote branch before landing
+  git push origin --delete claude/feat/test-deleted-remote 2>/dev/null
+
+  run "$PROJECT/.ccanvil/scripts/docs-check.sh" land --force
+  [ "$status" -eq 0 ]
+  echo "$output" | grep -q "already deleted"
 }

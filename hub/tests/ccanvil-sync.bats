@@ -1475,3 +1475,236 @@ EOF
   # Lockfile should still be the corrupted version (not replaced with jq garbage)
   [ "$(cat "$NODE/.ccanvil/ccanvil.lock")" = "NOT JSON" ]
 }
+
+
+# =========================================================================
+# init-preflight tests
+# =========================================================================
+
+@test "init-preflight: empty node shows all files as copy" {
+  # Create a fresh empty node (no files from hub)
+  local EMPTY_NODE
+  EMPTY_NODE=$(mktemp -d)
+  mkdir -p "$EMPTY_NODE/.ccanvil/scripts"
+  cp "$SCRIPT" "$EMPTY_NODE/.ccanvil/scripts/ccanvil-sync.sh"
+
+  cd "$EMPTY_NODE"
+  run bash "$EMPTY_NODE/.ccanvil/scripts/ccanvil-sync.sh" init-preflight "$HUB"
+  [ "$status" -eq 0 ]
+
+  # All files should be recommended as "copy"
+  local copy_count
+  copy_count=$(echo "$output" | jq '[.plan[] | select(.recommended_action == "copy")] | length')
+  [ "$copy_count" -gt 0 ]
+
+  # No conflicts
+  local conflicts
+  conflicts=$(echo "$output" | jq '.summary.conflicts')
+  [ "$conflicts" -eq 0 ]
+
+  rm -rf "$EMPTY_NODE"
+}
+
+@test "init-preflight: identical files recommend skip" {
+  # Node already has identical copies of hub files (from setup)
+  cd "$NODE"
+  run bash "$NODE/.ccanvil/scripts/ccanvil-sync.sh" init-preflight "$HUB"
+  [ "$status" -eq 0 ]
+
+  # All hub-origin files that exist locally and match should be "skip"
+  local skip_count
+  skip_count=$(echo "$output" | jq '[.plan[] | select(.recommended_action == "skip" and .source == "both")] | length')
+  [ "$skip_count" -gt 0 ]
+
+  # Zero conflicts
+  local conflicts
+  conflicts=$(echo "$output" | jq '.summary.conflicts')
+  [ "$conflicts" -eq 0 ]
+}
+
+@test "init-preflight: detects section-merge candidates" {
+  # Modify node's tdd.md to differ from hub but keep delimiter structure
+  cat > "$NODE/.claude/rules/tdd.md" <<'EOF'
+# TDD Rules
+
+My custom testing approach.
+
+<!-- NODE-SPECIFIC-START -->
+<!-- My node-specific TDD notes -->
+My custom project testing notes.
+EOF
+
+  cd "$NODE"
+  run bash "$NODE/.ccanvil/scripts/ccanvil-sync.sh" init-preflight "$HUB"
+  [ "$status" -eq 0 ]
+
+  # tdd.md should be recommended as section-merge
+  local action
+  action=$(echo "$output" | jq -r '.plan[] | select(.file == ".claude/rules/tdd.md") | .recommended_action')
+  [ "$action" = "section-merge" ]
+}
+
+@test "init-preflight: flags review for conflicting non-delimited files" {
+  # Create a settings.json in both hub and node with different content
+  echo '{"editor": "vim"}' > "$HUB/.claude/settings.json"
+  echo '{"editor": "code"}' > "$NODE/.claude/settings.json"
+
+  # Re-commit hub so it picks up the new file
+  git -C "$HUB" add -A && git -C "$HUB" commit -q -m "add settings"
+
+  cd "$NODE"
+  run bash "$NODE/.ccanvil/scripts/ccanvil-sync.sh" init-preflight "$HUB"
+  [ "$status" -eq 0 ]
+
+  # settings.json should be "review"
+  local action
+  action=$(echo "$output" | jq -r '.plan[] | select(.file == ".claude/settings.json") | .recommended_action')
+  [ "$action" = "review" ]
+
+  # At least 1 conflict
+  local conflicts
+  conflicts=$(echo "$output" | jq '.summary.conflicts')
+  [ "$conflicts" -ge 1 ]
+}
+
+
+# =========================================================================
+# init-apply tests
+# =========================================================================
+
+@test "init-apply: executes copy actions on empty node" {
+  local EMPTY_NODE
+  EMPTY_NODE=$(mktemp -d)
+  mkdir -p "$EMPTY_NODE/.ccanvil/scripts"
+  cp "$SCRIPT" "$EMPTY_NODE/.ccanvil/scripts/ccanvil-sync.sh"
+
+  cd "$EMPTY_NODE"
+
+  # Get preflight plan
+  local plan_json
+  plan_json=$(bash "$EMPTY_NODE/.ccanvil/scripts/ccanvil-sync.sh" init-preflight "$HUB")
+
+  # Write plan to temp file for init-apply
+  echo "$plan_json" | jq '.plan' > "$EMPTY_NODE/.ccanvil/init-plan.json"
+
+  run bash "$EMPTY_NODE/.ccanvil/scripts/ccanvil-sync.sh" init-apply "$HUB" "$EMPTY_NODE/.ccanvil/init-plan.json"
+  [ "$status" -eq 0 ]
+
+  # Key files should now exist
+  [ -f "$EMPTY_NODE/.claude/rules/tdd.md" ]
+  [ -f "$EMPTY_NODE/CLAUDE.md" ]
+
+  # Output should show copied count
+  echo "$output" | grep -q '"copied"'
+
+  rm -rf "$EMPTY_NODE"
+}
+
+@test "init-apply: skips files with skip action" {
+  cd "$NODE"
+
+  # Preflight on node with identical files → all skip
+  local plan_json
+  plan_json=$(bash "$NODE/.ccanvil/scripts/ccanvil-sync.sh" init-preflight "$HUB")
+  echo "$plan_json" | jq '.plan' > "$NODE/.ccanvil/init-plan.json"
+
+  # Record hash of a file before apply
+  local before_hash
+  before_hash=$(shasum -a 256 "$NODE/.claude/rules/tdd.md" | awk '{print $1}')
+
+  run bash "$NODE/.ccanvil/scripts/ccanvil-sync.sh" init-apply "$HUB" "$NODE/.ccanvil/init-plan.json"
+  [ "$status" -eq 0 ]
+
+  # File should be unchanged
+  local after_hash
+  after_hash=$(shasum -a 256 "$NODE/.claude/rules/tdd.md" | awk '{print $1}')
+  [ "$before_hash" = "$after_hash" ]
+}
+
+@test "init-apply: section-merge preserves node content" {
+  # Give node a modified tdd.md with node-specific content
+  cat > "$NODE/.claude/rules/tdd.md" <<'EOF'
+# TDD Rules
+
+Old hub content here.
+
+<!-- NODE-SPECIFIC-START -->
+<!-- My custom notes -->
+My project-specific testing notes.
+EOF
+
+  cd "$NODE"
+
+  # Build a plan with section-merge action for tdd.md
+  local plan_json
+  plan_json=$(bash "$NODE/.ccanvil/scripts/ccanvil-sync.sh" init-preflight "$HUB")
+  echo "$plan_json" | jq '.plan' > "$NODE/.ccanvil/init-plan.json"
+
+  run bash "$NODE/.ccanvil/scripts/ccanvil-sync.sh" init-apply "$HUB" "$NODE/.ccanvil/init-plan.json"
+  [ "$status" -eq 0 ]
+
+  # Hub content should be updated
+  grep -q "Always test first." "$NODE/.claude/rules/tdd.md"
+  # Node content should be preserved
+  grep -q "My project-specific testing notes." "$NODE/.claude/rules/tdd.md"
+}
+
+@test "init-apply: overwrite replaces local file with hub content" {
+  # Create a settings.json in both hub and node with different content
+  echo '{"editor": "vim"}' > "$HUB/.claude/settings.json"
+  echo '{"editor": "code"}' > "$NODE/.claude/settings.json"
+  git -C "$HUB" add -A && git -C "$HUB" commit -q -m "add settings"
+
+  cd "$NODE"
+
+  # Build a plan, then manually change the action to overwrite
+  local plan_json
+  plan_json=$(bash "$NODE/.ccanvil/scripts/ccanvil-sync.sh" init-preflight "$HUB")
+  echo "$plan_json" | jq '[.plan[] | if .file == ".claude/settings.json" then .recommended_action = "overwrite" else . end]' \
+    > "$NODE/.ccanvil/init-plan.json"
+
+  run bash "$NODE/.ccanvil/scripts/ccanvil-sync.sh" init-apply "$HUB" "$NODE/.ccanvil/init-plan.json"
+  [ "$status" -eq 0 ]
+
+  # File should have hub content
+  grep -q '"vim"' "$NODE/.claude/settings.json"
+}
+
+@test "init-preflight + init-apply: full flow on empty project matches direct init" {
+  # Simulate what /init would do: preflight → apply → cmd_init
+  local FRESH
+  FRESH=$(mktemp -d)
+  mkdir -p "$FRESH/.ccanvil/scripts"
+  cp "$SCRIPT" "$FRESH/.ccanvil/scripts/ccanvil-sync.sh"
+
+  cd "$FRESH"
+
+  # Preflight
+  local plan_json
+  plan_json=$(bash "$FRESH/.ccanvil/scripts/ccanvil-sync.sh" init-preflight "$HUB")
+  local conflicts
+  conflicts=$(echo "$plan_json" | jq '.summary.conflicts')
+  [ "$conflicts" -eq 0 ]
+
+  # Apply
+  echo "$plan_json" | jq '.plan' > "$FRESH/.ccanvil/init-plan.json"
+  run bash "$FRESH/.ccanvil/scripts/ccanvil-sync.sh" init-apply "$HUB" "$FRESH/.ccanvil/init-plan.json"
+  [ "$status" -eq 0 ]
+
+  # Files should exist
+  [ -f "$FRESH/.claude/rules/tdd.md" ]
+  [ -f "$FRESH/CLAUDE.md" ]
+  [ -f "$FRESH/.claude/commands/catchup.md" ]
+
+  # Init lockfile
+  run bash "$FRESH/.ccanvil/scripts/ccanvil-sync.sh" init "$HUB"
+  [ "$status" -eq 0 ]
+  [ -f "$FRESH/.ccanvil/ccanvil.lock" ]
+
+  # All files should be clean (since they were just copied from hub)
+  local modified
+  modified=$(jq '[.files[] | select(.status != "clean")] | length' "$FRESH/.ccanvil/ccanvil.lock")
+  [ "$modified" -eq 0 ]
+
+  rm -rf "$FRESH"
+}

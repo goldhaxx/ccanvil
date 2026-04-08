@@ -1,7 +1,7 @@
 # Checkpoint
 
 > Feature: sync-subcommands (and prior features)
-> Last updated: 1775604693
+> Last updated: 1775606560
 > Plan hash: none (multi-feature session, plans were inline)
 > Session objective: Clear the entire actionable backlog
 
@@ -32,11 +32,12 @@
 - Fixed stale script paths in local adapter
 - 357/357 tests (3 new)
 
-### Sync subcommands (BTS-63, BTS-65, BTS-66, PR #12, open)
+### Sync subcommands (BTS-63, BTS-65, BTS-66, PR #12, merged)
 - **status --json** — machine-readable output with --filter support
 - **migrate** — one-command downstream migration (copy, section-merge, rename stale files, re-init)
 - **register/registry** — hub tracks linked downstream projects via .ccanvil/registry.json
-- 367/367 tests (10 new)
+- **init registration prompt** — post-init check surfaces registration if project is untracked
+- 369/369 tests (12 new)
 
 ### Backlog housekeeping
 - BTS-28: verified already implemented, marked Done
@@ -47,24 +48,23 @@
 
 ## Current State
 
-- **Branch:** `claude/feat/sync-subcommands`
-- **Hub tests:** 367/367 passing
+- **Branch:** `main` (all PRs merged)
+- **Hub tests:** 369/369 passing
 - **Working tree:** clean
-- **Open PR:** #12 (sync subcommands — ready to merge)
+- **All PRs merged:** #8, #9, #10, #11, #12
 - **Backlog:** empty (actionable). Only BTS-20 and BTS-21 remain (needs-research/future)
 
 ## Next Steps
 
-1. Merge PR #12
-2. Update MEMORY.md backlog section (all items now Done)
-3. Future: BTS-20 (workflow engine) and BTS-21 (GitHub agentic workflows) when ready
+1. Future: BTS-20 (workflow engine) and BTS-21 (GitHub agentic workflows) when ready
+2. Consider downstream project re-migration using new `migrate` subcommand
 
 ## Determinism Review
 
 - **operations_reviewed:** 10
-- **candidates_found:** 1
+- **candidates_found:** 0
 
-**AC-11 (init auto-registers):** The spec called for init to automatically call register (AC-11), but this was deferred to avoid changing init's behavior for projects that don't want registry tracking. Should be a follow-up: `init --register` flag or a post-init hook. Impact: **low** — register is a one-liner that can be run manually.
+AC-11 (init registration prompt) was resolved inline in cmd_init — the right design choice. Hook approach was evaluated and rejected: a PostToolUse Bash hook would fire on every Bash call (~50ms overhead) for a check that only matters during init. Inline check has zero overhead for non-init calls. No other candidates this session.
 
 <!-- NODE-SPECIFIC-START -->
 <!-- Add project-specific content below this line. -->

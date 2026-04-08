@@ -22,6 +22,24 @@ jobs:
       - name: Run tests
         run: "echo TODO: Replace with your project test command"
 
+  lifecycle-docs:
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check for stale lifecycle docs
+        run: |
+          stale=""
+          [ -f docs/spec.md ] && stale="$stale docs/spec.md"
+          [ -f docs/plan.md ] && stale="$stale docs/plan.md"
+          [ -f docs/checkpoint.md ] && stale="$stale docs/checkpoint.md"
+          if [ -n "$stale" ]; then
+            echo "::error::Lifecycle docs must be cleaned up before merge:$stale"
+            echo "Run: docs-check.sh complete <feature-id>"
+            exit 1
+          fi
+
   security:
     runs-on: ubuntu-latest
     steps:

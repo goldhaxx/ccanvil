@@ -1216,3 +1216,71 @@ EOF
   total=$(echo "$output" | jq '.total')
   [ "$total" -eq 0 ]
 }
+
+
+# =========================================================================
+# radar-gather tests
+# =========================================================================
+
+@test "radar-gather: outputs valid JSON with required fields" {
+  run bash "$SCRIPT" radar-gather "$DOCS"
+  [ "$status" -eq 0 ]
+  echo "$output" | jq -e 'has("active_spec")' >/dev/null
+  echo "$output" | jq -e 'has("completed_recent")' >/dev/null
+  echo "$output" | jq -e 'has("ideas")' >/dev/null
+  echo "$output" | jq -e 'has("roadmap")' >/dev/null
+  echo "$output" | jq -e 'has("backlog")' >/dev/null
+}
+
+@test "radar-gather: includes active spec when present" {
+  create_spec "test-feat" "1742860800" "In Progress"
+  run bash "$SCRIPT" radar-gather "$DOCS"
+  [ "$status" -eq 0 ]
+  local fid
+  fid=$(echo "$output" | jq -r '.active_spec.feature_id')
+  [ "$fid" = "test-feat" ]
+}
+
+@test "radar-gather: includes roadmap active theme" {
+  mkdir -p "$DOCS"
+  cat > "$DOCS/roadmap.md" <<'EOF'
+# Roadmap
+
+## Vision
+Build great things.
+
+## Active Theme
+Infrastructure hardening
+
+## Up Next
+1. Feature X
+EOF
+  run bash "$SCRIPT" radar-gather "$DOCS"
+  [ "$status" -eq 0 ]
+  local theme
+  theme=$(echo "$output" | jq -r '.roadmap.active_theme')
+  [ "$theme" = "Infrastructure hardening" ]
+}
+
+@test "radar-gather: handles missing roadmap gracefully" {
+  run bash "$SCRIPT" radar-gather "$DOCS"
+  [ "$status" -eq 0 ]
+  local exists
+  exists=$(echo "$output" | jq -r '.roadmap.exists')
+  [ "$exists" = "false" ]
+}
+
+@test "radar-gather: includes idea counts" {
+  mkdir -p "$DOCS"
+  cat > "$DOCS/ideas.md" <<'EOF'
+# Ideas
+
+- [ ] 2026-04-01: idea one <!-- status:new -->
+- [ ] 2026-04-02: idea two <!-- status:new -->
+EOF
+  run bash "$SCRIPT" radar-gather "$DOCS"
+  [ "$status" -eq 0 ]
+  local new_count
+  new_count=$(echo "$output" | jq '.ideas.new')
+  [ "$new_count" -eq 2 ]
+}

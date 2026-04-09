@@ -945,6 +945,96 @@ cmd_config_get() {
 }
 
 # ---------------------------------------------------------------------------
+# Radar — deterministic data gathering for /radar skill
+# ---------------------------------------------------------------------------
+
+cmd_radar_gather() {
+  local docs_dir="${1:-$DEFAULT_DOCS_DIR}"
+  local result="{}"
+
+  # Active spec
+  if [[ -f "$docs_dir/spec.md" ]]; then
+    local spec_meta
+    spec_meta=$(parse_metadata "$docs_dir/spec.md")
+    result=$(echo "$result" | jq --argjson m "$spec_meta" '. + {"active_spec": $m}')
+  else
+    result=$(echo "$result" | jq '. + {"active_spec": null}')
+  fi
+
+  # Recently completed specs (last 5)
+  local completed="[]"
+  local specs_dir="$docs_dir/specs"
+  if [[ -d "$specs_dir" ]]; then
+    for f in "$specs_dir"/*.md; do
+      [[ -f "$f" ]] || continue
+      local meta
+      meta=$(parse_metadata "$f")
+      local st
+      st=$(echo "$meta" | jq -r '.status // empty')
+      if [[ "$st" == "Complete" ]]; then
+        completed=$(echo "$completed" | jq --argjson m "$meta" '. + [$m]')
+      fi
+    done
+    # Keep last 5 by created date (descending)
+    completed=$(echo "$completed" | jq 'sort_by(.created) | reverse | .[0:5]')
+  fi
+  result=$(echo "$result" | jq --argjson c "$completed" '. + {"completed_recent": $c}')
+
+  # Idea count
+  local idea_counts='{"total":0,"new":0}'
+  if [[ -f "$docs_dir/ideas.md" ]]; then
+    idea_counts=$(cmd_idea_count "$docs_dir")
+  fi
+  result=$(echo "$result" | jq --argjson i "$idea_counts" '. + {"ideas": $i}')
+
+  # Roadmap summary (active theme + up next)
+  if [[ -f "$docs_dir/roadmap.md" ]]; then
+    local active_theme=""
+    local in_theme=false
+    while IFS= read -r line; do
+      if [[ "$line" =~ ^##\ Active\ Theme ]]; then
+        in_theme=true; continue
+      fi
+      if $in_theme; then
+        if [[ "$line" =~ ^## ]]; then break; fi
+        if [[ -n "$line" && ! "$line" =~ ^\<!-- ]]; then
+          active_theme="$line"
+          break
+        fi
+      fi
+    done < "$docs_dir/roadmap.md"
+    result=$(echo "$result" | jq --arg t "${active_theme:-not set}" '. + {"roadmap": {"active_theme": $t, "exists": true}}')
+  else
+    result=$(echo "$result" | jq '. + {"roadmap": {"active_theme": "no roadmap", "exists": false}}')
+  fi
+
+  # Git activity (last 7 days)
+  local git_summary=""
+  if git rev-parse HEAD >/dev/null 2>&1; then
+    local commit_count
+    commit_count=$(git log --oneline --since="7 days ago" 2>/dev/null | wc -l | tr -d ' ')
+    local branch
+    branch=$(git branch --show-current 2>/dev/null || echo "detached")
+    result=$(echo "$result" | jq --arg cc "$commit_count" --arg b "$branch" \
+      '. + {"git": {"commits_7d": ($cc | tonumber), "branch": $b}}')
+  else
+    result=$(echo "$result" | jq '. + {"git": {"commits_7d": 0, "branch": "none"}}')
+  fi
+
+  # Spec backlog summary
+  local backlog_counts
+  backlog_counts=$(cmd_list_specs "$docs_dir" 2>/dev/null | jq '{
+    total: length,
+    ready: [.[] | select(.status == "Ready")] | length,
+    in_progress: [.[] | select(.status == "In Progress")] | length,
+    complete: [.[] | select(.status == "Complete")] | length
+  }' 2>/dev/null || echo '{"total":0,"ready":0,"in_progress":0,"complete":0}')
+  result=$(echo "$result" | jq --argjson b "$backlog_counts" '. + {"backlog": $b}')
+
+  echo "$result" | jq '.'
+}
+
+# ---------------------------------------------------------------------------
 # Idea management
 # ---------------------------------------------------------------------------
 
@@ -1091,6 +1181,7 @@ case "$cmd" in
   activate)      cmd_activate "$@" ;;
   complete)      cmd_complete "$@" ;;
   land)          cmd_land "$@" ;;
+  radar-gather)  cmd_radar_gather "$@" ;;
   idea-add)      cmd_idea_add "$@" ;;
   idea-list)     cmd_idea_list "$@" ;;
   idea-count)    cmd_idea_count "$@" ;;

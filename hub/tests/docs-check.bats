@@ -1116,3 +1116,171 @@ GUIDE="$BATS_TEST_DIRNAME/../../.ccanvil/guide/command-reference.md"
 
   rm -rf "$repo"
 }
+
+
+# =========================================================================
+# idea management tests
+# =========================================================================
+
+@test "idea-add: creates ideas.md and appends entry" {
+  [ ! -f "$DOCS/ideas.md" ]
+  run bash "$SCRIPT" idea-add "test idea one" "$DOCS"
+  [ "$status" -eq 0 ]
+  [ -f "$DOCS/ideas.md" ]
+  grep -q "test idea one" "$DOCS/ideas.md"
+  grep -q "status:new" "$DOCS/ideas.md"
+}
+
+@test "idea-add: appends to existing file" {
+  echo "- [ ] 2026-04-01: first idea <!-- status:new -->" > "$DOCS/ideas.md"
+  run bash "$SCRIPT" idea-add "second idea" "$DOCS"
+  [ "$status" -eq 0 ]
+  local count
+  count=$(grep -c "status:" "$DOCS/ideas.md")
+  [ "$count" -eq 2 ]
+}
+
+@test "idea-list: outputs JSON array" {
+  cat > "$DOCS/ideas.md" <<'EOF'
+# Ideas
+
+- [ ] 2026-04-01: first idea <!-- status:new -->
+- [x] 2026-04-02: second idea <!-- status:promoted -->
+- [x] 2026-04-03: third idea <!-- status:dismissed -->
+EOF
+  run bash "$SCRIPT" idea-list "$DOCS"
+  [ "$status" -eq 0 ]
+  local count
+  count=$(echo "$output" | jq 'length')
+  [ "$count" -eq 3 ]
+  local first_status
+  first_status=$(echo "$output" | jq -r '.[0].status')
+  [ "$first_status" = "new" ]
+}
+
+@test "idea-list: filters by status" {
+  cat > "$DOCS/ideas.md" <<'EOF'
+# Ideas
+
+- [ ] 2026-04-01: first idea <!-- status:new -->
+- [x] 2026-04-02: second idea <!-- status:promoted -->
+- [ ] 2026-04-03: third idea <!-- status:new -->
+EOF
+  run bash "$SCRIPT" idea-list --status new "$DOCS"
+  [ "$status" -eq 0 ]
+  local count
+  count=$(echo "$output" | jq 'length')
+  [ "$count" -eq 2 ]
+}
+
+@test "idea-count: returns correct totals" {
+  cat > "$DOCS/ideas.md" <<'EOF'
+# Ideas
+
+- [ ] 2026-04-01: alpha <!-- status:new -->
+- [ ] 2026-04-02: beta <!-- status:new -->
+- [x] 2026-04-03: gamma <!-- status:promoted -->
+- [x] 2026-04-04: delta <!-- status:dismissed -->
+- [x] 2026-04-05: epsilon <!-- status:merged:BTS-99 -->
+EOF
+  run bash "$SCRIPT" idea-count "$DOCS"
+  [ "$status" -eq 0 ]
+  local total new promoted dismissed
+  total=$(echo "$output" | jq '.total')
+  new=$(echo "$output" | jq '.new')
+  promoted=$(echo "$output" | jq '.promoted')
+  dismissed=$(echo "$output" | jq '.dismissed')
+  [ "$total" -eq 5 ]
+  [ "$new" -eq 2 ]
+  [ "$promoted" -eq 1 ]
+  [ "$dismissed" -eq 1 ]
+}
+
+@test "idea-update: changes status and checks box" {
+  cat > "$DOCS/ideas.md" <<'EOF'
+# Ideas
+
+- [ ] 2026-04-01: first idea <!-- status:new -->
+- [ ] 2026-04-02: second idea <!-- status:new -->
+EOF
+  run bash "$SCRIPT" idea-update 2 promoted "$DOCS"
+  [ "$status" -eq 0 ]
+  grep -q "\[x\].*second idea.*status:promoted" "$DOCS/ideas.md"
+  grep -q "\[ \].*first idea.*status:new" "$DOCS/ideas.md"
+}
+
+@test "idea-count: empty file returns all zeros" {
+  run bash "$SCRIPT" idea-count "$DOCS"
+  [ "$status" -eq 0 ]
+  local total
+  total=$(echo "$output" | jq '.total')
+  [ "$total" -eq 0 ]
+}
+
+
+# =========================================================================
+# radar-gather tests
+# =========================================================================
+
+@test "radar-gather: outputs valid JSON with required fields" {
+  run bash "$SCRIPT" radar-gather "$DOCS"
+  [ "$status" -eq 0 ]
+  echo "$output" | jq -e 'has("active_spec")' >/dev/null
+  echo "$output" | jq -e 'has("completed_recent")' >/dev/null
+  echo "$output" | jq -e 'has("ideas")' >/dev/null
+  echo "$output" | jq -e 'has("roadmap")' >/dev/null
+  echo "$output" | jq -e 'has("backlog")' >/dev/null
+}
+
+@test "radar-gather: includes active spec when present" {
+  create_spec "test-feat" "1742860800" "In Progress"
+  run bash "$SCRIPT" radar-gather "$DOCS"
+  [ "$status" -eq 0 ]
+  local fid
+  fid=$(echo "$output" | jq -r '.active_spec.feature_id')
+  [ "$fid" = "test-feat" ]
+}
+
+@test "radar-gather: includes roadmap active theme" {
+  mkdir -p "$DOCS"
+  cat > "$DOCS/roadmap.md" <<'EOF'
+# Roadmap
+
+## Vision
+Build great things.
+
+## Active Theme
+Infrastructure hardening
+
+## Up Next
+1. Feature X
+EOF
+  run bash "$SCRIPT" radar-gather "$DOCS"
+  [ "$status" -eq 0 ]
+  local theme
+  theme=$(echo "$output" | jq -r '.roadmap.active_theme')
+  [ "$theme" = "Infrastructure hardening" ]
+}
+
+@test "radar-gather: handles missing roadmap gracefully" {
+  run bash "$SCRIPT" radar-gather "$DOCS"
+  [ "$status" -eq 0 ]
+  local exists
+  exists=$(echo "$output" | jq -r '.roadmap.exists')
+  [ "$exists" = "false" ]
+}
+
+@test "radar-gather: includes idea counts" {
+  mkdir -p "$DOCS"
+  cat > "$DOCS/ideas.md" <<'EOF'
+# Ideas
+
+- [ ] 2026-04-01: idea one <!-- status:new -->
+- [ ] 2026-04-02: idea two <!-- status:new -->
+EOF
+  run bash "$SCRIPT" radar-gather "$DOCS"
+  [ "$status" -eq 0 ]
+  local new_count
+  new_count=$(echo "$output" | jq '.ideas.new')
+  [ "$new_count" -eq 2 ]
+}

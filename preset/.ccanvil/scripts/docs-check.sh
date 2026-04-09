@@ -945,6 +945,226 @@ cmd_config_get() {
 }
 
 # ---------------------------------------------------------------------------
+# Radar — deterministic data gathering for /radar skill
+# ---------------------------------------------------------------------------
+
+cmd_radar_gather() {
+  local docs_dir="${1:-$DEFAULT_DOCS_DIR}"
+  local result="{}"
+
+  # Active spec
+  if [[ -f "$docs_dir/spec.md" ]]; then
+    local spec_meta
+    spec_meta=$(parse_metadata "$docs_dir/spec.md")
+    result=$(echo "$result" | jq --argjson m "$spec_meta" '. + {"active_spec": $m}')
+  else
+    result=$(echo "$result" | jq '. + {"active_spec": null}')
+  fi
+
+  # Recently completed specs (last 5)
+  local completed="[]"
+  local specs_dir="$docs_dir/specs"
+  if [[ -d "$specs_dir" ]]; then
+    for f in "$specs_dir"/*.md; do
+      [[ -f "$f" ]] || continue
+      local meta
+      meta=$(parse_metadata "$f")
+      local st
+      st=$(echo "$meta" | jq -r '.status // empty')
+      if [[ "$st" == "Complete" ]]; then
+        completed=$(echo "$completed" | jq --argjson m "$meta" '. + [$m]')
+      fi
+    done
+    # Keep last 5 by created date (descending)
+    completed=$(echo "$completed" | jq 'sort_by(.created) | reverse | .[0:5]')
+  fi
+  result=$(echo "$result" | jq --argjson c "$completed" '. + {"completed_recent": $c}')
+
+  # Idea count
+  local idea_counts='{"total":0,"new":0}'
+  if [[ -f "$docs_dir/ideas.md" ]]; then
+    idea_counts=$(cmd_idea_count "$docs_dir")
+  fi
+  result=$(echo "$result" | jq --argjson i "$idea_counts" '. + {"ideas": $i}')
+
+  # Roadmap summary (active theme + up next)
+  if [[ -f "$docs_dir/roadmap.md" ]]; then
+    local active_theme=""
+    local in_theme=false
+    while IFS= read -r line; do
+      if [[ "$line" =~ ^##\ Active\ Theme ]]; then
+        in_theme=true; continue
+      fi
+      if $in_theme; then
+        if [[ "$line" =~ ^## ]]; then break; fi
+        if [[ -n "$line" && ! "$line" =~ ^\<!-- ]]; then
+          active_theme="$line"
+          break
+        fi
+      fi
+    done < "$docs_dir/roadmap.md"
+    result=$(echo "$result" | jq --arg t "${active_theme:-not set}" '. + {"roadmap": {"active_theme": $t, "exists": true}}')
+  else
+    result=$(echo "$result" | jq '. + {"roadmap": {"active_theme": "no roadmap", "exists": false}}')
+  fi
+
+  # Git activity (last 7 days)
+  local git_summary=""
+  if git rev-parse HEAD >/dev/null 2>&1; then
+    local commit_count
+    commit_count=$(git log --oneline --since="7 days ago" 2>/dev/null | wc -l | tr -d ' ')
+    local branch
+    branch=$(git branch --show-current 2>/dev/null || echo "detached")
+    result=$(echo "$result" | jq --arg cc "$commit_count" --arg b "$branch" \
+      '. + {"git": {"commits_7d": ($cc | tonumber), "branch": $b}}')
+  else
+    result=$(echo "$result" | jq '. + {"git": {"commits_7d": 0, "branch": "none"}}')
+  fi
+
+  # Spec backlog summary
+  local backlog_counts
+  backlog_counts=$(cmd_list_specs "$docs_dir" 2>/dev/null | jq '{
+    total: length,
+    ready: [.[] | select(.status == "Ready")] | length,
+    in_progress: [.[] | select(.status == "In Progress")] | length,
+    complete: [.[] | select(.status == "Complete")] | length
+  }' 2>/dev/null || echo '{"total":0,"ready":0,"in_progress":0,"complete":0}')
+  result=$(echo "$result" | jq --argjson b "$backlog_counts" '. + {"backlog": $b}')
+
+  echo "$result" | jq '.'
+}
+
+# ---------------------------------------------------------------------------
+# Idea management
+# ---------------------------------------------------------------------------
+
+cmd_idea_add() {
+  local text="${1:?Usage: idea-add <text> [docs-dir]}"
+  local docs_dir="${2:-$DEFAULT_DOCS_DIR}"
+  local ideas_file="$docs_dir/ideas.md"
+  local date_str
+  date_str=$(date +%Y-%m-%d)
+
+  # Create file with header if it doesn't exist
+  if [[ ! -f "$ideas_file" ]]; then
+    mkdir -p "$docs_dir"
+    echo "# Ideas" > "$ideas_file"
+    echo "" >> "$ideas_file"
+  fi
+
+  echo "- [ ] ${date_str}: ${text} <!-- status:new -->" >> "$ideas_file"
+  echo "Captured: $text"
+}
+
+cmd_idea_list() {
+  local filter_status=""
+  local docs_dir="$DEFAULT_DOCS_DIR"
+
+  # Parse args
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --status) filter_status="$2"; shift 2 ;;
+      *) docs_dir="$1"; shift ;;
+    esac
+  done
+
+  local ideas_file="$docs_dir/ideas.md"
+  local result="[]"
+
+  if [[ ! -f "$ideas_file" ]]; then
+    echo "$result"
+    return 0
+  fi
+
+  local line_num=0
+  local idea_num=0
+  while IFS= read -r line; do
+    line_num=$((line_num + 1))
+    # Match idea lines: - [ ] or - [x] followed by date: text <!-- status:xxx -->
+    if [[ "$line" =~ ^-\ \[(.)\]\ ([0-9]{4}-[0-9]{2}-[0-9]{2}):\ (.*)\ \<!--\ status:([a-z:A-Z0-9_-]+)\ --\> ]]; then
+      idea_num=$((idea_num + 1))
+      local date="${BASH_REMATCH[2]}"
+      local text="${BASH_REMATCH[3]}"
+      local status="${BASH_REMATCH[4]}"
+
+      # Apply filter
+      if [[ -n "$filter_status" && "$status" != "$filter_status" ]]; then
+        continue
+      fi
+
+      result=$(echo "$result" | jq --arg d "$date" --arg t "$text" --arg s "$status" --argjson n "$idea_num" \
+        '. + [{"num": $n, "date": $d, "text": $t, "status": $s}]')
+    fi
+  done < "$ideas_file"
+
+  echo "$result" | jq '.'
+}
+
+cmd_idea_count() {
+  local docs_dir="${1:-$DEFAULT_DOCS_DIR}"
+  local ideas_file="$docs_dir/ideas.md"
+
+  if [[ ! -f "$ideas_file" ]]; then
+    jq -n '{"total":0,"new":0,"promoted":0,"dismissed":0,"merged":0}'
+    return 0
+  fi
+
+  local total=0 new=0 promoted=0 dismissed=0 merged=0
+  while IFS= read -r line; do
+    if [[ "$line" =~ \<!--\ status:([a-z:A-Z0-9_-]+)\ --\> ]]; then
+      local status="${BASH_REMATCH[1]}"
+      total=$((total + 1))
+      case "$status" in
+        new) new=$((new + 1)) ;;
+        promoted) promoted=$((promoted + 1)) ;;
+        dismissed) dismissed=$((dismissed + 1)) ;;
+        merged*) merged=$((merged + 1)) ;;
+      esac
+    fi
+  done < "$ideas_file"
+
+  jq -n --argjson t "$total" --argjson n "$new" --argjson p "$promoted" --argjson d "$dismissed" --argjson m "$merged" \
+    '{"total":$t,"new":$n,"promoted":$p,"dismissed":$d,"merged":$m}'
+}
+
+cmd_idea_update() {
+  local idea_num="${1:?Usage: idea-update <idea-number> <status> [docs-dir]}"
+  local new_status="${2:?Usage: idea-update <idea-number> <status> [docs-dir]}"
+  local docs_dir="${3:-$DEFAULT_DOCS_DIR}"
+  local ideas_file="$docs_dir/ideas.md"
+
+  [[ -f "$ideas_file" ]] || { echo "ERROR: $ideas_file not found" >&2; exit 1; }
+
+  # Find the Nth idea line and update it
+  local current_num=0
+  local target_line=0
+  local line_num=0
+  while IFS= read -r line; do
+    line_num=$((line_num + 1))
+    if [[ "$line" =~ ^-\ \[.\].*\<!--\ status: ]]; then
+      current_num=$((current_num + 1))
+      if [[ "$current_num" -eq "$idea_num" ]]; then
+        target_line=$line_num
+        break
+      fi
+    fi
+  done < "$ideas_file"
+
+  if [[ "$target_line" -eq 0 ]]; then
+    echo "ERROR: idea #$idea_num not found" >&2
+    exit 1
+  fi
+
+  # Update the status and check the box
+  sed -i '' "${target_line}s/\[ \]/[x]/" "$ideas_file" 2>/dev/null || \
+    sed -i "${target_line}s/\[ \]/[x]/" "$ideas_file"
+  sed -i '' "${target_line}s/status:[a-zA-Z0-9:_-]*/status:${new_status}/" "$ideas_file" 2>/dev/null || \
+    sed -i "${target_line}s/status:[a-zA-Z0-9:_-]*/status:${new_status}/" "$ideas_file"
+
+  echo "Updated idea #$idea_num to $new_status"
+}
+
+# ---------------------------------------------------------------------------
 # Dispatch
 # ---------------------------------------------------------------------------
 
@@ -961,8 +1181,13 @@ case "$cmd" in
   activate)      cmd_activate "$@" ;;
   complete)      cmd_complete "$@" ;;
   land)          cmd_land "$@" ;;
+  radar-gather)  cmd_radar_gather "$@" ;;
+  idea-add)      cmd_idea_add "$@" ;;
+  idea-list)     cmd_idea_list "$@" ;;
+  idea-count)    cmd_idea_count "$@" ;;
+  idea-update)   cmd_idea_update "$@" ;;
   *)
-    echo "Usage: docs-check.sh {status|validate|recommend|audit-session|config-get|list-specs|activate|complete|land} [args...]" >&2
+    echo "Usage: docs-check.sh {status|validate|recommend|audit-session|config-get|list-specs|activate|complete|land|idea-add|idea-list|idea-count|idea-update} [args...]" >&2
     exit 1
     ;;
 esac

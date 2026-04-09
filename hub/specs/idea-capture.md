@@ -2,7 +2,7 @@
 
 > Feature: idea-capture
 > Created: 1775757518
-> Status: In Progress
+> Status: Complete
 
 ## Summary
 

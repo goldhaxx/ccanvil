@@ -4,8 +4,8 @@ Every feature follows this sequence. No exceptions.
 
 ```mermaid
 flowchart TD
-    DESC["1. DESCRIBE<br/><i>'I want the app to do X'</i>"]
-    SPEC["2. SPEC<br/><i>spec-writer agent creates docs/spec.md<br/>with acceptance criteria</i>"]
+    DESC["1. DESCRIBE<br/><i>'I want the app to do X' or /idea</i>"]
+    SPEC["2. SPEC<br/><i>/spec writes docs/specs/&lt;id&gt;.md<br/>with acceptance criteria</i>"]
     REV_SPEC{"Review spec?"}
     ADJ["Adjust criteria<br/><i>'Add a criterion for...'</i>"]
     PLAN["3. PLAN<br/><i>/plan creates docs/plan.md<br/>ordered TDD steps</i>"]

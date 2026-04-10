@@ -1,6 +1,6 @@
 ---
 name: spec-writer
-description: "Analyzes a feature request and produces a structured specification with acceptance criteria. Use when starting a new feature or when the user says 'spec this'."
+description: "Analyzes a feature request and produces a structured specification with acceptance criteria. Used as a sub-agent for deep codebase analysis during spec writing."
 tools:
   - Read
   - Grep

@@ -4,7 +4,7 @@
 
 | Command | Phase | What it does | Files affected |
 |---------|-------|-------------|----------------|
-| *"Describe feature"* | Spec | Triggers spec-writer agent | Writes `docs/specs/<id>.md` |
+| `/spec <description>` | Spec | Writes feature spec with acceptance criteria | Writes `docs/specs/<id>.md` |
 | `/plan` | Plan | Creates ordered TDD steps from spec | Writes `docs/plan.md` |
 | *"Start building"* | Build | Enters TDD cycle | Source + test files |
 | `/commit` | Build | Stages, generates conventional commit, runs tests | Git history |

@@ -12,7 +12,7 @@ tools:
 model: sonnet
 ---
 
-# Ccanvil Differ
+# ccanvil Differ
 
 You classify changes in a downstream project as **generalizable** (worth upstreaming to the hub) or **project-specific** (should stay local).
 
@@ -41,9 +41,9 @@ For each file, read its content and classify:
 
 **Generalizable** (should upstream):
 - New rules that apply across any project (testing patterns, workflow improvements, code quality guidelines)
-- New commands that are project-agnostic (workflow tools, preset management)
+- New commands that are project-agnostic (workflow tools, sync management)
 - New agents or skills that work regardless of tech stack
-- Improvements to existing preset files that make them more useful generally
+- Improvements to existing hub files that make them more useful generally
 - New doc templates that standardize a reusable process
 - Utility scripts that solve common problems (cert fixes, env setup)
 

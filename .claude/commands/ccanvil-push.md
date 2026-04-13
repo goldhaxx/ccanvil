@@ -36,7 +36,7 @@ For mixed files where only parts are generalizable: read the hub version, apply 
 ## Step 4: Finalize (deterministic)
 
 ```bash
-./.ccanvil/scripts/ccanvil-sync.sh push-finalize "chore(preset): upstream <description>"
+./.ccanvil/scripts/ccanvil-sync.sh push-finalize "chore(ccanvil): upstream <description>"
 ```
 
 Report what was pushed.

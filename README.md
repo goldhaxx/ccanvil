@@ -172,7 +172,7 @@ Copy the whole directory with `cp -r .claude ./.claude`. Here's what's inside:
 
 ### The `.ccanvil/` directory (preset infrastructure — copied by `/init`)
 
-Distributed via `preset/.ccanvil/`. Contains scripts, guide docs, and templates:
+Contains scripts, guide docs, and templates:
 
 | File in preset | Copy to | What it does | Customize? |
 |---|---|---|---|

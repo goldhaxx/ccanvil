@@ -437,7 +437,7 @@ JSON
   grep -q "operations.sh" "$BATS_TEST_DIRNAME/../../CLAUDE.md"
 }
 
-@test "preset guide documents operations.sh" {
+@test "guide documents operations.sh" {
   grep -q "operations.sh" "$BATS_TEST_DIRNAME/../../.ccanvil/guide/command-reference.md"
 }
 

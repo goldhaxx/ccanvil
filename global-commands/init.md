@@ -5,7 +5,7 @@ Initialize a new project using the ccanvil preset located at ~/projects/ccanvil.
 3. Bootstrap the sync script so preflight can run:
    ```bash
    mkdir -p .ccanvil/scripts
-   cp ~/projects/ccanvil/preset/.ccanvil/scripts/ccanvil-sync.sh .ccanvil/scripts/ccanvil-sync.sh
+   cp ~/projects/ccanvil/.ccanvil/scripts/ccanvil-sync.sh .ccanvil/scripts/ccanvil-sync.sh
    ```
 4. Run the preflight scan to detect conflicts between hub preset and existing project files:
    ```bash
@@ -29,7 +29,7 @@ Initialize a new project using the ccanvil preset located at ~/projects/ccanvil.
 8. Copy the ISSUE_TEMPLATE directory (not covered by sync patterns):
    ```bash
    mkdir -p .github/ISSUE_TEMPLATE
-   cp -R ~/projects/ccanvil/preset/.ccanvil/templates/github/ISSUE_TEMPLATE/ .github/ISSUE_TEMPLATE/
+   cp -R ~/projects/ccanvil/.ccanvil/templates/github/ISSUE_TEMPLATE/ .github/ISSUE_TEMPLATE/
    ```
 9. Ask me three things:
    - Project name

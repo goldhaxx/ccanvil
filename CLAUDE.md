@@ -21,17 +21,16 @@ bash .ccanvil/scripts/context-budget.sh check --text      # Context budget
 
 ## Architecture
 ```
-preset/                     # Distributable artifacts — /init copies from here
-├── .claude/                # Rules, commands, agents, skills, hooks, settings
-├── .ccanvil/scripts/       # ccanvil-sync.sh, docs-check.sh, operations.sh
-├── .ccanvil/guide/         # Preset reference docs (12 section files)
-├── .ccanvil/templates/     # Format guides, GitHub templates
-└── CLAUDE.md               # Project template (node + hub-managed sections)
+.claude/                    # Rules, commands, agents, skills, hooks, settings
+.ccanvil/                   # Scripts, guide, templates — /init copies from here
+├── scripts/                # ccanvil-sync.sh, docs-check.sh, operations.sh
+├── guide/                  # Preset reference docs (12 section files)
+└── templates/              # Format guides, GitHub templates
+CLAUDE.md                   # Project template (node + hub-managed sections)
 hub/                        # Hub-only — NOT distributed
 ├── tests/                  # bats-core test suite (11 .bats files)
 ├── specs/                  # Completed spec archive
 └── meta/                   # SYSTEM_PROMPT.md, INIT_PROMPT.md
-.ccanvil → preset/.ccanvil  # Symlink so scripts work in hub too
 docs/                       # Active feature lifecycle (branch-local)
 ```
 

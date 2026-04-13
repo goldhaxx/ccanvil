@@ -1,7 +1,7 @@
 #!/usr/bin/env bats
 # Tests for branch-based feature lifecycle
 #
-# Covers: preset config, list-specs, activate, complete, validate/recommend
+# Covers: ccanvil config, list-specs, activate, complete, validate/recommend
 # multi-spec, hooks, and worktree compatibility.
 
 SCRIPT="$BATS_TEST_DIRNAME/../../.ccanvil/scripts/docs-check.sh"

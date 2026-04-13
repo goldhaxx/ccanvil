@@ -42,6 +42,7 @@ EXCLUDED_FILES=(
 
 # Extra files copied during init that aren't in TRACKED_PATTERNS
 INIT_EXTRA_FILES=(
+  ".gitignore"
   ".claudeignore"
   ".claude/lint.json"
 )
@@ -255,17 +256,8 @@ cmd_init() {
   echo "  Total files: $total"
   echo "  Clean: $clean | Modified: $modified | Local: $local_only | Hub-only: $hub_only"
 
-  # Check if project is registered with the hub
-  local hub_root_abs="${hub_path/#\~/$HOME}"
-  local registry="$hub_root_abs/.ccanvil/registry.json"
-  local node_path
-  node_path=$(pwd)
-  if [[ ! -f "$registry" ]] || ! jq -e --arg p "$node_path" '.nodes[$p]' "$registry" >/dev/null 2>&1; then
-    echo ""
-    echo "NOTE: This project is not registered with the hub."
-    echo "  Register to enable project tracking and discovery."
-    echo "  Run: ccanvil-sync.sh register"
-  fi
+  # Auto-register with the hub
+  cmd_register 2>/dev/null || echo "WARNING: Hub registration failed (non-fatal)"
 }
 
 cmd_init_preflight() {

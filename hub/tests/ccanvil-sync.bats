@@ -98,6 +98,20 @@ HUBEOF
   # Create CHANGELOG.md in hub (required by push-apply and promote)
   echo "# Changelog" > "$HUB/CHANGELOG.md"
 
+  # Create .gitignore (distributed via INIT_EXTRA_FILES)
+  cat > "$HUB/.gitignore" <<'HUBEOF'
+.DS_Store
+node_modules/
+dist/
+.env
+.env.*
+!.env.example
+.claude/settings.local.json
+.claude/ccanvil.local.json
+.claude/local/
+.claude/worktrees/
+HUBEOF
+
   # Initialize a git repo in hub (needed for hub_version)
   git -C "$HUB" init -q
   git -C "$HUB" add -A
@@ -120,13 +134,17 @@ HUBEOF
   git -C "$NODE" add -A
   git -C "$NODE" commit -q -m "init node"
 
-  # Run ccanvil-sync init in node
+  # Run ccanvil-sync init in node (also auto-registers with hub)
   cd "$NODE"
   bash "$NODE/.ccanvil/scripts/ccanvil-sync.sh" init "$HUB"
 
   # Commit the lockfile so the node is clean
   git -C "$NODE" add -A
   git -C "$NODE" commit -q -m "ccanvil init"
+
+  # Commit registration in hub so hub stays clean
+  git -C "$HUB" add -A
+  git -C "$HUB" commit -q -m "register node" 2>/dev/null || true
 }
 
 teardown() {
@@ -562,25 +580,32 @@ EOF
   jq -e '.files' "$NODE/.ccanvil/ccanvil.lock"
 }
 
-@test "init: prompts to register when project is not in registry" {
+@test "init: auto-registers project with hub" {
   cd "$NODE"
-  # Remove lockfile and re-init (no registry exists yet)
+  # Remove lockfile and registry, then re-init
   rm -f "$NODE/.ccanvil/ccanvil.lock"
+  rm -f "$HUB/.ccanvil/registry.json"
   run bash "$NODE/.ccanvil/scripts/ccanvil-sync.sh" init "$HUB"
   [ "$status" -eq 0 ]
-  echo "$output" | grep -q "not registered"
-  echo "$output" | grep -q "ccanvil-sync.sh register"
+  echo "$output" | grep -q "REGISTERED"
+
+  # Verify project is in registry
+  local node_path
+  node_path=$(cd "$NODE" && pwd)
+  jq -e --arg p "$node_path" '.nodes[$p]' "$HUB/.ccanvil/registry.json"
 }
 
-@test "init: no registration prompt when already registered" {
+@test "init: re-init updates registration timestamp" {
   cd "$NODE"
-  # Register first
-  bash "$NODE/.ccanvil/scripts/ccanvil-sync.sh" register
+  # First init to register
+  rm -f "$NODE/.ccanvil/ccanvil.lock"
+  bash "$NODE/.ccanvil/scripts/ccanvil-sync.sh" init "$HUB"
+
   # Re-init
   rm -f "$NODE/.ccanvil/ccanvil.lock"
   run bash "$NODE/.ccanvil/scripts/ccanvil-sync.sh" init "$HUB"
   [ "$status" -eq 0 ]
-  ! echo "$output" | grep -q "not registered"
+  echo "$output" | grep -q "REGISTERED"
 }
 
 @test "init: files matching tracked patterns are in lockfile" {
@@ -1567,6 +1592,45 @@ EOF
   [ "$conflicts" -ge 1 ]
 }
 
+@test "init-preflight: includes .gitignore in plan for empty project" {
+  local EMPTY_NODE
+  EMPTY_NODE=$(mktemp -d)
+  mkdir -p "$EMPTY_NODE/.ccanvil/scripts"
+  cp "$SCRIPT" "$EMPTY_NODE/.ccanvil/scripts/ccanvil-sync.sh"
+
+  cd "$EMPTY_NODE"
+  run bash "$EMPTY_NODE/.ccanvil/scripts/ccanvil-sync.sh" init-preflight "$HUB"
+  [ "$status" -eq 0 ]
+
+  # .gitignore should be in the plan as copy
+  local gitignore_action
+  gitignore_action=$(echo "$output" | jq -r '[.plan[] | select(.file == ".gitignore")] | .[0].recommended_action')
+  [ "$gitignore_action" = "copy" ]
+
+  rm -rf "$EMPTY_NODE"
+}
+
+@test "init-preflight: recommends review when local .gitignore differs" {
+  local FRESH
+  FRESH=$(mktemp -d)
+  mkdir -p "$FRESH/.ccanvil/scripts"
+  cp "$SCRIPT" "$FRESH/.ccanvil/scripts/ccanvil-sync.sh"
+
+  # Create a different .gitignore locally
+  echo "node_modules/" > "$FRESH/.gitignore"
+
+  cd "$FRESH"
+  run bash "$FRESH/.ccanvil/scripts/ccanvil-sync.sh" init-preflight "$HUB"
+  [ "$status" -eq 0 ]
+
+  # .gitignore should be flagged as review (differs, no delimiter)
+  local gitignore_action
+  gitignore_action=$(echo "$output" | jq -r '[.plan[] | select(.file == ".gitignore")] | .[0].recommended_action')
+  [ "$gitignore_action" = "review" ]
+
+  rm -rf "$FRESH"
+}
+
 
 # =========================================================================
 # init-apply tests
@@ -1720,8 +1784,9 @@ EOF
   [ -f "$FRESH/.claude/rules/tdd.md" ]
   [ -f "$FRESH/CLAUDE.md" ]
   [ -f "$FRESH/.claude/commands/catchup.md" ]
+  [ -f "$FRESH/.gitignore" ]
 
-  # Init lockfile
+  # Init lockfile (also auto-registers)
   run bash "$FRESH/.ccanvil/scripts/ccanvil-sync.sh" init "$HUB"
   [ "$status" -eq 0 ]
   [ -f "$FRESH/.ccanvil/ccanvil.lock" ]
@@ -1730,6 +1795,11 @@ EOF
   local modified
   modified=$(jq '[.files[] | select(.status != "clean")] | length' "$FRESH/.ccanvil/ccanvil.lock")
   [ "$modified" -eq 0 ]
+
+  # Project should be registered
+  local fresh_path
+  fresh_path=$(cd "$FRESH" && pwd)
+  jq -e --arg p "$fresh_path" '.nodes[$p]' "$HUB/.ccanvil/registry.json"
 
   rm -rf "$FRESH"
 }

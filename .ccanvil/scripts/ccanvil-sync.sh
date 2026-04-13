@@ -386,15 +386,23 @@ cmd_init_apply() {
 
   local copied=0 skipped=0 merged=0 errors=0
 
+  # Auto-detect format: accept both {plan:[], summary:{}} and bare []
+  local plan_expr='.'
+  if jq -e 'type == "object" and has("plan")' "$plan_file" > /dev/null 2>&1; then
+    plan_expr='.plan'
+  elif ! jq -e 'type == "array"' "$plan_file" > /dev/null 2>&1; then
+    die "Invalid plan file: expected JSON array or object with .plan key"
+  fi
+
   # Process each entry in the plan
   local entry_count
-  entry_count=$(jq 'length' "$plan_file")
+  entry_count=$(jq "$plan_expr | length" "$plan_file")
 
   local i=0
   while [[ $i -lt $entry_count ]]; do
     local file action
-    file=$(jq -r ".[$i].file" "$plan_file")
-    action=$(jq -r ".[$i].recommended_action" "$plan_file")
+    file=$(jq -r "$plan_expr | .[$i].file" "$plan_file")
+    action=$(jq -r "$plan_expr | .[$i].recommended_action" "$plan_file")
 
     # Resolve hub source file path
     # Check GitHub template mappings first, then tracked patterns

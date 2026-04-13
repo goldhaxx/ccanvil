@@ -1580,12 +1580,10 @@ EOF
 
   cd "$EMPTY_NODE"
 
-  # Get preflight plan
+  # Get preflight plan and save full output directly
   local plan_json
   plan_json=$(bash "$EMPTY_NODE/.ccanvil/scripts/ccanvil-sync.sh" init-preflight "$HUB")
-
-  # Write plan to temp file for init-apply
-  echo "$plan_json" | jq '.plan' > "$EMPTY_NODE/.ccanvil/init-plan.json"
+  echo "$plan_json" > "$EMPTY_NODE/.ccanvil/init-plan.json"
 
   run bash "$EMPTY_NODE/.ccanvil/scripts/ccanvil-sync.sh" init-apply "$HUB" "$EMPTY_NODE/.ccanvil/init-plan.json"
   [ "$status" -eq 0 ]
@@ -1606,7 +1604,7 @@ EOF
   # Preflight on node with identical files → all skip
   local plan_json
   plan_json=$(bash "$NODE/.ccanvil/scripts/ccanvil-sync.sh" init-preflight "$HUB")
-  echo "$plan_json" | jq '.plan' > "$NODE/.ccanvil/init-plan.json"
+  echo "$plan_json" > "$NODE/.ccanvil/init-plan.json"
 
   # Record hash of a file before apply
   local before_hash
@@ -1638,7 +1636,7 @@ EOF
   # Build a plan with section-merge action for tdd.md
   local plan_json
   plan_json=$(bash "$NODE/.ccanvil/scripts/ccanvil-sync.sh" init-preflight "$HUB")
-  echo "$plan_json" | jq '.plan' > "$NODE/.ccanvil/init-plan.json"
+  echo "$plan_json" > "$NODE/.ccanvil/init-plan.json"
 
   run bash "$NODE/.ccanvil/scripts/ccanvil-sync.sh" init-apply "$HUB" "$NODE/.ccanvil/init-plan.json"
   [ "$status" -eq 0 ]
@@ -1670,6 +1668,33 @@ EOF
   grep -q '"vim"' "$NODE/.claude/settings.json"
 }
 
+@test "init-apply: accepts full preflight output with wrapped plan" {
+  local FRESH
+  FRESH=$(mktemp -d)
+  mkdir -p "$FRESH/.ccanvil/scripts"
+  cp "$SCRIPT" "$FRESH/.ccanvil/scripts/ccanvil-sync.sh"
+
+  cd "$FRESH"
+
+  # Get preflight output (wrapped format: {plan:[], summary:{}})
+  local plan_json
+  plan_json=$(bash "$FRESH/.ccanvil/scripts/ccanvil-sync.sh" init-preflight "$HUB")
+
+  # Save full output directly — no .plan extraction
+  echo "$plan_json" > "$FRESH/.ccanvil/init-plan.json"
+
+  run bash "$FRESH/.ccanvil/scripts/ccanvil-sync.sh" init-apply "$HUB" "$FRESH/.ccanvil/init-plan.json"
+  [ "$status" -eq 0 ]
+
+  # Key files should exist
+  [ -f "$FRESH/.claude/rules/tdd.md" ]
+  [ -f "$FRESH/CLAUDE.md" ]
+
+  echo "$output" | grep -q '"copied"'
+
+  rm -rf "$FRESH"
+}
+
 @test "init-preflight + init-apply: full flow on empty project matches direct init" {
   # Simulate what /init would do: preflight → apply → cmd_init
   local FRESH
@@ -1686,8 +1711,8 @@ EOF
   conflicts=$(echo "$plan_json" | jq '.summary.conflicts')
   [ "$conflicts" -eq 0 ]
 
-  # Apply
-  echo "$plan_json" | jq '.plan' > "$FRESH/.ccanvil/init-plan.json"
+  # Apply — pass full preflight output directly (no .plan extraction)
+  echo "$plan_json" > "$FRESH/.ccanvil/init-plan.json"
   run bash "$FRESH/.ccanvil/scripts/ccanvil-sync.sh" init-apply "$HUB" "$FRESH/.ccanvil/init-plan.json"
   [ "$status" -eq 0 ]
 
@@ -1705,6 +1730,24 @@ EOF
   local modified
   modified=$(jq '[.files[] | select(.status != "clean")] | length' "$FRESH/.ccanvil/ccanvil.lock")
   [ "$modified" -eq 0 ]
+
+  rm -rf "$FRESH"
+}
+
+@test "init-apply: rejects invalid JSON plan file" {
+  local FRESH
+  FRESH=$(mktemp -d)
+  mkdir -p "$FRESH/.ccanvil/scripts"
+  cp "$SCRIPT" "$FRESH/.ccanvil/scripts/ccanvil-sync.sh"
+
+  cd "$FRESH"
+
+  # Write invalid JSON
+  echo "not json at all" > "$FRESH/.ccanvil/init-plan.json"
+
+  run bash "$FRESH/.ccanvil/scripts/ccanvil-sync.sh" init-apply "$HUB" "$FRESH/.ccanvil/init-plan.json"
+  [ "$status" -ne 0 ]
+  echo "$output" | grep -qi "invalid plan file"
 
   rm -rf "$FRESH"
 }

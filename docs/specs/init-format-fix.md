@@ -2,7 +2,7 @@
 
 > Feature: init-format-fix
 > Created: 1776103445
-> Status: In Progress
+> Status: Complete
 
 ## Summary
 

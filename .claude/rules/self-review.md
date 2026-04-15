@@ -2,7 +2,7 @@
 
 ## The Rule
 
-The `## Determinism Review` section in `docs/checkpoint.md` is **mandatory** at every checkpoint. The workflow rule in `workflow.md` specifies the exact checkpoint flow and checklist. This rule provides the judgment criteria for what to flag.
+The `## Determinism Review` section in `docs/checkpoint.md` is **mandatory** at every checkpoint. The checkpoint template (`.ccanvil/templates/checkpoint.md`) defines the format. This rule provides the judgment criteria for what to flag.
 
 ## When to Flag
 

@@ -91,40 +91,70 @@ parse_metadata() {
   local status_field=""
   local spec_hash=""
   local plan_hash=""
-  local past_heading=false
 
-  while IFS= read -r line || [[ -n "$line" ]]; do
-    # Skip blank lines before heading
-    if [[ -z "$line" ]] && ! $past_heading; then
-      continue
-    fi
-    # Skip heading
-    if [[ "$line" =~ ^#\  ]] && ! $past_heading; then
-      past_heading=true
-      continue
-    fi
-    # After heading, skip blanks before blockquote
-    if $past_heading && [[ -z "$line" ]]; then
-      continue
-    fi
-    # Parse blockquote lines
-    if $past_heading && [[ "$line" =~ ^\> ]]; then
-      local value="${line#> }"
-      case "$value" in
-        Feature:*)    feature_id="${value#Feature: }" ;;
-        Created:*)    created="${value#Created: }" ;;
-        "Last updated:"*) last_updated="${value#Last updated: }" ;;
-        Status:*)     status_field="${value#Status: }" ;;
-        "Spec hash:"*) spec_hash="${value#Spec hash: }" ;;
-        "Plan hash:"*) plan_hash="${value#Plan hash: }" ;;
-      esac
-      continue
-    fi
-    # First non-blockquote line after heading = end of metadata
-    if $past_heading; then
-      break
-    fi
-  done < "$file"
+  # Detect YAML frontmatter: first non-empty line is ---
+  local first_line
+  first_line=$(head -1 "$file")
+  if [[ "$first_line" == "---" ]]; then
+    # YAML frontmatter mode: parse key: value lines until closing ---
+    local in_frontmatter=false
+    while IFS= read -r line || [[ -n "$line" ]]; do
+      if [[ "$line" == "---" ]]; then
+        if $in_frontmatter; then
+          break  # closing delimiter
+        fi
+        in_frontmatter=true
+        continue
+      fi
+      if $in_frontmatter; then
+        local key="${line%%:*}"
+        local val="${line#*: }"
+        case "$key" in
+          [Ff]eature)        feature_id="$val" ;;
+          [Cc]reated)        created="$val" ;;
+          [Ss]tatus)         status_field="$val" ;;
+          "Last updated"|"last_updated") last_updated="$val" ;;
+          "Spec hash"|"spec_hash")       spec_hash="$val" ;;
+          "Plan hash"|"plan_hash")       plan_hash="$val" ;;
+        esac
+      fi
+    done < "$file"
+  else
+    # Blockquote mode: original parser
+    local past_heading=false
+    while IFS= read -r line || [[ -n "$line" ]]; do
+      # Skip blank lines before heading
+      if [[ -z "$line" ]] && ! $past_heading; then
+        continue
+      fi
+      # Skip heading
+      if [[ "$line" =~ ^#\  ]] && ! $past_heading; then
+        past_heading=true
+        continue
+      fi
+      # After heading, skip blanks before blockquote
+      if $past_heading && [[ -z "$line" ]]; then
+        continue
+      fi
+      # Parse blockquote lines
+      if $past_heading && [[ "$line" =~ ^\> ]]; then
+        local value="${line#> }"
+        case "$value" in
+          Feature:*)    feature_id="${value#Feature: }" ;;
+          Created:*)    created="${value#Created: }" ;;
+          "Last updated:"*) last_updated="${value#Last updated: }" ;;
+          Status:*)     status_field="${value#Status: }" ;;
+          "Spec hash:"*) spec_hash="${value#Spec hash: }" ;;
+          "Plan hash:"*) plan_hash="${value#Plan hash: }" ;;
+        esac
+        continue
+      fi
+      # First non-blockquote line after heading = end of metadata
+      if $past_heading; then
+        break
+      fi
+    done < "$file"
+  fi
 
   # Build JSON
   local json="{"
@@ -148,6 +178,23 @@ parse_metadata() {
 
   json+="}"
   echo "$json"
+}
+
+# Update the Status field in a metadata file (handles both blockquote and YAML frontmatter)
+update_metadata_status() {
+  local file="$1"
+  local new_status="$2"
+  local first_line
+  first_line=$(head -1 "$file")
+  if [[ "$first_line" == "---" ]]; then
+    # YAML frontmatter: replace Status line between --- delimiters
+    sed -i '' "s/^[Ss]tatus: .*/Status: $new_status/" "$file" 2>/dev/null || \
+      sed -i "s/^[Ss]tatus: .*/Status: $new_status/" "$file"
+  else
+    # Blockquote format
+    sed -i '' "s/^> Status: .*/> Status: $new_status/" "$file" 2>/dev/null || \
+      sed -i "s/^> Status: .*/> Status: $new_status/" "$file"
+  fi
 }
 
 # doc_entry <file> <doc-name>
@@ -395,8 +442,8 @@ cmd_recommend() {
       next_action="Activate a spec: docs-check.sh activate $ready_spec"
       reason="No active spec. Ready specs available in docs/specs/."
     else
-      next_action="Mark a spec as Ready, then activate it"
-      reason="Specs exist in docs/specs/ but none are marked Ready."
+      next_action="Activate a spec: docs-check.sh activate <id>"
+      reason="Specs exist in docs/specs/ but none are activated."
     fi
 
   # No docs at all
@@ -721,8 +768,7 @@ cmd_activate() {
   }
 
   # Update status in specs/ to "In Progress"
-  sed -i '' "s/^> Status: .*/> Status: In Progress/" "$spec_file" 2>/dev/null || \
-    sed -i "s/^> Status: .*/> Status: In Progress/" "$spec_file"
+  update_metadata_status "$spec_file" "In Progress"
 
   # Copy spec to docs/spec.md (after status update so it gets the new status)
   cp "$spec_file" "$docs_dir/spec.md"
@@ -795,8 +841,7 @@ cmd_complete() {
   fi
 
   # Update status to Complete
-  sed -i '' "s/^> Status: .*/> Status: Complete/" "$spec_file" 2>/dev/null || \
-    sed -i "s/^> Status: .*/> Status: Complete/" "$spec_file"
+  update_metadata_status "$spec_file" "Complete"
 
   # Clear assumptions.md if it exists
   local assumptions_file="$docs_dir/assumptions.md"

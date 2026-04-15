@@ -21,9 +21,8 @@ Autonomy & Friction Reduction — remove the friction between intent and executi
 
 ## Up Next
 
-1. **Downstream sync automation** — streamline the pull workflow across registered nodes; reduce the manual steps to propagate hub changes to fucina, luxlook, and future projects
+1. **workflow.md budget trim** — at 102 lines (20.9% of context budget), workflow.md exceeds the 40-line rule max; compress and eliminate redundancy with other rule files
 2. **Init validation** — end-to-end test of init on a fresh project with BTS-68/69 fixes applied; confirm the full flow works from empty directory to registered, syncing node
-3. **workflow.md budget trim** — at 102 lines (20.9% of context budget), workflow.md exceeds the 40-line rule max; split or compress
 
 ## Horizon
 

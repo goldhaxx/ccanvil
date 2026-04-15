@@ -6,6 +6,7 @@
 #   ccanvil-sync.sh init-preflight <hub>       Scan for conflicts, output merge plan
 #   ccanvil-sync.sh init-apply <hub> <plan>    Execute an approved merge plan
 #   ccanvil-sync.sh status                     Show file provenance and sync state
+#   ccanvil-sync.sh changelog                List hub commits since last sync (JSON)
 #   ccanvil-sync.sh diff [file]            Show diff between local and hub versions
 #   ccanvil-sync.sh hash <file>            Compute sha256 of a file
 #   ccanvil-sync.sh lock-get <file>        Read a lockfile entry (JSON)
@@ -560,6 +561,54 @@ cmd_status() {
   echo "Statuses: CLEAN=synced, MODIFIED=locally changed, MODIFIED*=changed since last sync,"
   echo "          LOCAL=project-only, PROMOTED=pushed to hub, HUB-ONLY=not yet pulled,"
   echo "          NODE-ONLY=excluded from sync (use /ccanvil-ignore to set, ccanvil-sync.sh track to undo)"
+}
+
+cmd_changelog() {
+  require_lockfile
+  local hub_root
+  hub_root=$(get_hub_source_raw)
+
+  [[ -d "$hub_root" ]] || die "Hub not found at: $hub_root"
+
+  local last_version
+  last_version=$(jq -r '.hub_version' "$LOCKFILE")
+
+  local current_version
+  current_version=$(git -C "$hub_root" rev-parse --short HEAD)
+
+  # Up-to-date: no new commits
+  if [[ "$last_version" == "$current_version" ]]; then
+    jq -n --arg from "$last_version" --arg to "$current_version" \
+      '{"status":"up-to-date","from":$from,"to":$to,"commit_count":0,"commits":[],"files_changed":[]}'
+    return 0
+  fi
+
+  # Validate last_version exists in hub repo
+  if ! git -C "$hub_root" rev-parse "$last_version" >/dev/null 2>&1; then
+    die "Last synced version $last_version not found in hub repo. History may have been rewritten."
+  fi
+
+  # Commit log
+  local commits_json="[]"
+  while IFS=$'\t' read -r hash subject; do
+    commits_json=$(echo "$commits_json" | jq --arg h "$hash" --arg s "$subject" \
+      '. + [{"hash": $h, "subject": $s}]')
+  done < <(git -C "$hub_root" log --format="%h%x09%s" "$last_version".."$current_version")
+
+  local commit_count
+  commit_count=$(echo "$commits_json" | jq 'length')
+
+  # Files changed across the range
+  local files_json="[]"
+  while IFS=$'\t' read -r change_type filepath; do
+    files_json=$(echo "$files_json" | jq --arg t "$change_type" --arg f "$filepath" \
+      '. + [{"type": $t, "file": $f}]')
+  done < <(git -C "$hub_root" diff --name-status "$last_version".."$current_version")
+
+  jq -n --arg from "$last_version" --arg to "$current_version" \
+    --argjson count "$commit_count" \
+    --argjson commits "$commits_json" --argjson files "$files_json" \
+    '{"status":"behind","from":$from,"to":$to,"commit_count":$count,"commits":$commits,"files_changed":$files}'
 }
 
 cmd_diff() {
@@ -1878,6 +1927,7 @@ case "${1:-}" in
   # --- Atomic commands (building blocks) ---
   init)             shift; cmd_init "$@" ;;
   status)           shift; cmd_status "$@" ;;
+  changelog)        cmd_changelog ;;
   diff)             shift; cmd_diff "${1:-}" ;;
   hash)             shift; cmd_hash "$@" ;;
   lock-get)         shift; cmd_lock_get "$@" ;;
@@ -1941,6 +1991,7 @@ case "${1:-}" in
     echo "Atomic commands (building blocks — prefer compound commands):"
     echo "  init [hub-path]                  Generate lockfile from current state"
     echo "  status                                Show file provenance and sync state"
+    echo "  changelog                             List hub commits since last sync (JSON)"
     echo "  diff [file]                           Show diff between local and hub"
     echo "  hash <file>                           Compute sha256 of a file"
     echo "  lock-get <file>                       Read a lockfile entry"

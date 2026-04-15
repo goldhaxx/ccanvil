@@ -1,19 +1,18 @@
----
-feature_id: workflow-budget-trim
-status: Ready
-created: 1776364800
-type: chore
----
+# Feature: workflow.md Budget Trim
 
-# workflow.md Budget Trim
+> Feature: workflow-budget-trim
+> Created: 1776364800
+> Status: Ready
+
+## Summary
+
+Compress workflow.md from 102 lines (20.9% of context budget) to under 40 lines (<9% budget) by removing sections redundant with other always-loaded files and compressing verbose sections.
 
 ## Problem
 
 `workflow.md` is 102 lines and 1673 tokens — 20.9% of the 8000-token context budget. The rule-file max is 40 lines. It is the single largest always-loaded file, consuming attention budget on every turn.
 
 ## Analysis
-
-Sections and their line counts:
 
 | Section | Lines | Redundancy |
 |---------|-------|------------|

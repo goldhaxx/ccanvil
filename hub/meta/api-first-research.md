@@ -110,7 +110,9 @@ Test cases should cover:
 | Project | Stack | API | Hook | Status |
 |---------|-------|-----|------|--------|
 | taxes | FastAPI + SQLite | `src/app.py` | `.claude/hooks/protect-db.sh` | Production, 24-case test suite |
-| fieldnation-toolbox | FastAPI + SQLite | (adapted from taxes) | **Missing — needs protect-db.sh** | At risk |
+| fieldnation-toolbox | FastAPI + SQLite | (adapted from taxes pre-guardrails) | **Missing — needs protect-db.sh** | At risk — agent already running direct SQL mutations |
+
+**fieldnation-toolbox context:** This project adopted the FastAPI/SQLite stack by having Claude review the taxes project directly, but this happened before protect-db.sh and the API-first CLAUDE.md rules were added. The agent in that project is already executing direct SQL mutations against the database with no gating. This is the canonical example of why tech stack distribution needs to exist — ad-hoc stack borrowing creates drift when the source project evolves its guardrails.
 
 ## Sources
 

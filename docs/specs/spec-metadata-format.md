@@ -2,7 +2,7 @@
 
 > Feature: spec-metadata-format
 > Created: 1776276101
-> Status: In Progress
+> Status: Complete
 
 ## Summary
 

@@ -121,6 +121,96 @@ timestamp() {
   date +%s
 }
 
+# UUID v4 regex (lowercase)
+UUID_V4_REGEX='^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$'
+
+generate_uuid() {
+  if command -v uuidgen >/dev/null 2>&1; then
+    uuidgen | tr '[:upper:]' '[:lower:]'
+  elif command -v python3 >/dev/null 2>&1; then
+    python3 -c 'import uuid; print(uuid.uuid4())'
+  else
+    die "No UUID generator available. Install uuidgen or python3."
+  fi
+}
+
+validate_uuid() {
+  local uuid="$1"
+  [[ "$uuid" =~ $UUID_V4_REGEX ]]
+}
+
+normalize_path() {
+  # Convert absolute path to ~-form if under $HOME
+  local path="$1"
+  echo "${path/#$HOME/~}"
+}
+
+expand_path() {
+  # Expand ~-form path to absolute using current $HOME
+  local path="$1"
+  echo "${path/#\~/$HOME}"
+}
+
+# Get or create node UUID. Canonical source: .claude/ccanvil.json.
+# Mirrors to .ccanvil/ccanvil.lock if lockfile exists.
+get_or_create_node_uuid() {
+  local ccanvil_json=".claude/ccanvil.json"
+  local existing=""
+
+  # Check canonical source first
+  if [[ -f "$ccanvil_json" ]]; then
+    existing=$(jq -r '.node_uuid // empty' "$ccanvil_json" 2>/dev/null || true)
+    if [[ -n "$existing" ]]; then
+      validate_uuid "$existing" || die "Invalid UUID in $ccanvil_json: $existing"
+      echo "$existing"
+      return 0
+    fi
+  fi
+
+  # Fall back to lockfile
+  if [[ -f "$LOCKFILE" ]]; then
+    existing=$(jq -r '.node_uuid // empty' "$LOCKFILE" 2>/dev/null || true)
+    if [[ -n "$existing" ]]; then
+      validate_uuid "$existing" || die "Invalid UUID in $LOCKFILE: $existing"
+      echo "$existing"
+      return 0
+    fi
+  fi
+
+  # Generate new
+  local new_uuid
+  new_uuid=$(generate_uuid)
+  validate_uuid "$new_uuid" || die "Generated invalid UUID: $new_uuid"
+  echo "$new_uuid"
+}
+
+# Write UUID to both canonical (.claude/ccanvil.json) and mirror (lockfile).
+persist_node_uuid() {
+  local uuid="$1"
+  validate_uuid "$uuid" || die "Cannot persist invalid UUID: $uuid"
+
+  # Canonical: .claude/ccanvil.json
+  local ccanvil_json=".claude/ccanvil.json"
+  mkdir -p "$(dirname "$ccanvil_json")"
+  if [[ ! -f "$ccanvil_json" ]]; then
+    echo '{}' > "$ccanvil_json"
+  fi
+  local tmp
+  tmp=$(mktemp)
+  jq --arg u "$uuid" '.node_uuid = $u' "$ccanvil_json" > "$tmp" && mv "$tmp" "$ccanvil_json"
+
+  # Mirror: lockfile (if it exists)
+  if [[ -f "$LOCKFILE" ]]; then
+    tmp=$(mktemp)
+    jq --arg u "$uuid" '.node_uuid = $u' "$LOCKFILE" > "$tmp"
+    if [[ -s "$tmp" ]] && jq empty "$tmp" 2>/dev/null; then
+      mv "$tmp" "$LOCKFILE"
+    else
+      rm -f "$tmp"
+    fi
+  fi
+}
+
 
 
 get_sync_field() {
@@ -256,6 +346,11 @@ cmd_init() {
   echo "  Hub: $display_path @ $hub_version"
   echo "  Total files: $total"
   echo "  Clean: $clean | Modified: $modified | Local: $local_only | Hub-only: $hub_only"
+
+  # Ensure node UUID exists and is mirrored in both lockfile and ccanvil.json
+  local node_uuid
+  node_uuid=$(get_or_create_node_uuid)
+  persist_node_uuid "$node_uuid"
 
   # Auto-register with the hub
   cmd_register 2>/dev/null || echo "WARNING: Hub registration failed (non-fatal)"

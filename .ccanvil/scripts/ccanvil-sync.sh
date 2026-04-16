@@ -264,8 +264,31 @@ cmd_init() {
 cmd_init_preflight() {
   local hub_path="${1:?Usage: ccanvil-sync.sh init-preflight <hub-path>}"
   hub_path="${hub_path/#\~/$HOME}"
+  shift
 
   [[ -d "$hub_path" ]] || die "Hub not found at: $hub_path"
+
+  # Parse --stack flags
+  local stack_ids=()
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --stack) shift; stack_ids+=("${1:?--stack requires an argument}"); shift ;;
+      *) shift ;;
+    esac
+  done
+
+  # Also read stacks from ccanvil.json if present
+  if [[ -f ".claude/ccanvil.json" ]]; then
+    while IFS= read -r sid; do
+      [[ -z "$sid" ]] && continue
+      # Avoid duplicates
+      local already=false
+      for existing in "${stack_ids[@]+"${stack_ids[@]}"}"; do
+        [[ "$existing" == "$sid" ]] && already=true && break
+      done
+      $already || stack_ids+=("$sid")
+    done < <(jq -r '.stacks[]? // empty' ".claude/ccanvil.json" 2>/dev/null)
+  fi
 
   local dist_root
   dist_root="$hub_path"
@@ -355,6 +378,43 @@ cmd_init_preflight() {
     done < <(scan_tracked_files)
   fi
 
+  # 5. Scan stack profile files (AC-5)
+  for sid in "${stack_ids[@]+"${stack_ids[@]}"}"; do
+    local stack_manifest="$dist_root/hub/stacks/$sid/manifest.json"
+    [[ -f "$stack_manifest" ]] || continue
+    local stack_dir="$dist_root/hub/stacks/$sid"
+    local fc
+    fc=$(jq '.files | length' "$stack_manifest")
+    for i in $(seq 0 $((fc - 1))); do
+      local src tgt
+      src=$(jq -r ".files[$i].source" "$stack_manifest")
+      tgt=$(jq -r ".files[$i].target" "$stack_manifest")
+      # Skip if already seen
+      local already_seen=false
+      for s in "${seen_files[@]+"${seen_files[@]}"}"; do
+        [[ "$s" == "$tgt" ]] && already_seen=true && break
+      done
+      $already_seen && continue
+
+      if [[ -f "$tgt" ]]; then
+        local hub_h local_h
+        hub_h=$(file_hash "$stack_dir/$src")
+        local_h=$(file_hash "$tgt")
+        if [[ "$hub_h" == "$local_h" ]]; then
+          plan=$(echo "$plan" | jq --arg f "$tgt" --arg s "stack:$sid" \
+            '. + [{"file": $f, "source": $s, "recommended_action": "skip", "reason": "Already matches stack"}]')
+        else
+          plan=$(echo "$plan" | jq --arg f "$tgt" --arg s "stack:$sid" \
+            '. + [{"file": $f, "source": $s, "recommended_action": "review", "reason": "Local differs from stack; needs user decision"}]')
+        fi
+      else
+        plan=$(echo "$plan" | jq --arg f "$tgt" --arg s "stack:$sid" \
+          '. + [{"file": $f, "source": $s, "recommended_action": "copy", "reason": "New file from stack"}]')
+      fi
+      seen_files+=("$tgt")
+    done
+  done
+
   # Compute summary
   local conflicts auto total
   conflicts=$(echo "$plan" | jq '[.[] | select(.recommended_action == "review")] | length')
@@ -393,21 +453,38 @@ cmd_init_apply() {
 
   local i=0
   while [[ $i -lt $entry_count ]]; do
-    local file action
+    local file action source
     file=$(jq -r "$plan_expr | .[$i].file" "$plan_file")
     action=$(jq -r "$plan_expr | .[$i].recommended_action" "$plan_file")
+    source=$(jq -r "$plan_expr | .[$i].source // empty" "$plan_file")
 
     # Resolve hub source file path
-    # Check GitHub template mappings first, then tracked patterns
     local hub_file=""
-    for mapping in "${INIT_GITHUB_TEMPLATES[@]}"; do
-      local tpl_src="${mapping%%:*}"
-      local tpl_dst="${mapping#*:}"
-      if [[ "$tpl_dst" == "$file" ]]; then
-        hub_file="$github_tpl_root/$tpl_src"
-        break
+
+    # Check stack source first (AC-6)
+    if [[ "$source" == stack:* ]]; then
+      local stack_id="${source#stack:}"
+      local stack_manifest="$dist_root/hub/stacks/$stack_id/manifest.json"
+      if [[ -f "$stack_manifest" ]]; then
+        local stack_src
+        stack_src=$(jq -r --arg t "$file" '.files[] | select(.target == $t) | .source' "$stack_manifest")
+        if [[ -n "$stack_src" ]]; then
+          hub_file="$dist_root/hub/stacks/$stack_id/$stack_src"
+        fi
       fi
-    done
+    fi
+
+    # Check GitHub template mappings
+    if [[ -z "$hub_file" ]]; then
+      for mapping in "${INIT_GITHUB_TEMPLATES[@]}"; do
+        local tpl_src="${mapping%%:*}"
+        local tpl_dst="${mapping#*:}"
+        if [[ "$tpl_dst" == "$file" ]]; then
+          hub_file="$github_tpl_root/$tpl_src"
+          break
+        fi
+      done
+    fi
     if [[ -z "$hub_file" && -f "$dist_root/$file" ]]; then
       hub_file="$dist_root/$file"
     fi

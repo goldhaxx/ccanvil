@@ -340,3 +340,74 @@ teardown() {
   current_hash=$(shasum -a 256 "$NODE/.claude/hooks/protect-db.sh" | awk '{print $1}')
   [ "$current_hash" = "$custom_hash" ]
 }
+
+
+# =========================================================================
+# Step 7: init-preflight with --stack flag (AC-5)
+# =========================================================================
+
+@test "init-preflight --stack: includes stack files in plan" {
+  # Create a fresh target directory (not yet initialized)
+  local TARGET
+  TARGET=$(mktemp -d)
+  mkdir -p "$TARGET/.claude"
+
+  cd "$TARGET"
+  local result
+  result=$(bash "$HUB/.ccanvil/scripts/ccanvil-sync.sh" init-preflight "$HUB" --stack fastapi-sqlite)
+
+  # Should include protect-db.sh in the plan
+  echo "$result" | jq -e '.plan[] | select(.file == ".claude/hooks/protect-db.sh")'
+}
+
+@test "init-preflight --stack: stack files have stack source" {
+  local TARGET
+  TARGET=$(mktemp -d)
+  mkdir -p "$TARGET/.claude"
+
+  cd "$TARGET"
+  local result
+  result=$(bash "$HUB/.ccanvil/scripts/ccanvil-sync.sh" init-preflight "$HUB" --stack fastapi-sqlite)
+
+  local source
+  source=$(echo "$result" | jq -r '.plan[] | select(.file == ".claude/hooks/protect-db.sh") | .source')
+  [ "$source" = "stack:fastapi-sqlite" ]
+}
+
+@test "init-preflight: reads stacks from ccanvil.json" {
+  local TARGET
+  TARGET=$(mktemp -d)
+  mkdir -p "$TARGET/.claude"
+  echo '{"stacks":["fastapi-sqlite"]}' > "$TARGET/.claude/ccanvil.json"
+
+  cd "$TARGET"
+  local result
+  result=$(bash "$HUB/.ccanvil/scripts/ccanvil-sync.sh" init-preflight "$HUB")
+
+  # Should include protect-db.sh without --stack flag
+  echo "$result" | jq -e '.plan[] | select(.file == ".claude/hooks/protect-db.sh")'
+}
+
+
+# =========================================================================
+# Step 8: init-apply with stack entries (AC-6)
+# =========================================================================
+
+@test "init-apply: provisions stack files from preflight plan" {
+  local TARGET
+  TARGET=$(mktemp -d)
+  mkdir -p "$TARGET/.claude"
+
+  cd "$TARGET"
+
+  # Run preflight with stack flag
+  local plan_file
+  plan_file=$(mktemp)
+  bash "$HUB/.ccanvil/scripts/ccanvil-sync.sh" init-preflight "$HUB" --stack fastapi-sqlite > "$plan_file"
+
+  # Run init-apply
+  bash "$HUB/.ccanvil/scripts/ccanvil-sync.sh" init-apply "$HUB" "$plan_file"
+
+  # Stack file should be provisioned
+  [ -f "$TARGET/.claude/hooks/protect-db.sh" ]
+}

@@ -53,12 +53,12 @@ teardown() {
   [[ "$uuid" =~ $UUID_V4_REGEX ]]
 }
 
-@test "init: writes UUID to .claude/ccanvil.json" {
+@test "init: writes UUID to .claude/ccanvil.local.json" {
   cd "$NODE"
   bash "$NODE/.ccanvil/scripts/ccanvil-sync.sh" init "$HUB"
 
   local uuid
-  uuid=$(jq -r '.node_uuid // empty' "$NODE/.claude/ccanvil.json")
+  uuid=$(jq -r '.node_uuid // empty' "$NODE/.claude/ccanvil.local.json")
   [ -n "$uuid" ]
   [[ "$uuid" =~ $UUID_V4_REGEX ]]
 }
@@ -69,7 +69,7 @@ teardown() {
 
   local lock_uuid json_uuid
   lock_uuid=$(jq -r '.node_uuid' "$NODE/.ccanvil/ccanvil.lock")
-  json_uuid=$(jq -r '.node_uuid' "$NODE/.claude/ccanvil.json")
+  json_uuid=$(jq -r '.node_uuid' "$NODE/.claude/ccanvil.local.json")
   [ "$lock_uuid" = "$json_uuid" ]
 }
 
@@ -78,7 +78,7 @@ teardown() {
   bash "$NODE/.ccanvil/scripts/ccanvil-sync.sh" init "$HUB"
 
   local uuid
-  uuid=$(jq -r '.node_uuid' "$NODE/.claude/ccanvil.json")
+  uuid=$(jq -r '.node_uuid' "$NODE/.claude/ccanvil.local.json")
   [ "$uuid" = "$(echo "$uuid" | tr '[:upper:]' '[:lower:]')" ]
 }
 
@@ -86,12 +86,12 @@ teardown() {
   cd "$NODE"
   bash "$NODE/.ccanvil/scripts/ccanvil-sync.sh" init "$HUB"
   local first
-  first=$(jq -r '.node_uuid' "$NODE/.claude/ccanvil.json")
+  first=$(jq -r '.node_uuid' "$NODE/.claude/ccanvil.local.json")
 
   # Re-init — should NOT regenerate
   bash "$NODE/.ccanvil/scripts/ccanvil-sync.sh" init "$HUB"
   local second
-  second=$(jq -r '.node_uuid' "$NODE/.claude/ccanvil.json")
+  second=$(jq -r '.node_uuid' "$NODE/.claude/ccanvil.local.json")
 
   [ "$first" = "$second" ]
 }
@@ -99,7 +99,7 @@ teardown() {
 @test "init: fails on malformed UUID in ccanvil.json" {
   cd "$NODE"
   mkdir -p "$NODE/.claude"
-  echo '{"node_uuid":"not-a-valid-uuid"}' > "$NODE/.claude/ccanvil.json"
+  echo '{"node_uuid":"not-a-valid-uuid"}' > "$NODE/.claude/ccanvil.local.json"
 
   run bash "$NODE/.ccanvil/scripts/ccanvil-sync.sh" init "$HUB"
   [ "$status" -ne 0 ]
@@ -115,7 +115,7 @@ teardown() {
   cd "$NODE"
   bash "$NODE/.ccanvil/scripts/ccanvil-sync.sh" init "$HUB"
   local original
-  original=$(jq -r '.node_uuid' "$NODE/.claude/ccanvil.json")
+  original=$(jq -r '.node_uuid' "$NODE/.claude/ccanvil.local.json")
 
   # Delete lockfile, re-init
   rm -f "$NODE/.ccanvil/ccanvil.lock"
@@ -162,7 +162,7 @@ teardown() {
   bash "$NODE/.ccanvil/scripts/ccanvil-sync.sh" init "$HUB"
 
   local uuid
-  uuid=$(jq -r '.node_uuid' "$NODE/.claude/ccanvil.json")
+  uuid=$(jq -r '.node_uuid' "$NODE/.claude/ccanvil.local.json")
 
   # Registry should have entry keyed by UUID
   jq -e --arg u "$uuid" '.nodes[$u]' "$HUB/.ccanvil/registry.json"
@@ -173,7 +173,7 @@ teardown() {
   bash "$NODE/.ccanvil/scripts/ccanvil-sync.sh" init "$HUB"
 
   local uuid path
-  uuid=$(jq -r '.node_uuid' "$NODE/.claude/ccanvil.json")
+  uuid=$(jq -r '.node_uuid' "$NODE/.claude/ccanvil.local.json")
   path=$(jq -r --arg u "$uuid" '.nodes[$u].path' "$HUB/.ccanvil/registry.json")
 
   # Path should not contain absolute $HOME (unless NODE is outside $HOME)
@@ -189,7 +189,7 @@ teardown() {
   bash "$NODE/.ccanvil/scripts/ccanvil-sync.sh" init "$HUB"
 
   local uuid
-  uuid=$(jq -r '.node_uuid' "$NODE/.claude/ccanvil.json")
+  uuid=$(jq -r '.node_uuid' "$NODE/.claude/ccanvil.local.json")
 
   jq -e --arg u "$uuid" '.nodes[$u].name' "$HUB/.ccanvil/registry.json"
   jq -e --arg u "$uuid" '.nodes[$u].registered_at' "$HUB/.ccanvil/registry.json"
@@ -200,7 +200,7 @@ teardown() {
   bash "$NODE/.ccanvil/scripts/ccanvil-sync.sh" init "$HUB"
 
   local uuid
-  uuid=$(jq -r '.node_uuid' "$NODE/.claude/ccanvil.json")
+  uuid=$(jq -r '.node_uuid' "$NODE/.claude/ccanvil.local.json")
 
   # Call register again
   bash "$NODE/.ccanvil/scripts/ccanvil-sync.sh" register
@@ -221,7 +221,7 @@ teardown() {
   bash "$NODE/.ccanvil/scripts/ccanvil-sync.sh" init "$HUB"
 
   local uuid
-  uuid=$(jq -r '.node_uuid' "$NODE/.claude/ccanvil.json")
+  uuid=$(jq -r '.node_uuid' "$NODE/.claude/ccanvil.local.json")
 
   # Simulate move: copy node to new location, register from there
   local MOVED
@@ -250,7 +250,7 @@ teardown() {
   bash "$NODE/.ccanvil/scripts/ccanvil-sync.sh" init "$HUB"
 
   local uuid
-  uuid=$(jq -r '.node_uuid' "$NODE/.claude/ccanvil.json")
+  uuid=$(jq -r '.node_uuid' "$NODE/.claude/ccanvil.local.json")
 
   local output
   output=$(bash "$NODE/.ccanvil/scripts/ccanvil-sync.sh" registry)
@@ -267,7 +267,7 @@ teardown() {
   bash "$NODE/.ccanvil/scripts/ccanvil-sync.sh" init "$HUB"
 
   local uuid
-  uuid=$(jq -r '.node_uuid' "$NODE/.claude/ccanvil.json")
+  uuid=$(jq -r '.node_uuid' "$NODE/.claude/ccanvil.local.json")
 
   # Seed legacy path-keyed entry by overwriting registry
   local registry="$HUB/.ccanvil/registry.json"
@@ -296,7 +296,7 @@ teardown() {
   bash "$NODE/.ccanvil/scripts/ccanvil-sync.sh" init "$HUB"
 
   local uuid
-  uuid=$(jq -r '.node_uuid' "$NODE/.claude/ccanvil.json")
+  uuid=$(jq -r '.node_uuid' "$NODE/.claude/ccanvil.local.json")
 
   git -C "$NODE" add -A
   git -C "$NODE" commit -q -m "ccanvil init" 2>/dev/null || true
@@ -325,7 +325,7 @@ teardown() {
   bash "$NODE/.ccanvil/scripts/ccanvil-sync.sh" init "$HUB"
 
   local uuid
-  uuid=$(jq -r '.node_uuid' "$NODE/.claude/ccanvil.json")
+  uuid=$(jq -r '.node_uuid' "$NODE/.claude/ccanvil.local.json")
 
   git -C "$NODE" add -A
   git -C "$NODE" commit -q -m "ccanvil init" 2>/dev/null || true

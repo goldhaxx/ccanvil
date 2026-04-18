@@ -64,6 +64,19 @@ ALLOWLIST_FILES=(
   '.bats'                          # Test fixtures contain fake tokens/secrets by design
 )
 
+# Load optional project-local allowlist. One substring pattern per line.
+# Lines starting with '#' and blank lines are ignored; whitespace is trimmed.
+# Semantics match the hardcoded ALLOWLIST_FILES above (substring match on file path).
+PROJECT_ALLOWLIST_FILE=".security-audit-allowlist"
+if [[ -f "$PROJECT_ALLOWLIST_FILE" ]]; then
+  while IFS= read -r raw_line || [[ -n "$raw_line" ]]; do
+    trimmed="${raw_line#"${raw_line%%[![:space:]]*}"}"
+    trimmed="${trimmed%"${trimmed##*[![:space:]]}"}"
+    [[ -z "$trimmed" || "${trimmed:0:1}" == "#" ]] && continue
+    ALLOWLIST_FILES+=("$trimmed")
+  done < "$PROJECT_ALLOWLIST_FILE"
+fi
+
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------

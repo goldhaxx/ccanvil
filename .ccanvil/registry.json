@@ -32,6 +32,11 @@
       "registered_at": "1776388454",
       "last_synced": "1776391980",
       "last_synced_version": "45a971d"
+    },
+    "4ee230a2-6454-4cbd-bbac-666ff0aac054": {
+      "name": "caffeine-calculator",
+      "path": "~/projects/caffeine-calculator",
+      "registered_at": "1776538476"
     }
   }
 }

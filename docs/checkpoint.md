@@ -1,54 +1,53 @@
 # Checkpoint
 
-> Feature: multi-feature-session (node-uuid-registry → clean-init-commits → global-commands-sync)
-> Last updated: 1776398755
-> Plan hash: n/a (three sequential features, each plan archived on its merged PR)
-> Session objective: ship tech-stack-distribution, then address the registry/init gaps surfaced during rollout, then modernize all downstream nodes — including whoop-toolbox.
+> Feature: session-2026-04-19 (project migration + broadcast conflict resolution)
+> Last updated: 1776657786
+> Plan hash: n/a (maintenance session, no spec)
+> Session objective: register caffeine-calculator (migrating from legacy path), broadcast current hub state, and resolve long-standing taxes conflicts.
 
 ## Accomplished
 
-- **PR #27: tech-stack-distribution** — hub/stacks/<id>/ profile system; `stack-list` + `stack-apply` subcommands; init-preflight/init-apply extended with `--stack` flag; first profile `fastapi-sqlite` with protect-db.sh hook.
-- **PR #28: node-uuid-registry** — stable UUIDs generated at init, stored in `.claude/ccanvil.local.json` (canonical, gitignored) + mirrored in lockfile. Registry keyed by UUID; paths portable (`~`-form). Automatic migration of legacy path-keyed entries; `STALE` detection for missing paths.
-- **PR #29: clean-init-commits** — `cmd_register`, `migrate_registry`, and broadcast batch-update all auto-commit hub registry changes (`chore(registry): ...`). Bootstrap commits in nodes tolerate gitignored lockfiles (skip via `git check-ignore`). Failure-tolerant — hook failures print warnings, don't abort.
-- **PR #30: global-commands-sync** — renamed hub `global-commands/init.md` → `ccanvil-init.md`; new `pull-globals` subcommand propagates hub's `ccanvil-*.md` files to `~/.claude/commands/` with conflict-safe diff reporting + `--force` opt-in. New skill `/ccanvil-pull-globals`. User-owned namespace is sacrosanct.
-- **Registry migrated live** — all 4 nodes converted path→UUID; taxes registered (`24f2fe5a`); all registry mutations committed in hub.
-- **All downstream nodes modernized to hub `45a971d`** — whoop-toolbox, luxlook, fucina synced and carrying the new skill. taxes + fieldnation-toolbox skipped (active work in progress on both).
-- **2 bugs flagged + fixed** — migration couldn't bootstrap ccanvil.local.json in legacy nodes (fixed in `c3617ac`); `~/.claude/commands/init.md` path stale after BTS-67 flatten (motivated PR #30).
+- **caffeine-calculator migrated and registered.** Moved `~/Documents/GitHub/caffeine-calculator` → `~/projects/caffeine-calculator`. Registered in hub registry as UUID `4ee230a2-6454-4cbd-bbac-666ff0aac054`. Synced from lockfile version `3344c69` → current (`8f5ad8c` then `4a2458e`). Accepted 4 new hub files (guard-destructive, guard-force-push, ccanvil-pull-globals skill, spec skill).
+- **Claude Code conversation history preserved across move.** Renamed `~/.claude/projects/-Users-zacharywright-Documents-GitHub-caffeine-calculator` → `-Users-zacharywright-projects-caffeine-calculator` and rewrote embedded `cwd` fields in all `.jsonl` session files via `sed`.
+- **Broadcast hub `4a2458e` to all 6 nodes.** security-audit.sh update propagated to taxes, caffeine-calculator, luxlook, whoop-toolbox, fucina. fieldnation-toolbox was already current.
+- **taxes conflicts resolved.** Accepted 3 new hub files (guards, pull-globals skill), took hub's `.claude/settings.json`, re-applied `fastapi-sqlite` stack to restore `protect-db.sh` hook registration in settings. Stack-sourced `protect-db.sh` marked node-only (workaround — see Context Notes). Committed as `8490cf8`.
+- **Idea captured:** `pull-plan` mis-classifies files with `origin: stack:<id>` as "removed from hub" because it only scans the hub root.
 
 ## Current State
 
 - **Branch:** main
-- **Tests:** 511/511 passing
-- **Uncommitted changes:** none
-- **Build status:** clean; hub repo tracking origin/main
+- **Tests:** not run this session (no hub code changes)
+- **Uncommitted changes:** `M docs/ideas.md` (idea captures); this checkpoint write.
+- **Build status:** clean; all 6 downstream nodes synced to hub `4a2458e`, no pending conflicts
 
 ## Blocked On
 
-- **taxes** and **fieldnation-toolbox** still on older hub versions (both have active in-progress work). Next broadcast for each will catch them up once their current branches land.
+- Nothing. `pull-plan` stack-origin bug is deferred to a proper spec; workaround in place.
 
 ## Next Steps
 
-1. **Dark code idea (8ef0)** is still untriaged — run `/idea triage` to evaluate Nate B Jones' Three-Layer Solution for ccanvil integration (spec-driven dev, self-describing systems, comprehension gate). Could influence the module-manifest direction.
-2. **Backlog continuation** — BTS-22 (docs directory strategy), checkpoint evolution (`/compact` + auto-memory may obsolete checkpoint format), BTS-20 (workflow engine).
-3. **Run a broadcast + stack-apply for fieldnation-toolbox** once its WIP lands — that's the urgent API-first case (unguarded SQL mutations).
-4. **Run `/radar`** at next session start for full strategic briefing.
+1. **Triage open ideas** — 2 untriaged (new `/pr`-for-local-repos design question; `pull-plan` stack-origin bug fix). Run `/idea triage` against roadmap.
+2. **Dark code idea (8ef0)** still untriaged from last session — Nate B Jones' Three-Layer Solution evaluation against module-manifest direction.
+3. **Fix `pull-plan` stack-origin classification.** When resolved, the `node-only` workaround on `taxes/.claude/hooks/protect-db.sh` can be reverted — the file should again be tracked with `origin: stack:fastapi-sqlite`.
+4. **Backlog continuation** — BTS-22 (docs directory strategy), checkpoint evolution, BTS-20 (workflow engine).
 
 ## Context Notes
 
-- **Design decision (node_uuid storage):** spec said `.claude/ccanvil.json`; implementation moved to `.claude/ccanvil.local.json`. Reason: `ccanvil.json` is hub-tracked, so adding per-node state to it makes the file always locally-modified, breaking sync. `ccanvil.local.json` was designed for exactly this purpose. PR body documents the deviation.
-- **Design decision (auto-commit hub registry):** uses `ALLOW_MAIN=1` to bypass protect-main hook; legitimate because these are deterministic sync-lifecycle commits. Failure-tolerant (warns + continues).
-- **Known limitation (`pull-globals` requires a lockfile):** can't be run from the hub itself (hub has no self-pointing lockfile). Workaround: run from any node. Not worth fixing now given the niche.
-- **Whoop-toolbox was initialized before PR #28-30 landed.** Broadcast brought it to current state; this validates the UUID migration + clean-init-commits work on a real node that predates both features.
-- **fucina and luxlook were "Already up to date" on the first post-merge broadcast** — UUIDs propagated via the migration-in-broadcast path, not a per-node init re-run.
+- **Legacy project location (`~/Documents/GitHub/`) was outside ccanvil's mental model.** The migration surfaced that `register`'s UUID bootstrap creates `.claude/ccanvil.local.json` as untracked, which blocks the very next broadcast pre-check. Required `ALLOW_MAIN=1 git commit` in the node. Same friction pattern as earlier registration flows.
+- **Stack re-apply was necessary after taking hub's `settings.json`.** Hub settings doesn't (and shouldn't) include stack-specific hook entries. After `take-hub`, run `stack-apply <id>` to restore. Could be automated: `pull-apply` could detect active stacks on the node and auto-reinvoke them.
+- **Workaround for stack-origin bug (taxes `protect-db.sh` → `node-only`).** File is functionally a stack file, but marked node-only to silence broadcast noise. When the `pull-plan` bug is fixed, revert with `ccanvil-sync.sh track .claude/hooks/protect-db.sh` and re-apply the stack so lockfile origin becomes `stack:fastapi-sqlite` again.
+- **Claude Code conversation continuity across project moves is not automatic.** `~/.claude/projects/` is keyed by path-encoded directory name; moving the project strands the history. Worth a future subcommand.
 
 ## Determinism Review
 
-- **operations_reviewed:** ~15 (registry mutations, node file bootstrap, merge/land cycles, cross-node commits)
-- **candidates_found:** 2
+- **operations_reviewed:** ~8 (migration, register, broadcast x2, conflict resolution per-file, jsonl rewrite)
+- **candidates_found:** 3
 
-- **Cross-node commit loops:** Claude ran `for node in whoop-toolbox luxlook fucina; do cd $node && git add ... && git commit ...; done` twice this session (once for UUID bootstrap files, once for the new skill). Should be a broadcast phase or a `ccanvil-sync.sh adopt-new-all <file>` subcommand. Impact: medium — these happen whenever a non-auto-mergeable new file reaches multiple nodes.
+- **Claude-Code history relocation after project move:** Claude ran `mv ~/.claude/projects/<old>` and `find ... -exec sed` to preserve conversation continuity. Should be a script: `ccanvil-sync.sh relocate <new-path>` (invoked from the new location) that renames the `~/.claude/projects/` dir and rewrites `cwd` fields in jsonl. Impact: medium — happens on every project move and users won't remember to do it manually.
 
-- **Post-merge local main reset:** Claude ran `ALLOW_DESTRUCTIVE=1 git reset --hard origin/main` three times (once per PR merge) to reconcile the diverged local main after squash. This is actually what `docs-check.sh land` is for, but `land` refuses to run "when already on main" — so the natural flow of `/pr` → merge → reset gets manual. Should be: `land` handles the on-main case by just resetting to origin/main if we're clean. Impact: medium — happens every PR.
+- **Post-`take-hub` stack re-application:** Claude manually ran `stack-apply fastapi-sqlite` after taking hub's settings.json because the stack's hook entries were wiped. Should be: `pull-apply <file> take-hub` checks lockfile for active stacks on this node and auto-reinvokes `stack-apply` for each. Impact: low-medium — only bites when hub's settings.json changes on a stack-tagged node.
+
+- **Node UUID bootstrap commit during register:** Claude had to manually `ALLOW_MAIN=1 git add/commit` the newly-created `.claude/ccanvil.local.json` in caffeine-calculator before broadcast would proceed. `cmd_register` should commit this file itself (mirror of `commit_hub_file` on the node side). Impact: medium — every first `register` on a gitignore-respecting node hits this.
 
 <!-- NODE-SPECIFIC-START -->
 <!-- Add project-specific content below this line. -->

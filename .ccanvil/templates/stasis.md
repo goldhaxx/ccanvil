@@ -1,10 +1,10 @@
-# Checkpoint
+# Stasis
 
 > Feature: [feature-id]
 > Last updated: [epoch]
 > Plan hash: [hash]
 > Session objective: [what we set out to do]
-<!-- Reminder: if no plan exists yet, run /plan before checkpointing (plan before checkpoint). -->
+<!-- Reminder: if no plan exists yet, run /plan before /stasis (plan before stasis). -->
 
 ## Accomplished
 
@@ -37,6 +37,18 @@
 - **candidates_found:** [count]
 - [For each candidate: **[operation]**: Claude [what happened]. Should be [deterministic replacement]. Impact: [high/medium/low].]
 - [If no candidates: "No candidates this session."]
+
+## Cross-Session Patterns
+
+[Any determinism-review candidates or audit-session findings that also appeared in the previous stasis. Run `docs-check.sh legacy-refs-scan` as part of this check. If no prior stasis exists: "First stasis — no prior state to compare." If no patterns: "No recurring patterns."]
+
+## Security Review
+
+[Run the project's security scan (via `security-audit` skill if present, else static grep for secrets/PII keywords in the session's diff). Report `PASS` or a bullet list of findings.]
+
+## Memory Candidates
+
+[List insights that meet auto-memory criteria — non-obvious feedback, surprising project facts, external references. If none: "No candidates this session."]
 
 <!-- NODE-SPECIFIC-START -->
 <!-- Add project-specific content below this line. -->

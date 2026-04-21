@@ -590,46 +590,46 @@ TEMPLATES="$BATS_TEST_DIRNAME/../../.ccanvil/templates"
   [ "$output" -ge 1 ]
 }
 
-@test "template: checkpoint.md has Feature and Plan hash placeholders" {
-  run grep -c "^> Feature: \[" "$TEMPLATES/checkpoint.md"
+@test "template: stasis.md has Feature and Plan hash placeholders" {
+  run grep -c "^> Feature: \[" "$TEMPLATES/stasis.md"
   [ "$status" -eq 0 ]
   [ "$output" -ge 1 ]
 
-  run grep -c "^> Plan hash: \[" "$TEMPLATES/checkpoint.md"
-  [ "$status" -eq 0 ]
-  [ "$output" -ge 1 ]
-}
-
-@test "template: checkpoint.md uses epoch placeholder for Last updated" {
-  run grep -c "^> Last updated: \[epoch\]" "$TEMPLATES/checkpoint.md"
+  run grep -c "^> Plan hash: \[" "$TEMPLATES/stasis.md"
   [ "$status" -eq 0 ]
   [ "$output" -ge 1 ]
 }
 
-@test "template: checkpoint.md has pre-checkpoint reminder" {
-  run grep -c "plan before checkpoint" "$TEMPLATES/checkpoint.md"
+@test "template: stasis.md uses epoch placeholder for Last updated" {
+  run grep -c "^> Last updated: \[epoch\]" "$TEMPLATES/stasis.md"
+  [ "$status" -eq 0 ]
+  [ "$output" -ge 1 ]
+}
+
+@test "template: stasis.md has pre-stasis reminder" {
+  run grep -c "plan before stasis" "$TEMPLATES/stasis.md"
   [ "$status" -eq 0 ]
   [ "$output" -ge 1 ]
 }
 
 # ===========================================================================
-# Step 1: Checkpoint template — Determinism Review section (AC-1)
+# Stasis template — Determinism Review section
 # ===========================================================================
 
-@test "template: checkpoint.md has Determinism Review section" {
-  run grep -c "^## Determinism Review" "$TEMPLATES/checkpoint.md"
+@test "template: stasis.md has Determinism Review section" {
+  run grep -c "^## Determinism Review" "$TEMPLATES/stasis.md"
   [ "$status" -eq 0 ]
   [ "$output" -ge 1 ]
 }
 
-@test "template: checkpoint.md has operations_reviewed field" {
-  run grep -c "operations_reviewed" "$TEMPLATES/checkpoint.md"
+@test "template: stasis.md has operations_reviewed field" {
+  run grep -c "operations_reviewed" "$TEMPLATES/stasis.md"
   [ "$status" -eq 0 ]
   [ "$output" -ge 1 ]
 }
 
-@test "template: checkpoint.md has candidates_found field" {
-  run grep -c "candidates_found" "$TEMPLATES/checkpoint.md"
+@test "template: stasis.md has candidates_found field" {
+  run grep -c "candidates_found" "$TEMPLATES/stasis.md"
   [ "$status" -eq 0 ]
   [ "$output" -ge 1 ]
 }

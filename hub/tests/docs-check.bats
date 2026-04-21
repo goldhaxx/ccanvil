@@ -68,7 +68,7 @@ EOF
 }
 
 # ---------------------------------------------------------------------------
-# Helper: create a checkpoint.md with lifecycle metadata
+# Helper: create a stasis.md with lifecycle metadata
 # ---------------------------------------------------------------------------
 create_stasis() {
   local feature_id="${1:-my-feature}"
@@ -130,7 +130,7 @@ EOF
   [ "$plan_spec_hash" = "abcd1234" ]
 }
 
-@test "status: extracts feature_id and plan_hash from checkpoint.md" {
+@test "status: extracts feature_id and plan_hash from stasis.md" {
   create_stasis "my-feature" "1742861000" "efgh5678"
   run bash "$SCRIPT" status "$DOCS"
   [ "$status" -eq 0 ]
@@ -317,7 +317,7 @@ create_linked_docs() {
 
   create_plan "my-feature" "1742860900" "$spec_hash"
 
-  # Compute plan's actual content hash for the checkpoint
+  # Compute plan's actual content hash for the stasis
   local plan_hash
   plan_hash=$(bash "$SCRIPT" status "$DOCS" | jq -r '.plan.content_hash')
 
@@ -347,7 +347,7 @@ create_linked_docs() {
   [ "$result" = "stale-plan" ]
 }
 
-@test "validate: stale-stasis when plan body changed after checkpoint" {
+@test "validate: stale-stasis when plan body changed after stasis" {
   create_linked_docs
 
   # Modify plan body (not metadata)
@@ -382,7 +382,7 @@ create_linked_docs() {
   run bash "$SCRIPT" validate "$DOCS"
   [ "$status" -eq 0 ]
 
-  # stale-plan is more actionable (fix plan first, then checkpoint follows)
+  # stale-plan is more actionable (fix plan first, then stasis follows)
   result=$(echo "$output" | jq -r '.result')
   [ "$result" = "stale-plan" ]
 }
@@ -405,7 +405,7 @@ create_linked_docs() {
 # Step 4: validate — missing docs and unlinked metadata
 # ===========================================================================
 
-@test "validate: only spec exists — reports plan and checkpoint missing" {
+@test "validate: only spec exists — reports plan and stasis missing" {
   create_spec "my-feature" "1742860800" "In Progress"
 
   run bash "$SCRIPT" validate "$DOCS"
@@ -448,7 +448,7 @@ EOF
   [[ "$details" == *"unlinked"* ]] || [ "$result" = "unlinked" ]
 }
 
-@test "validate: spec + plan exist, checkpoint missing — still validates hashes" {
+@test "validate: spec + plan exist, stasis missing — still validates hashes" {
   create_spec "my-feature" "1742860800" "In Progress"
   local spec_hash
   spec_hash=$(bash "$SCRIPT" status "$DOCS" | jq -r '.spec.content_hash')
@@ -460,7 +460,7 @@ EOF
   result=$(echo "$output" | jq -r '.result')
   details=$(echo "$output" | jq -r '.details | join(", ")')
 
-  # Hashes match so far, but checkpoint is missing
+  # Hashes match so far, but stasis is missing
   [[ "$details" == *"stasis.md missing"* ]]
   # Result should be aligned (what we can check is aligned)
   [ "$result" = "aligned" ]
@@ -488,7 +488,7 @@ EOF
   [[ "$action" == *"/plan"* ]]
 }
 
-@test "recommend: spec + plan linked, no checkpoint → ready to build" {
+@test "recommend: spec + plan linked, no stasis → ready to build" {
   create_spec "my-feature" "1742860800" "In Progress"
   local spec_hash
   spec_hash=$(bash "$SCRIPT" status "$DOCS" | jq -r '.spec.content_hash')
@@ -517,7 +517,7 @@ EOF
   [[ "$action" == *"/plan"* ]]
 }
 
-@test "recommend: all aligned with checkpoint → /compact" {
+@test "recommend: all aligned with stasis → /compact" {
   create_linked_docs
 
   run bash "$SCRIPT" recommend "$DOCS"
@@ -638,8 +638,8 @@ TEMPLATES="$BATS_TEST_DIRNAME/../../.ccanvil/templates"
 # Step 2: validate — missing-determinism-review (AC-4)
 # ===========================================================================
 
-@test "validate: missing-determinism-review when checkpoint has no review section" {
-  # Create linked docs, then replace checkpoint without review section
+@test "validate: missing-determinism-review when stasis has no review section" {
+  # Create linked docs, then replace stasis without review section
   create_linked_docs
   local plan_hash
   plan_hash=$(bash "$SCRIPT" status "$DOCS" | jq -r '.plan.content_hash')
@@ -666,7 +666,7 @@ EOF
   [ "$result" = "missing-determinism-review" ]
 }
 
-@test "validate: aligned when checkpoint has Determinism Review section" {
+@test "validate: aligned when stasis has Determinism Review section" {
   create_linked_docs
 
   run bash "$SCRIPT" validate "$DOCS"
@@ -677,7 +677,7 @@ EOF
 }
 
 @test "validate: missing-determinism-review when section exists but is empty" {
-  # Create linked docs, then replace checkpoint with empty review section
+  # Create linked docs, then replace stasis with empty review section
   create_linked_docs
   local plan_hash
   plan_hash=$(bash "$SCRIPT" status "$DOCS" | jq -r '.plan.content_hash')
@@ -704,7 +704,7 @@ EOF
 }
 
 @test "validate: missing-determinism-review has detail message" {
-  # Create linked docs, then replace checkpoint without review section
+  # Create linked docs, then replace stasis without review section
   create_linked_docs
   local plan_hash
   plan_hash=$(bash "$SCRIPT" status "$DOCS" | jq -r '.plan.content_hash')
@@ -1020,7 +1020,7 @@ SCRIPT
 }
 
 # ===========================================================================
-# Step 7: Workflow rule — checkpoint flow and checklist (AC-2, AC-3)
+# Workflow rule — stasis flow and checklist
 # ===========================================================================
 
 RULES="$BATS_TEST_DIRNAME/../../.claude/rules"
@@ -1067,7 +1067,7 @@ RULES="$BATS_TEST_DIRNAME/../../.claude/rules"
 }
 
 # ===========================================================================
-# /recall skill integration (was /catchup pre-stasis-recall)
+# /recall skill integration
 # ===========================================================================
 
 SKILLS="$BATS_TEST_DIRNAME/../../.claude/skills"

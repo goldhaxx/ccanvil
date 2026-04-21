@@ -321,3 +321,41 @@ OPERATIONS="$REPO_ROOT/.ccanvil/scripts/operations.sh"
   # Skill file describes stopping if validate returns stale-plan/mismatched/etc.
   grep -qE 'stale-plan|mismatched|non-aligned|not aligned' "$REPO_ROOT/.claude/skills/stasis/SKILL.md"
 }
+
+# --- Step 13: AC-29 comprehensive grep guard ---
+
+@test "AC-29 grep guard: no stray checkpoint/catchup references outside allowlist" {
+  local allowlist="$REPO_ROOT/hub/tests/legacy-refs-allowlist.txt"
+  [ -f "$allowlist" ]
+
+  # Collect all hits via grep -rn across shipping content.
+  # Exclude .git, node_modules, dist, generated, and common binary paths.
+  local hits
+  hits=$(cd "$REPO_ROOT" && grep -rnE \
+    --exclude-dir=.git \
+    --exclude-dir=node_modules \
+    --exclude-dir=dist \
+    --exclude-dir=generated \
+    --exclude-dir=.claude/worktrees \
+    'checkpoint|catchup' \
+    .claude .ccanvil hub docs README.md CLAUDE.md 2>/dev/null \
+    | sed 's|^\./||' || true)
+
+  if [[ -z "$hits" ]]; then
+    return 0
+  fi
+
+  # Build combined regex from allowlist (strip comments + blanks).
+  local pattern
+  pattern=$(grep -vE '^\s*(#|$)' "$allowlist" | tr '\n' '|' | sed 's/|$//')
+
+  # Lines that do NOT match any allowlist entry are failures.
+  local unexpected
+  unexpected=$(echo "$hits" | grep -vE "$pattern" || true)
+
+  if [[ -n "$unexpected" ]]; then
+    echo "Unexpected legacy checkpoint/catchup references:" >&2
+    echo "$unexpected" >&2
+    return 1
+  fi
+}

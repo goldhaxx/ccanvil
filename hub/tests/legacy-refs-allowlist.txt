@@ -1,0 +1,52 @@
+# Allowlist for AC-29 grep guard.
+#
+# Extended-regex patterns matched against "path:line:content" strings from
+# `grep -rn`. Lines starting with # are comments.
+#
+# Add here only when legacy strings are INTENTIONALLY retained — e.g., the
+# implementations that detect/remove them, tests that exercise migration,
+# or historical archival content.
+
+# --- Historical / archival content (never rewritten in place) ---
+^\.ccanvil/guide/foundations\.md:
+^hub/research/
+^hub/specs/
+^docs/specs/
+^docs/ideas\.md:
+
+# --- Node-local, per-user settings (not shipped) ---
+^\.claude/settings\.local\.json:
+^\.claude/ccanvil\.local\.json:
+
+# --- Tests that exercise the legacy vocabulary ---
+# The scanner, migration, and allowlist tests contain the strings by design.
+^hub/tests/stasis-recall\.bats:
+^hub/tests/stasis-migration\.bats:
+^hub/tests/legacy-refs-scan\.bats:
+^hub/tests/legacy-refs-allowlist\.txt:
+# ccanvil-sync.bats has a pre-existing fixture using `catchup.md` as an
+# arbitrary hub-owned command filename; the tests aren't catchup-specific.
+^hub/tests/ccanvil-sync\.bats:
+
+# --- Scanner implementation (docs-check.sh legacy-refs-scan) ---
+# The function's docblock + regex pattern contain the legacy strings by
+# design — that's what the scanner detects in downstream projects.
+^\.ccanvil/scripts/docs-check\.sh:12[5-9][0-9]:
+^\.ccanvil/scripts/docs-check\.sh:13[0-4][0-9]:
+
+# --- Migration implementation (ccanvil-sync.sh migrate-stasis-artifact) ---
+# The function and its broadcast hook deliberately contain the legacy strings.
+^\.ccanvil/scripts/ccanvil-sync\.sh:20[7-9][0-9]:
+^\.ccanvil/scripts/ccanvil-sync\.sh:21[0-4][0-9]:
+^\.ccanvil/scripts/ccanvil-sync\.sh:23[0-4][0-9]:
+
+# --- Documentation OF the migration / scanner features ---
+# command-reference describes what legacy-refs-scan detects.
+^\.ccanvil/guide/command-reference\.md:14[0-9]:
+# session-management describes the one-time migration.
+^\.ccanvil/guide/session-management\.md:(83|84|85|86):
+
+# --- This branch's live feature docs (removed at `complete`) ---
+^docs/spec\.md:
+^docs/plan\.md:
+^docs/stasis\.md:

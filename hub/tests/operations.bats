@@ -422,7 +422,7 @@ JSON
 }
 
 # =========================================================================
-# Wire /recall skill (was /catchup pre-stasis-recall)
+# Wire /recall skill
 # =========================================================================
 
 @test "recall SKILL.md references operations.sh resolve backlog.list" {

@@ -22,12 +22,12 @@ Autonomy & Friction Reduction — remove the friction between intent and executi
 ## Up Next
 
 1. **Tech stack distribution** — distribute tech stack profiles (hooks, rules, CLAUDE.md sections) from hub to nodes. Init-time provisioning + patch-time application. First profile: FastAPI/SQLite with protect-db.sh and API-first rules. Spec written, ready to activate.
-2. **Checkpoint evolution** — evaluate whether checkpoint is still needed given `/compact`, `/catchup`, and auto-memory; may evolve into decision log or be retired
+2. **Stasis/Recall** (shipped in BTS-75) — end-of-session `/stasis` review before `/compact`, paired with `/recall` for re-hydration. Expanded scope: determinism review, security review, cross-session patterns, memory candidates, legacy-refs-scan.
 
 ## Horizon
 
 - **Dark code / Three-Layer Solution** — evaluate Nate B Jones' framework for ccanvil integration. Three layers: (1) Spec-Driven Development (force comprehension before generation — ccanvil already does this but may need strengthening); (2) Self-Describing Systems (module manifests: structural + semantic context, failure modes, behavioral contracts readable by humans and AI — biggest gap); (3) Comprehension Gate (review step where senior engineers + AI pose critical questions about design and dependencies). Source: https://www.youtube.com/watch?v=E1idsrv79tI. Full transcript review pending. (Medium, needs-research)
-- **BTS-22: Docs directory strategy** — multi-file specs/plans/checkpoints to reduce write friction and enable parallel features (Medium, needs-research)
+- **BTS-22: Docs directory strategy** — multi-file specs/plans/stasis artifacts to reduce write friction and enable parallel features (Medium, needs-research)
 - **BTS-20: Workflow engine** — deterministic state machine for lifecycle transitions; depends on lifecycle primitives stabilizing (Low, needs-research)
 - **BTS-21: GitHub Agentic Workflows** — evaluate gh-aw integration once it reaches GA (Low, needs-research)
 - **Lifecycle timing** — branch creation before or after spec; the full chain may be idea → branch → spec → plan → implement → complete → merge → land

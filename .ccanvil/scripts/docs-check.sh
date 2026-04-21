@@ -414,7 +414,7 @@ cmd_validate() {
 #   stale-plan        → "Re-run /plan"
 #   stale-checkpoint  → "Update checkpoint"
 #   aligned (no cp)   → "Ready to build"
-#   aligned (with cp) → "/clear and /catchup to resume"
+#   aligned (with cp) → "/compact to wrap session"
 #
 # Output: JSON with next_action and reason.
 # ---------------------------------------------------------------------------
@@ -476,8 +476,8 @@ cmd_recommend() {
     reason="Spec exists but no plan. Create an implementation plan from the spec."
 
   elif [[ "$result" == "aligned" && "$cp_exists" == "true" ]]; then
-    next_action="/clear and /catchup to resume"
-    reason="All docs aligned with checkpoint. Ready to resume or start next feature."
+    next_action="/compact to wrap session"
+    reason="All docs aligned with checkpoint. Run /compact to preserve context, then start the next feature."
 
   elif [[ "$result" == "aligned" && "$cp_exists" != "true" ]]; then
     next_action="Ready to build"

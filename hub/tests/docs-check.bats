@@ -517,14 +517,18 @@ EOF
   [[ "$action" == *"/plan"* ]]
 }
 
-@test "recommend: all aligned with checkpoint → /clear and /catchup" {
+@test "recommend: all aligned with checkpoint → /compact" {
   create_linked_docs
 
   run bash "$SCRIPT" recommend "$DOCS"
   [ "$status" -eq 0 ]
 
   action=$(echo "$output" | jq -r '.next_action')
-  [[ "$action" == *"/clear"* ]] || [[ "$action" == *"/catchup"* ]] || [[ "$action" == *"Continue"* ]]
+  [[ "$action" == *"/compact"* ]]
+  [[ "$action" != *"/clear"* ]]
+
+  reason=$(echo "$output" | jq -r '.reason')
+  [[ "$reason" == *"context"* ]]
 }
 
 @test "recommend: mismatched → reconcile feature IDs" {

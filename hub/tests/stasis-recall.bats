@@ -190,3 +190,19 @@ OPERATIONS="$REPO_ROOT/.ccanvil/scripts/operations.sh"
   grep -qE 'output_contract=.*"stasis"' "$OPERATIONS"
   ! grep -qE 'output_contract=.*"checkpoint"' "$OPERATIONS"
 }
+
+# --- Step 4: CI workflow template + manifest.lock ---
+
+@test "ci.yml template: greps docs/stasis.md (not docs/checkpoint.md)" {
+  local ci="$REPO_ROOT/.ccanvil/templates/github/workflows/ci.yml"
+  grep -q 'docs/stasis\.md' "$ci"
+  ! grep -q 'docs/checkpoint\.md' "$ci"
+}
+
+@test "manifest.lock: no 'docs/checkpoint.md' path entries" {
+  ! grep -q '"docs/checkpoint\.md"' "$REPO_ROOT/.claude/manifest.lock"
+}
+
+@test "manifest.lock: no 'docs/templates/checkpoint.md' stale entries" {
+  ! grep -q '"docs/templates/checkpoint\.md"' "$REPO_ROOT/.claude/manifest.lock"
+}

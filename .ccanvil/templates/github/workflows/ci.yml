@@ -33,7 +33,7 @@ jobs:
           stale=""
           [ -f docs/spec.md ] && stale="$stale docs/spec.md"
           [ -f docs/plan.md ] && stale="$stale docs/plan.md"
-          [ -f docs/checkpoint.md ] && stale="$stale docs/checkpoint.md"
+          [ -f docs/stasis.md ] && stale="$stale docs/stasis.md"
           if [ -n "$stale" ]; then
             echo "::error::Lifecycle docs must be cleaned up before merge:$stale"
             echo "Run: docs-check.sh complete <feature-id>"

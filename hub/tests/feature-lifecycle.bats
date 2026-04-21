@@ -895,7 +895,7 @@ Auth feature.
 EOF
   echo "spec content" > "$PROJECT/docs/spec.md"
   echo "plan content" > "$PROJECT/docs/plan.md"
-  echo "checkpoint content" > "$PROJECT/docs/checkpoint.md"
+  echo "stasis content" > "$PROJECT/docs/stasis.md"
   git -C "$PROJECT" add -A && git -C "$PROJECT" commit -q -m "add spec and docs"
 
   "$PROJECT/.ccanvil/scripts/docs-check.sh" complete auth-system "$PROJECT/docs"
@@ -903,7 +903,7 @@ EOF
   # Lifecycle docs should be gone
   [ ! -f "$PROJECT/docs/spec.md" ]
   [ ! -f "$PROJECT/docs/plan.md" ]
-  [ ! -f "$PROJECT/docs/checkpoint.md" ]
+  [ ! -f "$PROJECT/docs/stasis.md" ]
   # Archived spec should still exist
   [ -f "$PROJECT/docs/specs/auth-system.md" ]
 }

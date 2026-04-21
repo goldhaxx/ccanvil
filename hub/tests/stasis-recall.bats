@@ -33,3 +33,122 @@ REPO_ROOT="$BATS_TEST_DIRNAME/../.."
   grep -q "^## Next Steps" "$REPO_ROOT/.ccanvil/templates/stasis.md"
   grep -q "^## Determinism Review" "$REPO_ROOT/.ccanvil/templates/stasis.md"
 }
+
+# --- Step 2: docs-check.sh — artifact path + state name + variable rename ---
+
+DOCS_CHECK="$REPO_ROOT/.ccanvil/scripts/docs-check.sh"
+
+@test "docs-check.sh: no legacy 'cp_' variable prefixes" {
+  ! grep -qE '\bcp_(entry|exists|fid|stored_plan_hash)' "$DOCS_CHECK"
+}
+
+@test "docs-check.sh: uses full-spelling stasis_ variable names" {
+  grep -qE '\bstasis_(entry|exists|fid|stored_plan_hash)\b' "$DOCS_CHECK"
+}
+
+@test "docs-check.sh: no 'stale-checkpoint' state name remains" {
+  ! grep -q 'stale-checkpoint' "$DOCS_CHECK"
+}
+
+@test "docs-check.sh: exposes 'stale-stasis' state name" {
+  grep -q 'stale-stasis' "$DOCS_CHECK"
+}
+
+@test "docs-check.sh: references docs/stasis.md (not docs/checkpoint.md)" {
+  ! grep -q 'docs/checkpoint\.md' "$DOCS_CHECK"
+  grep -q 'checkpoint\.md\|stasis\.md' "$DOCS_CHECK"
+}
+
+# Behavioral tests use a fixture directory like docs-check.bats does.
+setup_fixture() {
+  FIXTURE=$(mktemp -d)
+  DOCS="$FIXTURE/docs"
+  mkdir -p "$DOCS"
+}
+
+teardown_fixture() {
+  rm -rf "$FIXTURE"
+}
+
+@test "status: emits .stasis JSON key (not .checkpoint)" {
+  setup_fixture
+  cat > "$DOCS/stasis.md" <<EOF
+# Stasis
+
+> Feature: demo
+> Last updated: 1700000000
+> Plan hash: abcd1234
+
+## Accomplished
+- Test
+## Next Steps
+- Next
+## Determinism Review
+- **operations_reviewed:** 1
+- **candidates_found:** 0
+EOF
+  run bash "$DOCS_CHECK" status "$DOCS"
+  [ "$status" -eq 0 ]
+  stasis_feature=$(echo "$output" | jq -r '.stasis.feature_id')
+  [ "$stasis_feature" = "demo" ]
+  # Legacy key should NOT exist
+  legacy=$(echo "$output" | jq -r '.checkpoint // "absent"')
+  [ "$legacy" = "absent" ]
+  teardown_fixture
+}
+
+@test "validate: returns 'stale-stasis' when plan changes after stasis" {
+  setup_fixture
+  # Seed spec
+  cat > "$DOCS/spec.md" <<EOF
+# Feature
+
+> Feature: demo
+> Created: 1700000000
+> Status: In Progress
+
+## Acceptance Criteria
+- AC-1
+EOF
+  # Compute real spec content_hash via the script's own status command,
+  # then write plan with that hash so spec↔plan are linked.
+  spec_hash=$(bash "$DOCS_CHECK" status "$DOCS" | jq -r '.spec.content_hash')
+  cat > "$DOCS/plan.md" <<EOF
+# Plan
+
+> Feature: demo
+> Created: 1700000100
+> Spec hash: $spec_hash
+
+## Sequence
+- Step 1
+EOF
+  # Compute plan hash similarly, write stasis linking to it.
+  plan_hash=$(bash "$DOCS_CHECK" status "$DOCS" | jq -r '.plan.content_hash')
+  cat > "$DOCS/stasis.md" <<EOF
+# Stasis
+
+> Feature: demo
+> Last updated: 1700000200
+> Plan hash: $plan_hash
+
+## Accomplished
+- Done
+## Next Steps
+- Next
+## Determinism Review
+- **operations_reviewed:** 1
+- **candidates_found:** 0
+- No candidates this session.
+EOF
+  # Sanity: currently aligned
+  run bash "$DOCS_CHECK" validate "$DOCS"
+  [ "$(echo "$output" | jq -r '.result')" = "aligned" ]
+
+  # Modify plan body — stasis should now be stale
+  echo "- Step 2" >> "$DOCS/plan.md"
+  run bash "$DOCS_CHECK" validate "$DOCS"
+  result=$(echo "$output" | jq -r '.result')
+  [ "$result" = "stale-stasis" ]
+  teardown_fixture
+}

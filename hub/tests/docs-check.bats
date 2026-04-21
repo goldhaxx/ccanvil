@@ -70,11 +70,11 @@ EOF
 # ---------------------------------------------------------------------------
 # Helper: create a checkpoint.md with lifecycle metadata
 # ---------------------------------------------------------------------------
-create_checkpoint() {
+create_stasis() {
   local feature_id="${1:-my-feature}"
   local updated="${2:-1742861000}"
   local plan_hash="${3:-efgh5678}"
-  cat > "$DOCS/checkpoint.md" <<EOF
+  cat > "$DOCS/stasis.md" <<EOF
 # Checkpoint
 
 > Feature: ${feature_id}
@@ -131,17 +131,17 @@ EOF
 }
 
 @test "status: extracts feature_id and plan_hash from checkpoint.md" {
-  create_checkpoint "my-feature" "1742861000" "efgh5678"
+  create_stasis "my-feature" "1742861000" "efgh5678"
   run bash "$SCRIPT" status "$DOCS"
   [ "$status" -eq 0 ]
 
-  cp_feature=$(echo "$output" | jq -r '.checkpoint.feature_id')
-  cp_updated=$(echo "$output" | jq -r '.checkpoint.last_updated')
-  cp_plan_hash=$(echo "$output" | jq -r '.checkpoint.plan_hash')
+  stasis_feature=$(echo "$output" | jq -r '.stasis.feature_id')
+  stasis_updated=$(echo "$output" | jq -r '.stasis.last_updated')
+  stasis_plan_hash=$(echo "$output" | jq -r '.stasis.plan_hash')
 
-  [ "$cp_feature" = "my-feature" ]
-  [ "$cp_updated" = "1742861000" ]
-  [ "$cp_plan_hash" = "efgh5678" ]
+  [ "$stasis_feature" = "my-feature" ]
+  [ "$stasis_updated" = "1742861000" ]
+  [ "$stasis_plan_hash" = "efgh5678" ]
 }
 
 @test "status: includes computed content_hash for each document" {
@@ -161,11 +161,11 @@ EOF
 
   spec_exists=$(echo "$output" | jq -r '.spec.exists')
   plan_exists=$(echo "$output" | jq -r '.plan.exists')
-  cp_exists=$(echo "$output" | jq -r '.checkpoint.exists')
+  stasis_exists=$(echo "$output" | jq -r '.stasis.exists')
 
   [ "$spec_exists" = "false" ]
   [ "$plan_exists" = "false" ]
-  [ "$cp_exists" = "false" ]
+  [ "$stasis_exists" = "false" ]
 }
 
 @test "status: reports unlinked when doc exists but has no metadata" {
@@ -191,7 +191,7 @@ EOF
 @test "status: all three docs together produce complete JSON" {
   create_spec "my-feature" "1742860800" "In Progress"
   create_plan "my-feature" "1742860900" "abcd1234"
-  create_checkpoint "my-feature" "1742861000" "efgh5678"
+  create_stasis "my-feature" "1742861000" "efgh5678"
 
   run bash "$SCRIPT" status "$DOCS"
   [ "$status" -eq 0 ]
@@ -199,20 +199,20 @@ EOF
   # All three should exist and have feature_id
   spec_f=$(echo "$output" | jq -r '.spec.feature_id')
   plan_f=$(echo "$output" | jq -r '.plan.feature_id')
-  cp_f=$(echo "$output" | jq -r '.checkpoint.feature_id')
+  stasis_f=$(echo "$output" | jq -r '.stasis.feature_id')
 
   [ "$spec_f" = "my-feature" ]
   [ "$plan_f" = "my-feature" ]
-  [ "$cp_f" = "my-feature" ]
+  [ "$stasis_f" = "my-feature" ]
 
   # All three should have content_hash
   spec_h=$(echo "$output" | jq -r '.spec.content_hash')
   plan_h=$(echo "$output" | jq -r '.plan.content_hash')
-  cp_h=$(echo "$output" | jq -r '.checkpoint.content_hash')
+  stasis_h=$(echo "$output" | jq -r '.stasis.content_hash')
 
   [[ "$spec_h" =~ ^[0-9a-f]{8}$ ]]
   [[ "$plan_h" =~ ^[0-9a-f]{8}$ ]]
-  [[ "$cp_h" =~ ^[0-9a-f]{8}$ ]]
+  [[ "$stasis_h" =~ ^[0-9a-f]{8}$ ]]
 }
 
 # ===========================================================================
@@ -321,7 +321,7 @@ create_linked_docs() {
   local plan_hash
   plan_hash=$(bash "$SCRIPT" status "$DOCS" | jq -r '.plan.content_hash')
 
-  create_checkpoint "my-feature" "1742861000" "$plan_hash"
+  create_stasis "my-feature" "1742861000" "$plan_hash"
 }
 
 @test "validate: aligned when all hashes and feature_ids match" {
@@ -347,7 +347,7 @@ create_linked_docs() {
   [ "$result" = "stale-plan" ]
 }
 
-@test "validate: stale-checkpoint when plan body changed after checkpoint" {
+@test "validate: stale-stasis when plan body changed after checkpoint" {
   create_linked_docs
 
   # Modify plan body (not metadata)
@@ -357,13 +357,13 @@ create_linked_docs() {
   [ "$status" -eq 0 ]
 
   result=$(echo "$output" | jq -r '.result')
-  [ "$result" = "stale-checkpoint" ]
+  [ "$result" = "stale-stasis" ]
 }
 
 @test "validate: mismatched when feature_ids differ" {
   create_spec "feature-a" "1742860800" "In Progress"
   create_plan "feature-b" "1742860900" "whatever"
-  create_checkpoint "feature-c" "1742861000" "whatever"
+  create_stasis "feature-c" "1742861000" "whatever"
 
   run bash "$SCRIPT" validate "$DOCS"
   [ "$status" -eq 0 ]
@@ -372,7 +372,7 @@ create_linked_docs() {
   [ "$result" = "mismatched" ]
 }
 
-@test "validate: stale-plan takes priority over stale-checkpoint" {
+@test "validate: stale-plan takes priority over stale-stasis" {
   create_linked_docs
 
   # Modify both spec and plan bodies
@@ -413,7 +413,7 @@ create_linked_docs() {
 
   details=$(echo "$output" | jq -r '.details | join(", ")')
   [[ "$details" == *"plan.md missing"* ]]
-  [[ "$details" == *"checkpoint.md missing"* ]]
+  [[ "$details" == *"stasis.md missing"* ]]
 }
 
 @test "validate: all docs missing — reports all missing, no error" {
@@ -423,7 +423,7 @@ create_linked_docs() {
   details=$(echo "$output" | jq -r '.details | join(", ")')
   [[ "$details" == *"spec.md missing"* ]]
   [[ "$details" == *"plan.md missing"* ]]
-  [[ "$details" == *"checkpoint.md missing"* ]]
+  [[ "$details" == *"stasis.md missing"* ]]
 }
 
 @test "validate: doc exists but no metadata — reports unlinked" {
@@ -461,7 +461,7 @@ EOF
   details=$(echo "$output" | jq -r '.details | join(", ")')
 
   # Hashes match so far, but checkpoint is missing
-  [[ "$details" == *"checkpoint.md missing"* ]]
+  [[ "$details" == *"stasis.md missing"* ]]
   # Result should be aligned (what we can check is aligned)
   [ "$result" = "aligned" ]
 }
@@ -643,7 +643,7 @@ TEMPLATES="$BATS_TEST_DIRNAME/../../.ccanvil/templates"
   create_linked_docs
   local plan_hash
   plan_hash=$(bash "$SCRIPT" status "$DOCS" | jq -r '.plan.content_hash')
-  cat > "$DOCS/checkpoint.md" <<EOF
+  cat > "$DOCS/stasis.md" <<EOF
 # Checkpoint
 
 > Feature: my-feature
@@ -681,7 +681,7 @@ EOF
   create_linked_docs
   local plan_hash
   plan_hash=$(bash "$SCRIPT" status "$DOCS" | jq -r '.plan.content_hash')
-  cat > "$DOCS/checkpoint.md" <<EOF
+  cat > "$DOCS/stasis.md" <<EOF
 # Checkpoint
 
 > Feature: my-feature
@@ -708,7 +708,7 @@ EOF
   create_linked_docs
   local plan_hash
   plan_hash=$(bash "$SCRIPT" status "$DOCS" | jq -r '.plan.content_hash')
-  cat > "$DOCS/checkpoint.md" <<EOF
+  cat > "$DOCS/stasis.md" <<EOF
 # Checkpoint
 
 > Feature: my-feature

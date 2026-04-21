@@ -77,36 +77,33 @@ require_jq() {
 }
 
 # Validate jq output is non-empty valid JSON before mv — prevents lockfile corruption
-# commit_hub_file: auto-commit a single file in the hub repo.
-# No-op if: hub isn't a git repo, file unchanged, file not tracked.
-# On commit failure: prints a warning, returns 0 (AC-8 failure tolerance).
-# Usage: commit_hub_file <hub_path> <rel_file> <commit_message>
-commit_hub_file() {
+
+# append_event: Append a JSON event to the hub's events log.
+# Registry and broadcast events are machine-local operational state, not code —
+# so they go to an append-only log instead of polluting main's commit history.
+# Usage: append_event <hub_path> <json-object-string>
+# On failure: WARNING + return 0 (never abort the caller).
+append_event() {
   local hub_path="$1"
-  local rel_file="$2"
-  local message="$3"
-
-  # Must be a git repo
-  git -C "$hub_path" rev-parse --git-dir >/dev/null 2>&1 || return 0
-
-  # Must actually have changes to the file (tracked-and-modified OR untracked)
-  if git -C "$hub_path" diff --quiet -- "$rel_file" 2>/dev/null && \
-     git -C "$hub_path" diff --cached --quiet -- "$rel_file" 2>/dev/null; then
-    # Not modified or staged. Check if untracked.
-    if ! git -C "$hub_path" ls-files --others --exclude-standard -- "$rel_file" 2>/dev/null | grep -q .; then
-      return 0
-    fi
-  fi
-
-  (cd "$hub_path" && \
-    ALLOW_MAIN=1 git add -- "$rel_file" && \
-    ALLOW_MAIN=1 git commit -m "$message" --quiet --only -- "$rel_file" 2>&1) || \
-    echo "WARNING: auto-commit of $rel_file failed (hub left dirty)" >&2
+  local event_json="$2"
+  local log_file="$hub_path/.ccanvil/events.log"
+  mkdir -p "$(dirname "$log_file")" 2>/dev/null || true
+  # Stamp with ts if caller didn't
+  local stamped
+  stamped=$(echo "$event_json" | jq -c --arg ts "$(date +%s)" '. + {ts: (.ts // ($ts | tonumber))}' 2>/dev/null) || {
+    echo "WARNING: append_event: malformed JSON, dropping: $event_json" >&2
+    return 0
+  }
+  echo "$stamped" >> "$log_file" || {
+    echo "WARNING: append_event: write failed for $log_file" >&2
+    return 0
+  }
   return 0
 }
 
 # commit_node_file: auto-commit a single file in the current node repo.
-# Mirror of commit_hub_file but operates on $(pwd).
+# Used by register to commit .claude/ccanvil.local.json so the node tree is
+# clean before the next broadcast pre-check. Operates on $(pwd).
 # No-op if: cwd isn't a git repo, file unchanged, commit fails.
 # Usage: commit_node_file <rel_file> <commit_message>
 commit_node_file() {
@@ -2024,9 +2021,10 @@ cmd_register() {
   commit_node_file ".claude/ccanvil.local.json" \
     "chore(ccanvil): register node $node_name [$node_uuid]"
 
-  # Auto-commit the registry mutation so the hub stays clean (AC-1, AC-6)
-  commit_hub_file "$hub_root" ".ccanvil/registry.json" \
-    "chore(registry): register $node_name [$node_uuid]"
+  # Record a register event in the hub's local events log
+  append_event "$hub_root" "$(jq -nc \
+    --arg u "$node_uuid" --arg n "$node_name" --arg p "$portable_path" \
+    '{event:"register",node_uuid:$u,node_name:$n,path:$p}')"
 }
 
 # relocate: Re-associate Claude Code conversation history after `mv`.
@@ -2096,6 +2094,39 @@ cmd_registry() {
   jq -r '.nodes | to_entries[] | "  \(.value.name) [\(.key)]\n    path: \(.value.path // .key)\n    registered: \(.value.registered_at)  |  last_synced: \(.value.last_synced // "never")  |  version: \(.value.last_synced_version // "never")"' "$registry"
 }
 
+# events: Print the hub's local events log as newline-delimited JSON.
+# Filters: --event <type>, --node <uuid-or-name>, --since <epoch>.
+# The events log is machine-local audit state (gitignored) — previously,
+# these events were git commits on main; now they live in .ccanvil/events.log.
+# Usage: ccanvil-sync.sh events [--event TYPE] [--node UUID|NAME] [--since EPOCH]
+cmd_events() {
+  local filter_event="" filter_node="" filter_since=""
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --event) filter_event="$2"; shift 2 ;;
+      --node)  filter_node="$2";  shift 2 ;;
+      --since) filter_since="$2"; shift 2 ;;
+      *) echo "Unknown events flag: $1" >&2; return 2 ;;
+    esac
+  done
+
+  local hub_root
+  if [[ -f "$LOCKFILE" ]]; then
+    hub_root=$(get_hub_source_raw)
+  else
+    hub_root=$(pwd)
+  fi
+  local log_file="$hub_root/.ccanvil/events.log"
+  [[ -f "$log_file" ]] || return 0
+
+  local jq_filter='.'
+  [[ -n "$filter_event" ]] && jq_filter="${jq_filter} | select(.event == \"$filter_event\")"
+  [[ -n "$filter_node"  ]] && jq_filter="${jq_filter} | select(.node_uuid == \"$filter_node\" or .node_name == \"$filter_node\")"
+  [[ -n "$filter_since" ]] && jq_filter="${jq_filter} | select(.ts >= $filter_since)"
+
+  jq -c "$jq_filter" "$log_file" 2>/dev/null
+}
+
 # broadcast: Push hub updates to all registered downstream nodes.
 # Runs deterministic phases only (auto-update, section-merge, finalize).
 # Conflicts are collected and reported, not resolved.
@@ -2136,12 +2167,16 @@ cmd_broadcast() {
 
   # Migrate legacy path-keyed entries to UUID-keyed (AC-7, AC-8).
   # Idempotent — entries already keyed by UUID are skipped.
+  local legacy_count_before
+  legacy_count_before=$(jq -r '[.nodes | keys[] | select(test("^[0-9a-f]{8}-[0-9a-f]{4}") | not)] | length' \
+    "$registry" 2>/dev/null || echo "0")
   migrate_registry "$registry"
 
-  # Auto-commit any migration changes so the hub stays clean during the loop (AC-3, AC-7)
-  if ! $dry_run; then
-    commit_hub_file "$hub_root" ".ccanvil/registry.json" \
-      "chore(registry): migrate to UUID keys"
+  # Record migration event only if legacy entries were actually rewritten
+  if ! $dry_run && [[ "$legacy_count_before" -gt 0 ]]; then
+    append_event "$hub_root" "$(jq -nc \
+      --argjson c "$legacy_count_before" \
+      '{event:"migrate_legacy_keys",count:$c}')"
   fi
 
   # Iterate over all registered nodes (keyed by UUID post-migration)
@@ -2293,6 +2328,11 @@ cmd_broadcast() {
     sync_ts=$(timestamp)
     while IFS= read -r su; do
       [[ -z "$su" ]] && continue
+      local prior_version
+      prior_version=$(jq -r --arg u "$su" '.nodes[$u].last_synced_version // "unknown"' "$registry")
+      local su_name
+      su_name=$(jq -r --arg u "$su" '.nodes[$u].name // "unknown"' "$registry")
+
       local tmp; tmp=$(mktemp)
       jq --arg u "$su" --arg t "$sync_ts" --arg v "$hub_version" \
         '.nodes[$u].last_synced = $t | .nodes[$u].last_synced_version = $v' \
@@ -2302,11 +2342,12 @@ cmd_broadcast() {
       else
         rm -f "$tmp"
       fi
-    done <<< "$synced_uuids"
 
-    # Auto-commit the last_synced updates (AC-4, AC-7)
-    commit_hub_file "$hub_root" ".ccanvil/registry.json" \
-      "chore(registry): record broadcast sync @ $hub_version"
+      # Record per-node sync event in the hub's local audit log
+      append_event "$hub_root" "$(jq -nc \
+        --arg u "$su" --arg n "$su_name" --arg fv "$prior_version" --arg tv "$hub_version" \
+        '{event:"broadcast_sync",node_uuid:$u,node_name:$n,from_version:$fv,to_version:$tv}')"
+    done <<< "$synced_uuids"
   fi
 
   # AC-9: Summary
@@ -2640,6 +2681,7 @@ case "${1:-}" in
   migrate)          shift; cmd_migrate "$@" ;;
   register)         cmd_register ;;
   registry)         cmd_registry ;;
+  events)           shift; cmd_events "$@" ;;
   broadcast)        shift; cmd_broadcast "$@" ;;
 
   # --- Stack commands ---

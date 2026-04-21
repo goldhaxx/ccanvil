@@ -29,3 +29,9 @@ generated/
 
 # Sync state — tracked in git for provenance.
 # Listed in .claudeignore so Claude uses the script to access them, not raw reads.
+
+# Machine-local operational state — per-user, not shared
+# (registry maps downstream node UUIDs → paths on this machine;
+#  events.log is the append-only audit trail for register/broadcast)
+.ccanvil/registry.json
+.ccanvil/events.log

@@ -2,7 +2,7 @@
 
 > Feature: stasis-recall
 > Created: 1776794240
-> Status: In Progress
+> Status: Complete
 
 ## Summary
 

@@ -73,10 +73,11 @@
 | `ccanvil-sync.sh register` | Register the current project in the hub. Generates a stable UUID at first run (stored in `.claude/ccanvil.local.json`, mirrored in lockfile). Registry is keyed by UUID; path stored in `~`-portable form |
 | `ccanvil-sync.sh registry` | List all registered downstream projects with UUID, name, path, last-synced info |
 | `ccanvil-sync.sh broadcast` | Iterate registered nodes by UUID (auto-migrates legacy path-keyed entries). Reports `STALE` when a UUID's path no longer exists |
+| `ccanvil-sync.sh events [--event T] [--node N] [--since EPOCH]` | Print hub's audit log as newline-delimited JSON. Events: `register`, `broadcast_sync`, `migrate_legacy_keys`. Filter by type, node uuid/name, or minimum timestamp |
 
 Node UUIDs make registration resilient to renames, moves, machine changes, and multi-user setups. The UUID is authoritative; paths self-update on each sync.
 
-`register` and `broadcast` auto-commit their registry mutations in the hub (`chore(registry): ...`) so the hub stays clean after every sync event. Bootstrap commits in nodes skip gitignored files (e.g., lockfiles in projects that don't track them).
+`register` and `broadcast` never commit to the hub repo. The registry (`.ccanvil/registry.json`) is gitignored machine-local state, and operational events are appended to `.ccanvil/events.log` (also gitignored). Use `ccanvil-sync.sh events` to query the audit trail. Bootstrap commits in nodes (for the node-side UUID file) still happen because `.claude/ccanvil.local.json` is intentionally tracked per-node.
 
 ## Global Commands Sync
 

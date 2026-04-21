@@ -5,7 +5,7 @@ Claude Code supports running multiple agents in parallel via git worktrees (`cla
 ## How it works
 
 - **Worktrees share `.git`:** All preset configuration (CLAUDE.md, rules, hooks, settings.json) is inherited automatically. No duplication needed.
-- **Branch-local docs:** `docs/spec.md`, `docs/plan.md`, `docs/checkpoint.md` are branch-specific. Each worktree operates on its own branch, so parallel agents get isolated doc state.
+- **Branch-local docs:** `docs/spec.md`, `docs/plan.md`, `docs/stasis.md` are branch-specific. Each worktree operates on its own branch, so parallel agents get isolated doc state.
 - **Lockfile is shared:** `.claude/ccanvil.lock` lives in `.git`-tracked state. Avoid running `/ccanvil-pull` from multiple worktrees simultaneously.
 
 ## Usage pattern

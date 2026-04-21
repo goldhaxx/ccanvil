@@ -51,13 +51,15 @@ project-root/
 │   │   ├── code-reviewer.md           # Code review sub-agent
 │   │   └── spec-writer.md             # Specification writing sub-agent
 │   └── commands/
-│       ├── catchup.md                 # /catchup — Resume after /compact or /clear
 │       ├── plan.md                    # /plan — Create implementation plan
 │       └── review.md                  # /review — Review uncommitted changes
+├── skills/
+│       ├── stasis/SKILL.md            # /stasis — End-of-session strategic review
+│       └── recall/SKILL.md            # /recall — Re-hydrate context after /compact or /clear
 └── docs/
     ├── spec.md                        # Current feature specification
     ├── plan.md                        # Implementation plan
-    └── checkpoint.md                  # Session continuity state
+    └── stasis.md                      # Session continuity state (written by /stasis)
 ```
 
 ---
@@ -106,7 +108,7 @@ These constraints exist because of measured transformer attention limitations. T
 
 ### Commands Constraints (`.claude/commands/*.md`)
 
-1. **File name becomes the slash command.** `catchup.md` → `/catchup`
+1. **File name becomes the slash command.** `plan.md` → `/plan`
 2. **First line should describe what the command does.**
 3. **Numbered steps for multi-step procedures.**
 4. **Commands should NOT implement — they should orient, plan, or delegate.**
@@ -208,7 +210,7 @@ src/
 docs/
 ├── spec.md       # Current feature specification
 ├── plan.md       # Implementation plan
-└── checkpoint.md # Progress state for session continuity
+└── stasis.md    # Progress state for session continuity (written by /stasis)
 \```
 
 [... rest is preset defaults: Workflow, Conventions, Reference Documents, Do Not ...]

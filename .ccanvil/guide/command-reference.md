@@ -15,8 +15,8 @@
 
 | Command | When | What it does |
 |---------|------|-------------|
-| `/catchup` | After `/compact` or `/clear` | Reads checkpoint + git state, reports status |
-| *"Checkpoint this"* | Pausing work | Writes state to `docs/checkpoint.md`, commits |
+| `/recall` | After `/compact` or `/clear` | Reads `docs/stasis.md` + git state, reports status |
+| `/stasis` | End of session, before `/compact` | Strategic review — writes state + determinism/security/cross-session review to `docs/stasis.md`, commits |
 | `/compact` | Between tasks | Compresses context, retains summary (built-in) |
 | `/clear` | Full reset (rare) | Resets context entirely (built-in) |
 | `/compact` | Context heavy | Summarizes context to free space (built-in) |
@@ -94,7 +94,7 @@ Only files matching `ccanvil-*.md` are hub-owned; all other files in `~/.claude/
 |---------|-------------|
 | `docs-check.sh list-specs [docs-dir]` | List all specs in `docs/specs/` with feature_id, status, created → JSON array |
 | `docs-check.sh activate <feature-id> [docs-dir]` | Create branch `claude/<type>/<id>`, copy spec to `docs/spec.md`, set status to In Progress, push branch, create draft PR. Tolerates dirty `docs/specs/*`, `docs/spec.md`, `docs/ideas.md`, `docs/roadmap.md` |
-| `docs-check.sh complete <feature-id> [docs-dir]` | Set spec status to Complete, remove lifecycle docs (spec/plan/checkpoint), commit cleanup, mark PR ready |
+| `docs-check.sh complete <feature-id> [docs-dir]` | Set spec status to Complete, remove lifecycle docs (spec/plan/stasis), commit cleanup, mark PR ready |
 | `docs-check.sh land [--force]` | On feature branch: switch to main, fetch, reset to origin, delete local and remote branch. On main (post-`gh pr merge --delete-branch`): fetch and fast-forward to `origin/main`. `--force` skips PR-merged check |
 | `docs-check.sh config-get <key> [project-dir]` | Read feature toggle from `.claude/ccanvil.json` (returns `true`/`false`) |
 
@@ -137,8 +137,9 @@ Only files matching `ccanvil-*.md` are hub-owned; all other files in `~/.claude/
 
 | Command | What it does |
 |---------|-------------|
-| `docs-check.sh status [docs-dir]` | Extract metadata (feature_id, hashes, timestamps) from spec/plan/checkpoint → JSON |
-| `docs-check.sh validate [docs-dir]` | Check alignment: `aligned`, `stale-plan`, `stale-checkpoint`, `mismatched`, `unlinked`, `missing-determinism-review` |
+| `docs-check.sh status [docs-dir]` | Extract metadata (feature_id, hashes, timestamps) from spec/plan/stasis → JSON |
+| `docs-check.sh validate [docs-dir]` | Check alignment: `aligned`, `stale-plan`, `stale-stasis`, `mismatched`, `unlinked`, `missing-determinism-review` |
+| `docs-check.sh legacy-refs-scan [project-dir]` | Scan for legacy references (`/catchup`, `/checkpoint`, `docs/checkpoint.md`, etc.) → JSON. Scope: `hub-owned` vs `node-specific`. Exit 1 if any found |
 | `docs-check.sh recommend [docs-dir]` | State machine → `{next_action, reason}` (e.g., "Run /plan", "Ready to build") |
 | `docs-check.sh audit-session [--since commit] [repo-dir]` | Scan git diffs for stochastic patterns (cp, jq, shasum, git -C, curl, wget) + commit messages for indicator phrases → JSON |
 

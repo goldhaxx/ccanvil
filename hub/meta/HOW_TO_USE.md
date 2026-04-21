@@ -79,7 +79,7 @@ If you don't have preferences, Claude Code picks sensible defaults and tells you
 
 ## The Rhythm of a Session
 
-A session has one objective. You state it, work toward it, and when it's done (or you need to stop), you checkpoint and clear. Here's what that looks like:
+A session has one objective. You state it, work toward it, and when it's done (or you need to stop), you run `/stasis` then `/compact`. Here's what that looks like:
 
 ### Starting fresh
 ```
@@ -90,28 +90,28 @@ claude
 ### Picking up where you left off
 ```
 claude
-/catchup
+/recall
 ```
 
-Claude Code reads `docs/checkpoint.md` and recent git history, then tells you where things stand and what's next. It does NOT start working — it orients and reports. When you're ready:
+Claude Code reads `docs/stasis.md` and recent git history, then tells you where things stand and what's next. It does NOT start working — it orients and reports. When you're ready:
 
 ```
 "Continue."
 ```
 
 ### Taking a break mid-feature
-Just say:
+Run:
 ```
-"Checkpoint this and stop."
+/stasis
 ```
 
-Claude Code writes progress, current state, and next steps to `docs/checkpoint.md`, commits any uncommitted work, and tells you it's ready for `/compact`.
+Claude Code writes progress, current state, next steps, determinism review, security review, cross-session patterns, and memory candidates to `docs/stasis.md`, commits, and tells you it's ready for `/compact`.
 
 ```
 /compact
 ```
 
-This compresses context while retaining a summary. Your progress is safe in git and the checkpoint file.
+This compresses context while retaining a summary. Your progress is safe in git and the stasis file.
 
 ### Switching to something urgent
 ```
@@ -119,8 +119,9 @@ This compresses context while retaining a summary. Your progress is safe in git 
 throws a 500 error when the session cookie is expired."
 ```
 
-Claude Code checkpoints the current work, and you compress context for the bug:
+Run `/stasis` to capture the current work, then compress context for the bug:
 ```
+/stasis
 /compact
 "Fix the login 500 error when the session cookie is expired."
 ```
@@ -135,8 +136,9 @@ Most of the time, natural language is all you need. The preset's rules and agent
 |---|---|---|
 | `/plan` | Creates an ordered implementation plan from the current spec | After you've reviewed and approved `docs/spec.md` |
 | `/review` | Spawns a sub-agent to review all uncommitted changes | Before committing significant work — catches issues in a fresh context |
-| `/catchup` | Reads checkpoint + git state, reports where things stand | After `/compact` or `/clear`, or when starting a new session |
-| `/compact` | Compresses context, retaining summary (built-in) | Between tasks, when switching focus, or when a session feels degraded |
+| `/stasis` | End-of-session review — writes `docs/stasis.md`, runs determinism + security + cross-session pattern checks, commits | Before `/compact`, at the end of a session |
+| `/recall` | Reads `docs/stasis.md` + git state, reports where things stand | After `/compact` or `/clear`, or when starting a new session |
+| `/compact` | Compresses context, retaining summary (built-in) | Between tasks, when switching focus, or when a session feels degraded (pair with `/stasis` first) |
 | `/clear` | Full context reset (built-in) | Only for completely unrelated tasks (rare) |
 
 You don't need to type `/spec` — just describe what you want and Claude Code will spec it. You don't need to type `/tdd` — the preset's rules enforce the test-first workflow automatically. You don't need to type `/commit` — Claude Code commits after each passing TDD cycle.
@@ -173,7 +175,7 @@ Claude Code is the engineer. Its job is to:
 
 **Commit frequently** with conventional commit messages after each passing cycle.
 
-**Manage its own context** by checkpointing progress, using sub-agents for research, and staying within the preset's rules.
+**Manage its own context** by running `/stasis` at session boundaries, using sub-agents for research, and staying within the preset's rules.
 
 **Update CLAUDE.md** as the project evolves — new commands, architecture changes, conventions that emerge from development.
 
@@ -219,9 +221,9 @@ Claude Code will plan the migration, update affected tests, modify the implement
 ### "This session feels slow or confused"
 
 ```
-"Checkpoint this."
+/stasis
 /compact
-/catchup
+/recall
 "Continue."
 ```
 
@@ -255,7 +257,7 @@ Compressed context fixes most issues. ccanvil is designed for short, focused ses
  └─────────────────────────────────────────────────────┘
 
  Between features: /compact to compress context
- Between sessions: "checkpoint" → /compact → /catchup to resume
+ Between sessions: /stasis → /compact → /recall to resume
 ```
 
 ---

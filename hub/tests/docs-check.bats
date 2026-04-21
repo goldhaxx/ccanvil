@@ -1060,8 +1060,8 @@ RULES="$BATS_TEST_DIRNAME/../../.claude/rules"
   [ "$output" -ge 1 ]
 }
 
-@test "self-review: references the checkpoint template" {
-  run grep -c "checkpoint.md\|checkpoint template" "$RULES/self-review.md"
+@test "self-review: references the stasis template" {
+  run grep -c "stasis.md\|stasis template" "$RULES/self-review.md"
   [ "$status" -eq 0 ]
   [ "$output" -ge 1 ]
 }

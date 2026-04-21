@@ -2,7 +2,7 @@
 
 > Feature: recommend-compact-default
 > Created: 1776711000
-> Status: In Progress
+> Status: Complete
 
 ## Summary
 

@@ -2,7 +2,7 @@
 
 > Feature: relocate-subcommand
 > Created: 1776712500
-> Status: In Progress
+> Status: Complete
 
 ## Summary
 

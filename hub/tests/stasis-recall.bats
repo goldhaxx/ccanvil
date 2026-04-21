@@ -46,8 +46,12 @@ DOCS_CHECK="$REPO_ROOT/.ccanvil/scripts/docs-check.sh"
   grep -qE '\bstasis_(entry|exists|fid|stored_plan_hash)\b' "$DOCS_CHECK"
 }
 
-@test "docs-check.sh: no 'stale-checkpoint' state name remains" {
-  ! grep -q 'stale-checkpoint' "$DOCS_CHECK"
+@test "docs-check.sh: no 'stale-checkpoint' state name remains (excluding scanner)" {
+  # cmd_legacy_refs_scan literally contains the legacy string as a regex
+  # pattern + docstring to detect it in other files — retention is deliberate.
+  # Strip everything from the scanner's docblock through its closing brace.
+  run bash -c "awk '/^# cmd_legacy_refs_scan/{skip=1} skip && /^}/{skip=0; next} !skip' '$DOCS_CHECK' | grep -c 'stale-checkpoint'"
+  [ "$output" = "0" ]
 }
 
 @test "docs-check.sh: exposes 'stale-stasis' state name" {

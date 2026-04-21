@@ -1252,6 +1252,94 @@ cmd_idea_update() {
 }
 
 # ---------------------------------------------------------------------------
+# cmd_legacy_refs_scan — Find references to legacy ccanvil verbs/artifacts.
+#
+# Scans a project dir for:
+#   - /catchup  (slash command)
+#   - /checkpoint  (slash command, pre-stasis naming)
+#   - docs/checkpoint.md  (artifact path)
+#   - checkpoint.read | checkpoint.write  (operations.sh op names)
+#   - stale-checkpoint  (validate state name)
+#
+# Classifies each match by scope:
+#   - "hub-owned": line appears BEFORE "<!-- NODE-SPECIFIC-START -->" in a file
+#                  that contains that marker (indicating the match is in content
+#                  the hub pulls and should be fixed at the hub).
+#   - "node-specific": line appears AFTER the marker, OR the file has no marker
+#                      (the user wrote it and must fix it manually).
+#
+# Output: JSON array [{file, line, match, scope}].
+# Exit: 0 if empty; 1 if any matches found.
+# ---------------------------------------------------------------------------
+cmd_legacy_refs_scan() {
+  local project_dir="${1:-.}"
+
+  local pattern='/catchup|/checkpoint|docs/checkpoint\.md|checkpoint\.(read|write)|stale-checkpoint'
+
+  # Collect matches via grep -rnE; skip .git, node_modules, and binary files.
+  # -I: skip binary; -n: line numbers; --exclude-dir: skip common noise.
+  # Tolerate empty grep output (exit 1 when no matches).
+  local raw_matches
+  raw_matches=$(cd "$project_dir" && grep -rnIE \
+    --exclude-dir=.git \
+    --exclude-dir=node_modules \
+    --exclude-dir=dist \
+    --exclude-dir=generated \
+    "$pattern" . 2>/dev/null || true)
+
+  if [[ -z "$raw_matches" ]]; then
+    echo "[]"
+    return 0
+  fi
+
+  # Per-file marker line lookup. macOS ships bash 3.2 (no associative arrays),
+  # so each iteration re-greps — fine for the tiny scanner workload.
+  local entries="[]"
+  while IFS= read -r raw; do
+    [[ -z "$raw" ]] && continue
+    # grep -rn format: ./path:line:content
+    local file_path="${raw%%:*}"
+    local rest="${raw#*:}"
+    local line_num="${rest%%:*}"
+    local content="${rest#*:}"
+
+    # Normalize leading ./
+    file_path="${file_path#./}"
+
+    # Look up the NODE-SPECIFIC marker line (0 if absent).
+    local marker
+    marker=$(grep -n '<!-- NODE-SPECIFIC-START -->' "$project_dir/$file_path" 2>/dev/null | head -1 | cut -d: -f1 || true)
+    marker="${marker:-0}"
+
+    local scope="node-specific"
+    if [[ "$marker" != "0" && "$line_num" -lt "$marker" ]]; then
+      scope="hub-owned"
+    fi
+
+    # Extract the actual matching token(s) from the content line using grep -oE
+    local matched
+    matched=$(echo "$content" | grep -oE "$pattern" | head -1)
+    [[ -z "$matched" ]] && continue
+
+    entries=$(echo "$entries" | jq \
+      --arg file "$file_path" \
+      --argjson line "$line_num" \
+      --arg match "$matched" \
+      --arg scope "$scope" \
+      '. + [{file: $file, line: $line, match: $match, scope: $scope}]')
+  done <<< "$raw_matches"
+
+  echo "$entries"
+
+  local count
+  count=$(echo "$entries" | jq 'length')
+  if [[ "$count" -gt 0 ]]; then
+    return 1
+  fi
+  return 0
+}
+
+# ---------------------------------------------------------------------------
 # Dispatch
 # ---------------------------------------------------------------------------
 
@@ -1259,22 +1347,23 @@ cmd="${1:-}"
 shift || true
 
 case "$cmd" in
-  status)        cmd_status "$@" ;;
-  validate)      cmd_validate "$@" ;;
-  recommend)     cmd_recommend "$@" ;;
-  audit-session) cmd_audit_session "$@" ;;
-  config-get)    cmd_config_get "$@" ;;
-  list-specs)    cmd_list_specs "$@" ;;
-  activate)      cmd_activate "$@" ;;
-  complete)      cmd_complete "$@" ;;
-  land)          cmd_land "$@" ;;
-  radar-gather)  cmd_radar_gather "$@" ;;
-  idea-add)      cmd_idea_add "$@" ;;
-  idea-list)     cmd_idea_list "$@" ;;
-  idea-count)    cmd_idea_count "$@" ;;
-  idea-update)   cmd_idea_update "$@" ;;
+  status)            cmd_status "$@" ;;
+  validate)          cmd_validate "$@" ;;
+  recommend)         cmd_recommend "$@" ;;
+  audit-session)     cmd_audit_session "$@" ;;
+  config-get)        cmd_config_get "$@" ;;
+  list-specs)        cmd_list_specs "$@" ;;
+  activate)          cmd_activate "$@" ;;
+  complete)          cmd_complete "$@" ;;
+  land)              cmd_land "$@" ;;
+  radar-gather)      cmd_radar_gather "$@" ;;
+  idea-add)          cmd_idea_add "$@" ;;
+  idea-list)         cmd_idea_list "$@" ;;
+  idea-count)        cmd_idea_count "$@" ;;
+  idea-update)       cmd_idea_update "$@" ;;
+  legacy-refs-scan)  cmd_legacy_refs_scan "$@" ;;
   *)
-    echo "Usage: docs-check.sh {status|validate|recommend|audit-session|config-get|list-specs|activate|complete|land|idea-add|idea-list|idea-count|idea-update} [args...]" >&2
+    echo "Usage: docs-check.sh {status|validate|recommend|audit-session|config-get|list-specs|activate|complete|land|idea-add|idea-list|idea-count|idea-update|legacy-refs-scan} [args...]" >&2
     exit 1
     ;;
 esac

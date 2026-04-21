@@ -68,13 +68,13 @@ EOF
 }
 
 # ---------------------------------------------------------------------------
-# Helper: create a checkpoint.md with lifecycle metadata
+# Helper: create a stasis.md with lifecycle metadata
 # ---------------------------------------------------------------------------
-create_checkpoint() {
+create_stasis() {
   local feature_id="${1:-my-feature}"
   local updated="${2:-1742861000}"
   local plan_hash="${3:-efgh5678}"
-  cat > "$DOCS/checkpoint.md" <<EOF
+  cat > "$DOCS/stasis.md" <<EOF
 # Checkpoint
 
 > Feature: ${feature_id}
@@ -130,18 +130,18 @@ EOF
   [ "$plan_spec_hash" = "abcd1234" ]
 }
 
-@test "status: extracts feature_id and plan_hash from checkpoint.md" {
-  create_checkpoint "my-feature" "1742861000" "efgh5678"
+@test "status: extracts feature_id and plan_hash from stasis.md" {
+  create_stasis "my-feature" "1742861000" "efgh5678"
   run bash "$SCRIPT" status "$DOCS"
   [ "$status" -eq 0 ]
 
-  cp_feature=$(echo "$output" | jq -r '.checkpoint.feature_id')
-  cp_updated=$(echo "$output" | jq -r '.checkpoint.last_updated')
-  cp_plan_hash=$(echo "$output" | jq -r '.checkpoint.plan_hash')
+  stasis_feature=$(echo "$output" | jq -r '.stasis.feature_id')
+  stasis_updated=$(echo "$output" | jq -r '.stasis.last_updated')
+  stasis_plan_hash=$(echo "$output" | jq -r '.stasis.plan_hash')
 
-  [ "$cp_feature" = "my-feature" ]
-  [ "$cp_updated" = "1742861000" ]
-  [ "$cp_plan_hash" = "efgh5678" ]
+  [ "$stasis_feature" = "my-feature" ]
+  [ "$stasis_updated" = "1742861000" ]
+  [ "$stasis_plan_hash" = "efgh5678" ]
 }
 
 @test "status: includes computed content_hash for each document" {
@@ -161,11 +161,11 @@ EOF
 
   spec_exists=$(echo "$output" | jq -r '.spec.exists')
   plan_exists=$(echo "$output" | jq -r '.plan.exists')
-  cp_exists=$(echo "$output" | jq -r '.checkpoint.exists')
+  stasis_exists=$(echo "$output" | jq -r '.stasis.exists')
 
   [ "$spec_exists" = "false" ]
   [ "$plan_exists" = "false" ]
-  [ "$cp_exists" = "false" ]
+  [ "$stasis_exists" = "false" ]
 }
 
 @test "status: reports unlinked when doc exists but has no metadata" {
@@ -191,7 +191,7 @@ EOF
 @test "status: all three docs together produce complete JSON" {
   create_spec "my-feature" "1742860800" "In Progress"
   create_plan "my-feature" "1742860900" "abcd1234"
-  create_checkpoint "my-feature" "1742861000" "efgh5678"
+  create_stasis "my-feature" "1742861000" "efgh5678"
 
   run bash "$SCRIPT" status "$DOCS"
   [ "$status" -eq 0 ]
@@ -199,20 +199,20 @@ EOF
   # All three should exist and have feature_id
   spec_f=$(echo "$output" | jq -r '.spec.feature_id')
   plan_f=$(echo "$output" | jq -r '.plan.feature_id')
-  cp_f=$(echo "$output" | jq -r '.checkpoint.feature_id')
+  stasis_f=$(echo "$output" | jq -r '.stasis.feature_id')
 
   [ "$spec_f" = "my-feature" ]
   [ "$plan_f" = "my-feature" ]
-  [ "$cp_f" = "my-feature" ]
+  [ "$stasis_f" = "my-feature" ]
 
   # All three should have content_hash
   spec_h=$(echo "$output" | jq -r '.spec.content_hash')
   plan_h=$(echo "$output" | jq -r '.plan.content_hash')
-  cp_h=$(echo "$output" | jq -r '.checkpoint.content_hash')
+  stasis_h=$(echo "$output" | jq -r '.stasis.content_hash')
 
   [[ "$spec_h" =~ ^[0-9a-f]{8}$ ]]
   [[ "$plan_h" =~ ^[0-9a-f]{8}$ ]]
-  [[ "$cp_h" =~ ^[0-9a-f]{8}$ ]]
+  [[ "$stasis_h" =~ ^[0-9a-f]{8}$ ]]
 }
 
 # ===========================================================================
@@ -317,11 +317,11 @@ create_linked_docs() {
 
   create_plan "my-feature" "1742860900" "$spec_hash"
 
-  # Compute plan's actual content hash for the checkpoint
+  # Compute plan's actual content hash for the stasis
   local plan_hash
   plan_hash=$(bash "$SCRIPT" status "$DOCS" | jq -r '.plan.content_hash')
 
-  create_checkpoint "my-feature" "1742861000" "$plan_hash"
+  create_stasis "my-feature" "1742861000" "$plan_hash"
 }
 
 @test "validate: aligned when all hashes and feature_ids match" {
@@ -347,7 +347,7 @@ create_linked_docs() {
   [ "$result" = "stale-plan" ]
 }
 
-@test "validate: stale-checkpoint when plan body changed after checkpoint" {
+@test "validate: stale-stasis when plan body changed after stasis" {
   create_linked_docs
 
   # Modify plan body (not metadata)
@@ -357,13 +357,13 @@ create_linked_docs() {
   [ "$status" -eq 0 ]
 
   result=$(echo "$output" | jq -r '.result')
-  [ "$result" = "stale-checkpoint" ]
+  [ "$result" = "stale-stasis" ]
 }
 
 @test "validate: mismatched when feature_ids differ" {
   create_spec "feature-a" "1742860800" "In Progress"
   create_plan "feature-b" "1742860900" "whatever"
-  create_checkpoint "feature-c" "1742861000" "whatever"
+  create_stasis "feature-c" "1742861000" "whatever"
 
   run bash "$SCRIPT" validate "$DOCS"
   [ "$status" -eq 0 ]
@@ -372,7 +372,7 @@ create_linked_docs() {
   [ "$result" = "mismatched" ]
 }
 
-@test "validate: stale-plan takes priority over stale-checkpoint" {
+@test "validate: stale-plan takes priority over stale-stasis" {
   create_linked_docs
 
   # Modify both spec and plan bodies
@@ -382,7 +382,7 @@ create_linked_docs() {
   run bash "$SCRIPT" validate "$DOCS"
   [ "$status" -eq 0 ]
 
-  # stale-plan is more actionable (fix plan first, then checkpoint follows)
+  # stale-plan is more actionable (fix plan first, then stasis follows)
   result=$(echo "$output" | jq -r '.result')
   [ "$result" = "stale-plan" ]
 }
@@ -405,7 +405,7 @@ create_linked_docs() {
 # Step 4: validate — missing docs and unlinked metadata
 # ===========================================================================
 
-@test "validate: only spec exists — reports plan and checkpoint missing" {
+@test "validate: only spec exists — reports plan and stasis missing" {
   create_spec "my-feature" "1742860800" "In Progress"
 
   run bash "$SCRIPT" validate "$DOCS"
@@ -413,7 +413,7 @@ create_linked_docs() {
 
   details=$(echo "$output" | jq -r '.details | join(", ")')
   [[ "$details" == *"plan.md missing"* ]]
-  [[ "$details" == *"checkpoint.md missing"* ]]
+  [[ "$details" == *"stasis.md missing"* ]]
 }
 
 @test "validate: all docs missing — reports all missing, no error" {
@@ -423,7 +423,7 @@ create_linked_docs() {
   details=$(echo "$output" | jq -r '.details | join(", ")')
   [[ "$details" == *"spec.md missing"* ]]
   [[ "$details" == *"plan.md missing"* ]]
-  [[ "$details" == *"checkpoint.md missing"* ]]
+  [[ "$details" == *"stasis.md missing"* ]]
 }
 
 @test "validate: doc exists but no metadata — reports unlinked" {
@@ -448,7 +448,7 @@ EOF
   [[ "$details" == *"unlinked"* ]] || [ "$result" = "unlinked" ]
 }
 
-@test "validate: spec + plan exist, checkpoint missing — still validates hashes" {
+@test "validate: spec + plan exist, stasis missing — still validates hashes" {
   create_spec "my-feature" "1742860800" "In Progress"
   local spec_hash
   spec_hash=$(bash "$SCRIPT" status "$DOCS" | jq -r '.spec.content_hash')
@@ -460,8 +460,8 @@ EOF
   result=$(echo "$output" | jq -r '.result')
   details=$(echo "$output" | jq -r '.details | join(", ")')
 
-  # Hashes match so far, but checkpoint is missing
-  [[ "$details" == *"checkpoint.md missing"* ]]
+  # Hashes match so far, but stasis is missing
+  [[ "$details" == *"stasis.md missing"* ]]
   # Result should be aligned (what we can check is aligned)
   [ "$result" = "aligned" ]
 }
@@ -488,7 +488,7 @@ EOF
   [[ "$action" == *"/plan"* ]]
 }
 
-@test "recommend: spec + plan linked, no checkpoint → ready to build" {
+@test "recommend: spec + plan linked, no stasis → ready to build" {
   create_spec "my-feature" "1742860800" "In Progress"
   local spec_hash
   spec_hash=$(bash "$SCRIPT" status "$DOCS" | jq -r '.spec.content_hash')
@@ -517,7 +517,7 @@ EOF
   [[ "$action" == *"/plan"* ]]
 }
 
-@test "recommend: all aligned with checkpoint → /compact" {
+@test "recommend: all aligned with stasis → /compact" {
   create_linked_docs
 
   run bash "$SCRIPT" recommend "$DOCS"
@@ -590,46 +590,46 @@ TEMPLATES="$BATS_TEST_DIRNAME/../../.ccanvil/templates"
   [ "$output" -ge 1 ]
 }
 
-@test "template: checkpoint.md has Feature and Plan hash placeholders" {
-  run grep -c "^> Feature: \[" "$TEMPLATES/checkpoint.md"
+@test "template: stasis.md has Feature and Plan hash placeholders" {
+  run grep -c "^> Feature: \[" "$TEMPLATES/stasis.md"
   [ "$status" -eq 0 ]
   [ "$output" -ge 1 ]
 
-  run grep -c "^> Plan hash: \[" "$TEMPLATES/checkpoint.md"
-  [ "$status" -eq 0 ]
-  [ "$output" -ge 1 ]
-}
-
-@test "template: checkpoint.md uses epoch placeholder for Last updated" {
-  run grep -c "^> Last updated: \[epoch\]" "$TEMPLATES/checkpoint.md"
+  run grep -c "^> Plan hash: \[" "$TEMPLATES/stasis.md"
   [ "$status" -eq 0 ]
   [ "$output" -ge 1 ]
 }
 
-@test "template: checkpoint.md has pre-checkpoint reminder" {
-  run grep -c "plan before checkpoint" "$TEMPLATES/checkpoint.md"
+@test "template: stasis.md uses epoch placeholder for Last updated" {
+  run grep -c "^> Last updated: \[epoch\]" "$TEMPLATES/stasis.md"
+  [ "$status" -eq 0 ]
+  [ "$output" -ge 1 ]
+}
+
+@test "template: stasis.md has pre-stasis reminder" {
+  run grep -c "plan before stasis" "$TEMPLATES/stasis.md"
   [ "$status" -eq 0 ]
   [ "$output" -ge 1 ]
 }
 
 # ===========================================================================
-# Step 1: Checkpoint template — Determinism Review section (AC-1)
+# Stasis template — Determinism Review section
 # ===========================================================================
 
-@test "template: checkpoint.md has Determinism Review section" {
-  run grep -c "^## Determinism Review" "$TEMPLATES/checkpoint.md"
+@test "template: stasis.md has Determinism Review section" {
+  run grep -c "^## Determinism Review" "$TEMPLATES/stasis.md"
   [ "$status" -eq 0 ]
   [ "$output" -ge 1 ]
 }
 
-@test "template: checkpoint.md has operations_reviewed field" {
-  run grep -c "operations_reviewed" "$TEMPLATES/checkpoint.md"
+@test "template: stasis.md has operations_reviewed field" {
+  run grep -c "operations_reviewed" "$TEMPLATES/stasis.md"
   [ "$status" -eq 0 ]
   [ "$output" -ge 1 ]
 }
 
-@test "template: checkpoint.md has candidates_found field" {
-  run grep -c "candidates_found" "$TEMPLATES/checkpoint.md"
+@test "template: stasis.md has candidates_found field" {
+  run grep -c "candidates_found" "$TEMPLATES/stasis.md"
   [ "$status" -eq 0 ]
   [ "$output" -ge 1 ]
 }
@@ -638,12 +638,12 @@ TEMPLATES="$BATS_TEST_DIRNAME/../../.ccanvil/templates"
 # Step 2: validate — missing-determinism-review (AC-4)
 # ===========================================================================
 
-@test "validate: missing-determinism-review when checkpoint has no review section" {
-  # Create linked docs, then replace checkpoint without review section
+@test "validate: missing-determinism-review when stasis has no review section" {
+  # Create linked docs, then replace stasis without review section
   create_linked_docs
   local plan_hash
   plan_hash=$(bash "$SCRIPT" status "$DOCS" | jq -r '.plan.content_hash')
-  cat > "$DOCS/checkpoint.md" <<EOF
+  cat > "$DOCS/stasis.md" <<EOF
 # Checkpoint
 
 > Feature: my-feature
@@ -666,7 +666,7 @@ EOF
   [ "$result" = "missing-determinism-review" ]
 }
 
-@test "validate: aligned when checkpoint has Determinism Review section" {
+@test "validate: aligned when stasis has Determinism Review section" {
   create_linked_docs
 
   run bash "$SCRIPT" validate "$DOCS"
@@ -677,11 +677,11 @@ EOF
 }
 
 @test "validate: missing-determinism-review when section exists but is empty" {
-  # Create linked docs, then replace checkpoint with empty review section
+  # Create linked docs, then replace stasis with empty review section
   create_linked_docs
   local plan_hash
   plan_hash=$(bash "$SCRIPT" status "$DOCS" | jq -r '.plan.content_hash')
-  cat > "$DOCS/checkpoint.md" <<EOF
+  cat > "$DOCS/stasis.md" <<EOF
 # Checkpoint
 
 > Feature: my-feature
@@ -704,11 +704,11 @@ EOF
 }
 
 @test "validate: missing-determinism-review has detail message" {
-  # Create linked docs, then replace checkpoint without review section
+  # Create linked docs, then replace stasis without review section
   create_linked_docs
   local plan_hash
   plan_hash=$(bash "$SCRIPT" status "$DOCS" | jq -r '.plan.content_hash')
-  cat > "$DOCS/checkpoint.md" <<EOF
+  cat > "$DOCS/stasis.md" <<EOF
 # Checkpoint
 
 > Feature: my-feature
@@ -1020,7 +1020,7 @@ SCRIPT
 }
 
 # ===========================================================================
-# Step 7: Workflow rule — checkpoint flow and checklist (AC-2, AC-3)
+# Workflow rule — stasis flow and checklist
 # ===========================================================================
 
 RULES="$BATS_TEST_DIRNAME/../../.claude/rules"
@@ -1060,26 +1060,26 @@ RULES="$BATS_TEST_DIRNAME/../../.claude/rules"
   [ "$output" -ge 1 ]
 }
 
-@test "self-review: references the checkpoint template" {
-  run grep -c "checkpoint.md\|checkpoint template" "$RULES/self-review.md"
+@test "self-review: references the stasis template" {
+  run grep -c "stasis.md\|stasis template" "$RULES/self-review.md"
   [ "$status" -eq 0 ]
   [ "$output" -ge 1 ]
 }
 
 # ===========================================================================
-# Step 9: /catchup integration (AC-10, AC-11)
+# /recall skill integration
 # ===========================================================================
 
-COMMANDS="$BATS_TEST_DIRNAME/../../.claude/commands"
+SKILLS="$BATS_TEST_DIRNAME/../../.claude/skills"
 
-@test "catchup: surfaces Determinism Review from checkpoint" {
-  run grep -c "Determinism Review" "$COMMANDS/catchup.md"
+@test "recall: surfaces Determinism Review from stasis" {
+  run grep -c "Determinism Review" "$SKILLS/recall/SKILL.md"
   [ "$status" -eq 0 ]
   [ "$output" -ge 1 ]
 }
 
-@test "catchup: runs audit-session" {
-  run grep -c "audit-session" "$COMMANDS/catchup.md"
+@test "recall: runs audit-session" {
+  run grep -c "audit-session" "$SKILLS/recall/SKILL.md"
   [ "$status" -eq 0 ]
   [ "$output" -ge 1 ]
 }

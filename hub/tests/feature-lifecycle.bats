@@ -895,7 +895,7 @@ Auth feature.
 EOF
   echo "spec content" > "$PROJECT/docs/spec.md"
   echo "plan content" > "$PROJECT/docs/plan.md"
-  echo "checkpoint content" > "$PROJECT/docs/checkpoint.md"
+  echo "stasis content" > "$PROJECT/docs/stasis.md"
   git -C "$PROJECT" add -A && git -C "$PROJECT" commit -q -m "add spec and docs"
 
   "$PROJECT/.ccanvil/scripts/docs-check.sh" complete auth-system "$PROJECT/docs"
@@ -903,7 +903,7 @@ EOF
   # Lifecycle docs should be gone
   [ ! -f "$PROJECT/docs/spec.md" ]
   [ ! -f "$PROJECT/docs/plan.md" ]
-  [ ! -f "$PROJECT/docs/checkpoint.md" ]
+  [ ! -f "$PROJECT/docs/stasis.md" ]
   # Archived spec should still exist
   [ -f "$PROJECT/docs/specs/auth-system.md" ]
 }
@@ -945,7 +945,7 @@ Auth feature.
 EOF
   git -C "$PROJECT" add -A && git -C "$PROJECT" commit -q -m "add spec"
 
-  # No docs/spec.md, plan.md, or checkpoint.md exist
+  # No docs/spec.md, plan.md, or stasis.md exist
   run "$PROJECT/.ccanvil/scripts/docs-check.sh" complete auth-system "$PROJECT/docs"
   [ "$status" -eq 0 ]
 }
@@ -961,7 +961,7 @@ EOF
     stale=""
     [ -f docs/spec.md ] && stale="$stale docs/spec.md"
     [ -f docs/plan.md ] && stale="$stale docs/plan.md"
-    [ -f docs/checkpoint.md ] && stale="$stale docs/checkpoint.md"
+    [ -f docs/stasis.md ] && stale="$stale docs/stasis.md"
     if [ -n "$stale" ]; then
       echo "Lifecycle docs must be cleaned up:$stale"
       exit 1
@@ -977,7 +977,7 @@ EOF
     stale=""
     [ -f docs/spec.md ] && stale="$stale docs/spec.md"
     [ -f docs/plan.md ] && stale="$stale docs/plan.md"
-    [ -f docs/checkpoint.md ] && stale="$stale docs/checkpoint.md"
+    [ -f docs/stasis.md ] && stale="$stale docs/stasis.md"
     if [ -n "$stale" ]; then
       echo "Lifecycle docs must be cleaned up:$stale"
       exit 1

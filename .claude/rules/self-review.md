@@ -2,7 +2,7 @@
 
 ## The Rule
 
-The `## Determinism Review` section in `docs/checkpoint.md` is **mandatory** at every checkpoint. The checkpoint template (`.ccanvil/templates/checkpoint.md`) defines the format. This rule provides the judgment criteria for what to flag.
+The `## Determinism Review` section in `docs/stasis.md` is **mandatory** at every stasis. The stasis template (`.ccanvil/templates/stasis.md`) defines the format. This rule provides the judgment criteria for what to flag.
 
 ## When to Flag
 
@@ -14,7 +14,7 @@ Flag an operation if ALL of these are true:
 
 ## What to Write
 
-Fill the `## Determinism Review` section in `docs/checkpoint.md` with:
+Fill the `## Determinism Review` section in `docs/stasis.md` with:
 - `operations_reviewed: [count]` — how many operations you assessed
 - `candidates_found: [count]` — how many should become deterministic
 - For each candidate: `**[operation]**: Claude [what happened]. Should be [deterministic replacement]. Impact: [high/medium/low].`
@@ -30,7 +30,7 @@ Fill the `## Determinism Review` section in `docs/checkpoint.md` with:
 
 ## Safety Net
 
-The `docs-check.sh audit-session` script provides a post-hoc safety net — it scans git diffs for stochastic patterns that the warm-context review may have missed. `/catchup` runs it automatically.
+The `docs-check.sh audit-session` script provides a post-hoc safety net — it scans git diffs for stochastic patterns that the warm-context review may have missed. `/recall` runs it automatically.
 
 ## Full Audit
 

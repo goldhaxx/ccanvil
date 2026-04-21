@@ -24,7 +24,7 @@ Each level is optional. ccanvil never requires external tools — it adapts to w
 
 - **Spec-first workflow** — acceptance criteria before code, every time
 - **TDD enforcement** — red-green-refactor cycle with automatic verification
-- **Context management** — hierarchical loading, aggressive compaction, checkpoint/resume
+- **Context management** — hierarchical loading, aggressive compaction, `/stasis` + `/recall` across sessions
 - **Modular tool integration** — pluggable providers for backlog, specs, plans, and more. Local files by default; MCP, CLIs, and APIs when you're ready
 - **Bi-directional sync** — hub/node architecture with section-merge, conflict resolution, lockfile tracking
 - **Security audit** — deterministic PII/secrets scanner, pre-push hook, integrated into reviews
@@ -113,7 +113,9 @@ You're set. Use the ccanvil workflow:
 /plan                → writes docs/plan.md with ordered TDD steps
 "Start Step 1"       → enters red-green-refactor cycle
 /review              → code review before committing
-/catchup             → resume after /compact
+/stasis              → end-of-session review (writes docs/stasis.md)
+/compact             → compress context
+/recall              → resume after /compact or /clear
 ```
 
 ---
@@ -148,16 +150,17 @@ Copy the whole directory with `cp -r .claude ./.claude`. Here's what's inside:
 | `.claude/hooks/lint-on-write.sh` | `./.claude/hooks/lint-on-write.sh` | PostToolUse hook for syntax validation. Built-in: bash, json, yaml. Extensible via `.claude/lint.json`. | No. Add project linters to `.claude/lint.json` instead. |
 | `.claude/hooks/format-on-write.sh` | `./.claude/hooks/format-on-write.sh` | PostToolUse hook for auto-formatting. Config-driven via `.claude/lint.json` formatters section. | No. Add project formatters to `.claude/lint.json` instead. |
 | `.claude/rules/tdd.md` | `./.claude/rules/tdd.md` | TDD enforcement rules. Defines the red-green-refactor cycle, test naming conventions, and what to do when tests break. Loaded alongside CLAUDE.md at launch. | Rarely. These rules are tech-stack-agnostic. Modify only if your project has unusual testing requirements. |
-| `.claude/rules/workflow.md` | `./.claude/rules/workflow.md` | Session discipline and context management rules. Defines session objectives, context preservation via checkpoints, commit practices, when to use sub-agents, and error recovery (stop after 2 failed attempts). Loaded alongside CLAUDE.md at launch. | Rarely. These are general best practices. Modify if your team has specific workflow requirements. |
+| `.claude/rules/workflow.md` | `./.claude/rules/workflow.md` | Session discipline and context management rules. Defines session objectives, context preservation via `/stasis`, commit practices, when to use sub-agents, and error recovery (stop after 2 failed attempts). Loaded alongside CLAUDE.md at launch. | Rarely. These are general best practices. Modify if your team has specific workflow requirements. |
 | `.claude/rules/code-quality.md` | `./.claude/rules/code-quality.md` | Code standards rules. Covers pattern-following, error handling, dependency management, code organization, and naming conventions. Loaded alongside CLAUDE.md at launch. | Sometimes. Adjust naming conventions or error handling patterns to match your project's standards. |
 | `.claude/rules/deterministic-first.md` | `./.claude/rules/deterministic-first.md` | Deterministic-first principle. Hierarchy: hooks → scripts → commands → reasoning. Core architecture governance. | Rarely. Foundational design principle. |
 | `.claude/rules/tls-troubleshooting.md` | _(hub-only)_ | TLS certificate troubleshooting for Cloudflare WARP. Not distributed to downstream projects — add to your global `~/.claude/rules/` if needed. | N/A. |
-| `.claude/rules/self-review.md` | `./.claude/rules/self-review.md` | Continuous determinism analysis during checkpoints and reviews. Lightweight version of `/ccanvil-audit`. | Rarely. Supports deterministic-first principle. |
+| `.claude/rules/self-review.md` | `./.claude/rules/self-review.md` | Continuous determinism analysis during `/stasis` runs and reviews. Lightweight version of `/ccanvil-audit`. | Rarely. Supports deterministic-first principle. |
 | `.claude/skills/tdd/SKILL.md` | `./.claude/skills/tdd/SKILL.md` | The full TDD workflow skill. When triggered (by saying "tdd" or "test first"), Claude follows a structured specification → red → green → refactor → commit procedure. Skills load on-demand, not at startup, so they don't consume context when unused. | Sometimes. Replace `$TEST_COMMAND` references if you want the skill to reference your exact test command. |
 | `.claude/agents/code-reviewer.md` | `./.claude/agents/code-reviewer.md` | A sub-agent that reviews uncommitted changes for correctness, test coverage, security issues, performance, and convention adherence. Runs in its own isolated context window. Invoked by the `/review` command. | Rarely. Modify if you want to add project-specific review criteria. |
 | `.claude/agents/spec-writer.md` | `./.claude/agents/spec-writer.md` | A sub-agent that analyzes feature requests and produces structured specifications with testable acceptance criteria. Runs in its own isolated context window. Writes output to `docs/spec.md`. | Rarely. Modify if your team uses a different specification format. |
 | `.claude/agents/ccanvil-differ.md` | `./.claude/agents/ccanvil-differ.md` | A sub-agent that classifies project changes as generalizable vs project-specific. Used by `/ccanvil-push` to determine what should be upstreamed. | Rarely. Modify if you want to change classification heuristics. |
-| `.claude/commands/catchup.md` | `./.claude/commands/catchup.md` | Defines the `/catchup` slash command. When invoked, reads `docs/checkpoint.md`, recent git history, and current diff to orient after a `/compact` or `/clear`. Does NOT implement anything — it only reports status. | No. This is workflow infrastructure. |
+| `.claude/skills/recall/SKILL.md` | `./.claude/skills/recall/SKILL.md` | Defines the `/recall` skill. When invoked, reads `docs/stasis.md`, recent git history, and current diff to orient after a `/compact` or `/clear`. Does NOT implement anything — it only reports status. | No. This is workflow infrastructure. |
+| `.claude/skills/stasis/SKILL.md` | `./.claude/skills/stasis/SKILL.md` | Defines the `/stasis` skill. Strategic end-of-session review that writes `docs/stasis.md` with determinism review, security review, cross-session patterns, and memory candidates. Run before `/compact`. | No. This is workflow infrastructure. |
 | `.claude/commands/plan.md` | `./.claude/commands/plan.md` | Defines the `/plan` slash command. When invoked, reads the spec and codebase, then writes an ordered implementation plan to `docs/plan.md`. Each step is sized for one TDD cycle. Does NOT implement anything — it only plans. | No. This is workflow infrastructure. |
 | `.claude/commands/review.md` | `./.claude/commands/review.md` | Defines the `/review` slash command. When invoked, delegates to the code-reviewer sub-agent to review all uncommitted changes. | No. This is workflow infrastructure. |
 | `.claude/commands/ccanvil-status.md` | `./.claude/commands/ccanvil-status.md` | `/ccanvil-status` — show sync state between project and hub. | No. Sync infrastructure. |
@@ -186,7 +189,7 @@ Contains scripts, guide docs, and templates:
 | `.ccanvil/scripts/fetch-license.sh` | `./.ccanvil/scripts/fetch-license.sh` | Fetches license templates from GitHub API. | No. |
 | `.ccanvil/scripts/fix-cloudflare-certs.sh` | `./.ccanvil/scripts/fix-cloudflare-certs.sh` | Cloudflare WARP TLS cert fix. | No. |
 | `.ccanvil/guide/*.md` | `./.ccanvil/guide/*.md` | Split guide section files (12 files). | Rarely. |
-| `.ccanvil/templates/*.md` | `./.ccanvil/templates/*.md` | Persistent format guides for specs, plans, checkpoints. | Rarely. |
+| `.ccanvil/templates/*.md` | `./.ccanvil/templates/*.md` | Persistent format guides for specs, plans, stasis. | Rarely. |
 | `.ccanvil/templates/lint.json` | `./.claude/lint.json` | Linter/formatter configuration template. | Yes. |
 | `.ccanvil/templates/github/*` | `./.github/`, `./README.md`, `./CONTRIBUTING.md` | GitHub-ready templates (README, CONTRIBUTING, PR/issue templates, CI, pre-push hook). | Yes. |
 
@@ -198,7 +201,7 @@ These are project-owned files, not preset artifacts. Created as empty placeholde
 |---|---|---|
 | `docs/spec.md` | Active spec — overwritten each time you spec a new feature. | No. Claude fills this in. |
 | `docs/plan.md` | Active plan — overwritten by `/plan`. | No. Claude fills this in. |
-| `docs/checkpoint.md` | Active checkpoint — overwritten when Claude checkpoints progress. | No. Claude fills this in. |
+| `docs/stasis.md` | Active stasis snapshot — written by `/stasis` at end of session. | No. `/stasis` fills this in. |
 | `docs/specs/` | Spec backlog directory. | No. Managed by lifecycle tools. |
 
 ### Files that stay outside your project (reference materials only)
@@ -250,7 +253,7 @@ You:  "Looks good. Let's start with Step 1."
 
 ```
 You:  /compact
-You:  /catchup
+You:  /recall
 
 Claude: "Last session completed Steps 1-3 of the auth feature.
          All tests passing. Step 4 (refresh token rotation) is next.
@@ -278,9 +281,9 @@ Claude: "Review complete.
 ```
 You:  "I need to pause auth and fix a critical bug in billing."
 
-         ↓ Claude writes checkpoint
+         ↓ You run /stasis
 
-Claude: "Checkpointed auth progress to docs/checkpoint.md.
+Claude: "Wrote stasis snapshot to docs/stasis.md.
          Committed current work. Ready for /compact."
 
 You:  /compact
@@ -342,7 +345,8 @@ You:  "Yes"
 | Command | What it does |
 |---------|-------------|
 | `/init` | Initialize current directory from the preset (global command) |
-| `/catchup` | Read checkpoint + git state, orient without implementing |
+| `/stasis` | End-of-session review — write `docs/stasis.md` before `/compact` |
+| `/recall` | Read stasis + git state, orient without implementing |
 | `/plan` | Create an implementation plan from a spec |
 | `/review` | Spawn code-reviewer agent on uncommitted changes |
 | `/ccanvil-status` | Show sync state between project and hub |
@@ -372,7 +376,7 @@ Without tests, Claude's only verification is its own judgment — which degrades
 LLMs perform best with clear, constrained objectives. A spec with binary acceptance criteria transforms a vague request into a concrete implementation target. The spec-first approach front-loads the thinking, which is the part humans do best.
 
 ### 4. Small sessions beat long sessions
-A fresh 30-minute session with clear context outperforms a degraded 3-hour session every time. Commit early, checkpoint often, /compact aggressively. Each session should have ONE objective.
+A fresh 30-minute session with clear context outperforms a degraded 3-hour session every time. Commit early, `/stasis` at session boundaries, `/compact` aggressively. Each session should have ONE objective.
 
 ### 5. Hooks for determinism, rules for judgment
 Use hooks for things that must ALWAYS happen — formatting, security blocks, lint checks. Use rules for things requiring judgment — coding patterns, architectural decisions. Use `.claude/lint.json` to configure project-specific linters and formatters without modifying hub scripts.
@@ -481,12 +485,12 @@ Rules that apply when working in this area of the codebase.
   .claude/settings.local.json
   .claude/local/CLAUDE.md
   .ccanvil/ccanvil.lock  (sync state — node-specific)
-  docs/checkpoint.md     (ephemeral session state)
+  docs/stasis.md         (ephemeral session state)
 ```
 
 Add to your `.gitignore`:
 ```
 .claude/settings.local.json
 .claude/local/
-docs/checkpoint.md
+docs/stasis.md
 ```

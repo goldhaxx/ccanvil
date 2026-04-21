@@ -21,14 +21,14 @@ Main is protected — PreToolUse hook blocks direct commits to main/master.
 
 ## Session Discipline
 - One objective per session. State it at the start.
-- End with: one-line summary → explicit next action → `/compact`.
-- After ~30 min of complex work, suggest checkpointing.
+- End with: one-line summary → explicit next action → `/stasis` → `/compact`.
+- After ~30 min of complex work, suggest running `/stasis`.
 
 ## Context Preservation
-- On "checkpoint," use `.ccanvil/templates/checkpoint.md` format. Include Feature ID, epoch, plan hash.
-- Plan before checkpoint if no plan exists.
-- Determinism review mandatory at checkpoint — follow `self-review.md`.
-- Resume after reset: read `docs/checkpoint.md` first.
+- Run `/stasis` before `/compact`. Writes `docs/stasis.md` using `.ccanvil/templates/stasis.md` — Feature ID, epoch, plan hash.
+- Plan before `/stasis` if no plan exists.
+- Determinism review mandatory in every stasis — follow `self-review.md`.
+- Resume after reset: run `/recall`.
 
 ## Hub Sync
 - Classify new preset files at creation: "project-specific or hub-tracked?"

@@ -23,13 +23,13 @@ graph TB
     subgraph "Working Documents"
         SP["docs/spec.md<br/><i>Active specification</i>"]
         PL["docs/plan.md<br/><i>Active plan</i>"]
-        CP["docs/checkpoint.md<br/><i>Session state</i>"]
+        CP["docs/stasis.md<br/><i>Session state</i>"]
     end
 
     subgraph "Persistent Templates"
         T1[".ccanvil/templates/spec.md"]
         T2[".ccanvil/templates/plan.md"]
-        T3[".ccanvil/templates/checkpoint.md"]
+        T3[".ccanvil/templates/stasis.md"]
     end
 
     subgraph "Reference Documents (synced)"

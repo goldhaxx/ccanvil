@@ -52,10 +52,10 @@ Hook scripts live in `.claude/hooks/` and are referenced from `settings.json`. T
 |-----------|---------|----------------------|
 | `deterministic-first.md` | Architecture | Use scripts/hooks over Claude reasoning for computable operations; hierarchy: hook → script → slash command → pure reasoning |
 | `tdd.md` | Testing | Red-green-refactor cycle, test naming, fix implementation not tests |
-| `workflow.md` | Sessions | One objective per session, checkpoint, delegate research, stop after 2 failures |
+| `workflow.md` | Sessions | One objective per session, `/stasis` before `/compact`, delegate research, stop after 2 failures |
 | `code-quality.md` | Code | Follow existing patterns, typed errors, pin dependencies, intent-revealing names |
 | `tls-troubleshooting.md` | Certs | Auto-detect WARP cert errors, fix with CA bundle, never disable TLS |
-| `self-review.md` | Meta | Flag stochastic interventions during checkpoints/reviews; lightweight always-on version of `/ccanvil-audit` |
+| `self-review.md` | Meta | Flag stochastic interventions during stasis runs and reviews; lightweight always-on version of `/ccanvil-audit` |
 
 <!-- NODE-SPECIFIC-START -->
 <!-- Add project-specific content below this line. -->

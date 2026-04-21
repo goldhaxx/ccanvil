@@ -3,7 +3,7 @@
 #
 # Usage:
 #   docs-check.sh status [docs-dir]      Extract metadata + compute hashes → JSON
-#   docs-check.sh validate [docs-dir]    Check alignment between spec, plan, checkpoint
+#   docs-check.sh validate [docs-dir]    Check alignment between spec, plan, stasis
 #   docs-check.sh recommend [docs-dir]   Suggest next action based on document state
 
 set -euo pipefail
@@ -234,27 +234,27 @@ doc_entry() {
 # ---------------------------------------------------------------------------
 # cmd_status — Extract metadata + compute content hashes for all docs.
 #
-# Output: JSON object with spec, plan, checkpoint entries.
+# Output: JSON object with spec, plan, stasis entries.
 # ---------------------------------------------------------------------------
 cmd_status() {
   local docs_dir="${1:-$DEFAULT_DOCS_DIR}"
 
-  local spec_entry plan_entry cp_entry
+  local spec_entry plan_entry stasis_entry
   spec_entry=$(doc_entry "$docs_dir/spec.md" "spec")
   plan_entry=$(doc_entry "$docs_dir/plan.md" "plan")
-  cp_entry=$(doc_entry "$docs_dir/checkpoint.md" "checkpoint")
+  stasis_entry=$(doc_entry "$docs_dir/stasis.md" "stasis")
 
   jq -n \
     --argjson spec "$spec_entry" \
     --argjson plan "$plan_entry" \
-    --argjson checkpoint "$cp_entry" \
-    '{spec: $spec, plan: $plan, checkpoint: $checkpoint}'
+    --argjson stasis "$stasis_entry" \
+    '{spec: $spec, plan: $plan, stasis: $stasis}'
 }
 
 # ---------------------------------------------------------------------------
-# cmd_validate — Check alignment between spec, plan, and checkpoint.
+# cmd_validate — Check alignment between spec, plan, and stasis.
 #
-# Priority order: mismatched > stale-plan > stale-checkpoint > aligned
+# Priority order: mismatched > stale-plan > stale-stasis > aligned
 #
 # Output: JSON with result, details array, and per-doc status.
 # ---------------------------------------------------------------------------
@@ -263,29 +263,29 @@ cmd_validate() {
   local status_json
   status_json=$(cmd_status "$docs_dir")
 
-  local spec_exists plan_exists cp_exists
+  local spec_exists plan_exists stasis_exists
   spec_exists=$(echo "$status_json" | jq -r '.spec.exists')
   plan_exists=$(echo "$status_json" | jq -r '.plan.exists')
-  cp_exists=$(echo "$status_json" | jq -r '.checkpoint.exists')
+  stasis_exists=$(echo "$status_json" | jq -r '.stasis.exists')
 
   local details="[]"
   local result="aligned"
 
   # Extract feature_ids
-  local spec_fid plan_fid cp_fid
+  local spec_fid plan_fid stasis_fid
   spec_fid=$(echo "$status_json" | jq -r '.spec.feature_id // empty')
   plan_fid=$(echo "$status_json" | jq -r '.plan.feature_id // empty')
-  cp_fid=$(echo "$status_json" | jq -r '.checkpoint.feature_id // empty')
+  stasis_fid=$(echo "$status_json" | jq -r '.stasis.feature_id // empty')
 
   # Collect present feature_ids for mismatch check
   local fids=()
   [[ -n "$spec_fid" ]] && fids+=("$spec_fid")
   [[ -n "$plan_fid" ]] && fids+=("$plan_fid")
-  [[ -n "$cp_fid" ]] && fids+=("$cp_fid")
+  [[ -n "$stasis_fid" ]] && fids+=("$stasis_fid")
 
   # Multi-spec: if no spec.md exists, check if specs/ has any specs
   # If so, this is "no-active-spec" (not an error — just no feature activated)
-  if [[ "$spec_exists" != "true" && "$plan_exists" != "true" && "$cp_exists" != "true" ]]; then
+  if [[ "$spec_exists" != "true" && "$plan_exists" != "true" && "$stasis_exists" != "true" ]]; then
     local specs_dir="$docs_dir/specs"
     if [[ -d "$specs_dir" ]] && ls "$specs_dir"/*.md >/dev/null 2>&1; then
       jq -n \
@@ -304,8 +304,8 @@ cmd_validate() {
   if [[ "$plan_exists" != "true" ]]; then
     details=$(echo "$details" | jq '. + ["plan.md missing"]')
   fi
-  if [[ "$cp_exists" != "true" ]]; then
-    details=$(echo "$details" | jq '. + ["checkpoint.md missing"]')
+  if [[ "$stasis_exists" != "true" ]]; then
+    details=$(echo "$details" | jq '. + ["stasis.md missing"]')
   fi
 
   # Check for unlinked docs (exist but have no feature_id metadata)
@@ -318,8 +318,8 @@ cmd_validate() {
     details=$(echo "$details" | jq '. + ["plan.md unlinked (no metadata)"]')
     has_unlinked=true
   fi
-  if [[ "$cp_exists" == "true" && -z "$cp_fid" ]]; then
-    details=$(echo "$details" | jq '. + ["checkpoint.md unlinked (no metadata)"]')
+  if [[ "$stasis_exists" == "true" && -z "$stasis_fid" ]]; then
+    details=$(echo "$details" | jq '. + ["stasis.md unlinked (no metadata)"]')
     has_unlinked=true
   fi
 
@@ -356,20 +356,20 @@ cmd_validate() {
     fi
   fi
 
-  # Check stale-checkpoint: plan's current hash vs checkpoint's stored plan_hash
-  if [[ "$result" != "mismatched" && "$result" != "stale-plan" && "$plan_exists" == "true" && "$cp_exists" == "true" ]]; then
-    local plan_current_hash cp_stored_plan_hash
+  # Check stale-stasis: plan's current hash vs stasis's stored plan_hash
+  if [[ "$result" != "mismatched" && "$result" != "stale-plan" && "$plan_exists" == "true" && "$stasis_exists" == "true" ]]; then
+    local plan_current_hash stasis_stored_plan_hash
     plan_current_hash=$(echo "$status_json" | jq -r '.plan.content_hash // empty')
-    cp_stored_plan_hash=$(echo "$status_json" | jq -r '.checkpoint.plan_hash // empty')
+    stasis_stored_plan_hash=$(echo "$status_json" | jq -r '.stasis.plan_hash // empty')
 
-    if [[ -n "$cp_stored_plan_hash" && -n "$plan_current_hash" && "$plan_current_hash" != "$cp_stored_plan_hash" ]]; then
-      result="stale-checkpoint"
-      details=$(echo "$details" | jq '. + ["plan content changed since checkpoint was written"]')
+    if [[ -n "$stasis_stored_plan_hash" && -n "$plan_current_hash" && "$plan_current_hash" != "$stasis_stored_plan_hash" ]]; then
+      result="stale-stasis"
+      details=$(echo "$details" | jq '. + ["plan content changed since stasis was written"]')
     fi
   fi
 
-  # Check missing-determinism-review: checkpoint exists but lacks the required section
-  if [[ "$result" == "aligned" && "$cp_exists" == "true" ]]; then
+  # Check missing-determinism-review: stasis exists but lacks the required section
+  if [[ "$result" == "aligned" && "$stasis_exists" == "true" ]]; then
     local has_review=false
     local review_has_content=false
     local in_review=false
@@ -388,11 +388,11 @@ cmd_validate() {
       if $in_review && [[ -n "$line" && ! "$line" =~ ^[[:space:]]*$ ]]; then
         review_has_content=true
       fi
-    done < "$docs_dir/checkpoint.md"
+    done < "$docs_dir/stasis.md"
 
     if ! $has_review || ! $review_has_content; then
       result="missing-determinism-review"
-      details=$(echo "$details" | jq '. + ["checkpoint.md missing Determinism Review section or section is empty"]')
+      details=$(echo "$details" | jq '. + ["stasis.md missing Determinism Review section or section is empty"]')
     fi
   fi
 
@@ -412,9 +412,9 @@ cmd_validate() {
 #   spec only         → "Run /plan"
 #   mismatched        → "Reconcile feature IDs"
 #   stale-plan        → "Re-run /plan"
-#   stale-checkpoint  → "Update checkpoint"
-#   aligned (no cp)   → "Ready to build"
-#   aligned (with cp) → "/compact to wrap session"
+#   stale-stasis      → "Update stasis"
+#   aligned (no stasis)   → "Ready to build"
+#   aligned (with stasis) → "/compact to wrap session"
 #
 # Output: JSON with next_action and reason.
 # ---------------------------------------------------------------------------
@@ -426,10 +426,10 @@ cmd_recommend() {
   local result
   result=$(echo "$validate_json" | jq -r '.result')
 
-  local spec_exists plan_exists cp_exists
+  local spec_exists plan_exists stasis_exists
   spec_exists=$(echo "$validate_json" | jq -r '.status.spec.exists')
   plan_exists=$(echo "$validate_json" | jq -r '.status.plan.exists')
-  cp_exists=$(echo "$validate_json" | jq -r '.status.checkpoint.exists')
+  stasis_exists=$(echo "$validate_json" | jq -r '.status.stasis.exists')
 
   local next_action reason
 
@@ -447,9 +447,9 @@ cmd_recommend() {
     fi
 
   # No docs at all
-  elif [[ "$spec_exists" != "true" && "$plan_exists" != "true" && "$cp_exists" != "true" ]]; then
+  elif [[ "$spec_exists" != "true" && "$plan_exists" != "true" && "$stasis_exists" != "true" ]]; then
     next_action="Describe a feature"
-    reason="No spec, plan, or checkpoint found. Start by describing what you want to build."
+    reason="No spec, plan, or stasis found. Start by describing what you want to build."
 
   elif [[ "$result" == "unlinked" ]]; then
     next_action="Add lifecycle metadata to docs"
@@ -463,23 +463,23 @@ cmd_recommend() {
     next_action="Re-run /plan"
     reason="Spec has changed since the plan was written. The plan is out of date."
 
-  elif [[ "$result" == "stale-checkpoint" ]]; then
-    next_action="Update checkpoint"
-    reason="Plan has changed since the checkpoint was written. The checkpoint is out of date."
+  elif [[ "$result" == "stale-stasis" ]]; then
+    next_action="Update stasis"
+    reason="Plan has changed since the stasis was written. The stasis is out of date."
 
   elif [[ "$result" == "missing-determinism-review" ]]; then
-    next_action="Add Determinism Review to checkpoint"
-    reason="Checkpoint exists but is missing the required Determinism Review section. Add the section before clearing context."
+    next_action="Add Determinism Review to stasis"
+    reason="Stasis exists but is missing the required Determinism Review section. Add the section before clearing context."
 
   elif [[ "$spec_exists" == "true" && "$plan_exists" != "true" ]]; then
     next_action="Run /plan"
     reason="Spec exists but no plan. Create an implementation plan from the spec."
 
-  elif [[ "$result" == "aligned" && "$cp_exists" == "true" ]]; then
+  elif [[ "$result" == "aligned" && "$stasis_exists" == "true" ]]; then
     next_action="/compact to wrap session"
-    reason="All docs aligned with checkpoint. Run /compact to preserve context, then start the next feature."
+    reason="All docs aligned with stasis. Run /compact to preserve context, then start the next feature."
 
-  elif [[ "$result" == "aligned" && "$cp_exists" != "true" ]]; then
+  elif [[ "$result" == "aligned" && "$stasis_exists" != "true" ]]; then
     next_action="Ready to build"
     reason="Spec and plan are aligned. Start implementing via TDD."
 
@@ -851,7 +851,7 @@ cmd_complete() {
   fi
 
   # Remove lifecycle docs (they're preserved in git history on the branch)
-  rm -f "$docs_dir/spec.md" "$docs_dir/plan.md" "$docs_dir/checkpoint.md"
+  rm -f "$docs_dir/spec.md" "$docs_dir/plan.md" "$docs_dir/stasis.md"
 
   # Commit completion + cleanup
   local repo_root
@@ -1252,6 +1252,94 @@ cmd_idea_update() {
 }
 
 # ---------------------------------------------------------------------------
+# cmd_legacy_refs_scan — Find references to legacy ccanvil verbs/artifacts.
+#
+# Scans a project dir for:
+#   - /catchup  (slash command)
+#   - /checkpoint  (slash command, pre-stasis naming)
+#   - docs/checkpoint.md  (artifact path)
+#   - checkpoint.read | checkpoint.write  (operations.sh op names)
+#   - stale-checkpoint  (validate state name)
+#
+# Classifies each match by scope:
+#   - "hub-owned": line appears BEFORE "<!-- NODE-SPECIFIC-START -->" in a file
+#                  that contains that marker (indicating the match is in content
+#                  the hub pulls and should be fixed at the hub).
+#   - "node-specific": line appears AFTER the marker, OR the file has no marker
+#                      (the user wrote it and must fix it manually).
+#
+# Output: JSON array [{file, line, match, scope}].
+# Exit: 0 if empty; 1 if any matches found.
+# ---------------------------------------------------------------------------
+cmd_legacy_refs_scan() {
+  local project_dir="${1:-.}"
+
+  local pattern='/catchup|/checkpoint|docs/checkpoint\.md|checkpoint\.(read|write)|stale-checkpoint'
+
+  # Collect matches via grep -rnE; skip .git, node_modules, and binary files.
+  # -I: skip binary; -n: line numbers; --exclude-dir: skip common noise.
+  # Tolerate empty grep output (exit 1 when no matches).
+  local raw_matches
+  raw_matches=$(cd "$project_dir" && grep -rnIE \
+    --exclude-dir=.git \
+    --exclude-dir=node_modules \
+    --exclude-dir=dist \
+    --exclude-dir=generated \
+    "$pattern" . 2>/dev/null || true)
+
+  if [[ -z "$raw_matches" ]]; then
+    echo "[]"
+    return 0
+  fi
+
+  # Per-file marker line lookup. macOS ships bash 3.2 (no associative arrays),
+  # so each iteration re-greps — fine for the tiny scanner workload.
+  local entries="[]"
+  while IFS= read -r raw; do
+    [[ -z "$raw" ]] && continue
+    # grep -rn format: ./path:line:content
+    local file_path="${raw%%:*}"
+    local rest="${raw#*:}"
+    local line_num="${rest%%:*}"
+    local content="${rest#*:}"
+
+    # Normalize leading ./
+    file_path="${file_path#./}"
+
+    # Look up the NODE-SPECIFIC marker line (0 if absent).
+    local marker
+    marker=$(grep -n '<!-- NODE-SPECIFIC-START -->' "$project_dir/$file_path" 2>/dev/null | head -1 | cut -d: -f1 || true)
+    marker="${marker:-0}"
+
+    local scope="node-specific"
+    if [[ "$marker" != "0" && "$line_num" -lt "$marker" ]]; then
+      scope="hub-owned"
+    fi
+
+    # Extract the actual matching token(s) from the content line using grep -oE
+    local matched
+    matched=$(echo "$content" | grep -oE "$pattern" | head -1)
+    [[ -z "$matched" ]] && continue
+
+    entries=$(echo "$entries" | jq \
+      --arg file "$file_path" \
+      --argjson line "$line_num" \
+      --arg match "$matched" \
+      --arg scope "$scope" \
+      '. + [{file: $file, line: $line, match: $match, scope: $scope}]')
+  done <<< "$raw_matches"
+
+  echo "$entries"
+
+  local count
+  count=$(echo "$entries" | jq 'length')
+  if [[ "$count" -gt 0 ]]; then
+    return 1
+  fi
+  return 0
+}
+
+# ---------------------------------------------------------------------------
 # Dispatch
 # ---------------------------------------------------------------------------
 
@@ -1259,22 +1347,23 @@ cmd="${1:-}"
 shift || true
 
 case "$cmd" in
-  status)        cmd_status "$@" ;;
-  validate)      cmd_validate "$@" ;;
-  recommend)     cmd_recommend "$@" ;;
-  audit-session) cmd_audit_session "$@" ;;
-  config-get)    cmd_config_get "$@" ;;
-  list-specs)    cmd_list_specs "$@" ;;
-  activate)      cmd_activate "$@" ;;
-  complete)      cmd_complete "$@" ;;
-  land)          cmd_land "$@" ;;
-  radar-gather)  cmd_radar_gather "$@" ;;
-  idea-add)      cmd_idea_add "$@" ;;
-  idea-list)     cmd_idea_list "$@" ;;
-  idea-count)    cmd_idea_count "$@" ;;
-  idea-update)   cmd_idea_update "$@" ;;
+  status)            cmd_status "$@" ;;
+  validate)          cmd_validate "$@" ;;
+  recommend)         cmd_recommend "$@" ;;
+  audit-session)     cmd_audit_session "$@" ;;
+  config-get)        cmd_config_get "$@" ;;
+  list-specs)        cmd_list_specs "$@" ;;
+  activate)          cmd_activate "$@" ;;
+  complete)          cmd_complete "$@" ;;
+  land)              cmd_land "$@" ;;
+  radar-gather)      cmd_radar_gather "$@" ;;
+  idea-add)          cmd_idea_add "$@" ;;
+  idea-list)         cmd_idea_list "$@" ;;
+  idea-count)        cmd_idea_count "$@" ;;
+  idea-update)       cmd_idea_update "$@" ;;
+  legacy-refs-scan)  cmd_legacy_refs_scan "$@" ;;
   *)
-    echo "Usage: docs-check.sh {status|validate|recommend|audit-session|config-get|list-specs|activate|complete|land|idea-add|idea-list|idea-count|idea-update} [args...]" >&2
+    echo "Usage: docs-check.sh {status|validate|recommend|audit-session|config-get|list-specs|activate|complete|land|idea-add|idea-list|idea-count|idea-update|legacy-refs-scan} [args...]" >&2
     exit 1
     ;;
 esac

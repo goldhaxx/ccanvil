@@ -19,7 +19,7 @@
 - After completing a task, give a one-line summary of what changed and what to verify.
 
 ## Context Management
-- When I say "checkpoint," write current progress and next steps to `docs/checkpoint.md`.
+- When I run `/stasis`, write current progress and next steps to `docs/stasis.md`.
 - Before any large refactor, read the relevant test files first to understand expected behavior.
 - Use sub-agents for research tasks. Keep the main session focused on implementation.
 

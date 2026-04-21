@@ -36,9 +36,8 @@
 
 # --- Migration implementation (ccanvil-sync.sh migrate-stasis-artifact) ---
 # The function and its broadcast hook deliberately contain the legacy strings.
-^\.ccanvil/scripts/ccanvil-sync\.sh:20[7-9][0-9]:
-^\.ccanvil/scripts/ccanvil-sync\.sh:21[0-4][0-9]:
-^\.ccanvil/scripts/ccanvil-sync\.sh:23[0-4][0-9]:
+# Content-based pattern (resilient to line shifts from unrelated edits in the file).
+^\.ccanvil/scripts/ccanvil-sync\.sh:[0-9]+:.*(docs/checkpoint\.md|commands/catchup\.md|old_catchup|stasis-migration|migrate-stasis|legacy catchup|checkpoint/catchup)
 
 # --- Documentation OF the migration / scanner features ---
 # command-reference describes what legacy-refs-scan detects.

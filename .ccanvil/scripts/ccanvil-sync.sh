@@ -462,6 +462,72 @@ cmd_init() {
   cmd_register 2>/dev/null || echo "WARNING: Hub registration failed (non-fatal)"
 }
 
+# detect_project_mode
+# Classifies the current working directory into one of five project modes
+# so /ccanvil-init can pick mode-aware defaults. Pure — reads filesystem
+# (and .git/ via `git rev-parse`) only, never writes.
+#
+# Classification order (most specific first):
+#   1. already-initialized — .ccanvil/ccanvil.lock + bootstrap script both exist
+#   2. partial-ccanvil     — has .claude/, CLAUDE.md, or non-bootstrap .ccanvil/ content; no lockfile
+#   3. mature-repo         — .git/ + HEAD reachable, no partial-ccanvil markers
+#   4. source-no-git       — source files present but no .git/ (or .git/ with no commits)
+#   5. fresh               — nothing else matches
+detect_project_mode() {
+  # 1. already-initialized
+  if [[ -f ".ccanvil/ccanvil.lock" && -f ".ccanvil/scripts/ccanvil-sync.sh" ]]; then
+    echo "already-initialized"
+    return
+  fi
+
+  # 2. partial-ccanvil — any ccanvil-meaningful marker beyond the bootstrap script
+  local has_partial=false
+  if [[ -d ".claude" ]]; then
+    has_partial=true
+  elif [[ -f "CLAUDE.md" ]]; then
+    has_partial=true
+  elif [[ -d ".ccanvil" ]]; then
+    # .ccanvil/ counts only if it contains something beyond the bootstrap script
+    while IFS= read -r f; do
+      case "$f" in
+        .ccanvil/scripts|.ccanvil/scripts/ccanvil-sync.sh) continue ;;
+        *) has_partial=true; break ;;
+      esac
+    done < <(find .ccanvil -mindepth 1 2>/dev/null)
+  fi
+  if $has_partial; then
+    echo "partial-ccanvil"
+    return
+  fi
+
+  # 3. mature-repo — .git/ + HEAD; AC-24 tiebreaker: .git/ without HEAD → source-no-git
+  if [[ -d ".git" ]]; then
+    if git rev-parse HEAD >/dev/null 2>&1; then
+      echo "mature-repo"
+      return
+    fi
+    echo "source-no-git"
+    return
+  fi
+
+  # 4. source-no-git — at least one file that isn't .DS_Store, .gitignore,
+  #    README.md, CLAUDE.md, or inside .git/.claude/.ccanvil/
+  while IFS= read -r f; do
+    f="${f#./}"
+    case "$f" in
+      .DS_Store|.gitignore|README.md|CLAUDE.md) continue ;;
+      .git/*|.claude/*|.ccanvil/*) continue ;;
+      *)
+        echo "source-no-git"
+        return
+        ;;
+    esac
+  done < <(find . -type f 2>/dev/null)
+
+  # 5. fresh
+  echo "fresh"
+}
+
 cmd_init_preflight() {
   local hub_path="${1:?Usage: ccanvil-sync.sh init-preflight <hub-path>}"
   hub_path="${hub_path/#\~/$HOME}"
@@ -494,6 +560,11 @@ cmd_init_preflight() {
   local dist_root
   dist_root="$hub_path"
   local github_tpl_root="$dist_root/.ccanvil/templates/github"
+
+  # Detect project mode before classifying files so /ccanvil-init can
+  # branch on it (mature-repo vs fresh vs already-initialized, etc.).
+  local project_mode
+  project_mode=$(detect_project_mode)
 
   local plan="[]"
   local seen_files=()
@@ -622,8 +693,9 @@ cmd_init_preflight() {
   auto=$(echo "$plan" | jq '[.[] | select(.recommended_action != "review")] | length')
   total=$(echo "$plan" | jq 'length')
 
-  jq -n --argjson conflicts "$conflicts" --argjson auto "$auto" --argjson total "$total" --argjson plan "$plan" \
-    '{"summary": {"conflicts": $conflicts, "auto": $auto, "total": $total}, "plan": $plan}'
+  jq -n --argjson conflicts "$conflicts" --argjson auto "$auto" --argjson total "$total" \
+        --argjson plan "$plan" --arg mode "$project_mode" \
+    '{"project_mode": $mode, "summary": {"conflicts": $conflicts, "auto": $auto, "total": $total}, "plan": $plan}'
 }
 
 cmd_init_apply() {

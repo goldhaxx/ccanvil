@@ -884,6 +884,44 @@ cmd_init_apply() {
     '{"copied": $copied, "skipped": $skipped, "merged": $merged, "errors": $errors}'
 }
 
+# format_preflight_table
+# Renders init-preflight JSON output as a human-readable table.
+# Reads JSON from stdin, writes table to stdout.
+# Shared between cmd_retrofit_check and /ccanvil-init's in-skill rendering.
+format_preflight_table() {
+  local json
+  json=$(cat)
+
+  local mode
+  mode=$(echo "$json" | jq -r '.project_mode // "unknown"')
+  echo "Detected mode: $mode"
+  echo ""
+
+  printf "%-50s %-5s %-7s %-34s %s\n" "File" "Hub" "Local" "Action" "Reason"
+  printf "%-50s %-5s %-7s %-34s %s\n" "----" "---" "-----" "------" "------"
+
+  echo "$json" | jq -r '.plan[] | [.file, .source, .recommended_action, .reason] | @tsv' | \
+    while IFS=$'\t' read -r file source action reason; do
+      local hub="-" lcl="-"
+      case "$source" in
+        hub-only)    hub="Y"; lcl="-" ;;
+        both)        hub="Y"; lcl="Y" ;;
+        local-only)  hub="-"; lcl="Y" ;;
+        stack:*)     hub="Y"; lcl="-" ;;
+      esac
+      printf "%-50s %-5s %-7s %-34s %s\n" "$file" "$hub" "$lcl" "$action" "$reason"
+    done
+}
+
+# cmd_retrofit_check — AC-15
+# Thin wrapper around init-preflight that emits a human-readable table
+# instead of JSON. Read-only: no files created, no lockfile touched.
+cmd_retrofit_check() {
+  local hub_path="${1:?Usage: ccanvil-sync.sh retrofit-check <hub-path>}"
+  cmd_init_preflight "$hub_path" | format_preflight_table
+  return 0
+}
+
 cmd_status() {
   require_lockfile
 
@@ -2902,6 +2940,7 @@ case "${1:-}" in
   # --- Init preflight/apply ---
   init-preflight)   shift; cmd_init_preflight "$@" ;;
   init-apply)       shift; cmd_init_apply "$@" ;;
+  retrofit-check)   shift; cmd_retrofit_check "$@" ;;
 
   # --- Compound commands (replace manual orchestration) ---
   pre-check)        cmd_pre_check ;;

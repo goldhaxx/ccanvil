@@ -249,6 +249,56 @@ EOF
   grep -q "First run content" "$NODE/CLAUDE.md"
 }
 
+# =========================================================================
+# AC-14 / AC-15: retrofit-check subcommand
+# =========================================================================
+
+@test "AC-15: retrofit-check exits 0 and prints 'Detected mode' header" {
+  _mature_fixture
+  run bash "$NODE/.ccanvil/scripts/ccanvil-sync.sh" retrofit-check "$HUB_ROOT"
+  [ "$status" -eq 0 ]
+  echo "$output" | grep -qE "^Detected mode: mature-repo"
+}
+
+@test "AC-15: retrofit-check table has File/Hub/Local/Action/Reason header" {
+  _mature_fixture
+  run bash "$NODE/.ccanvil/scripts/ccanvil-sync.sh" retrofit-check "$HUB_ROOT"
+  [ "$status" -eq 0 ]
+  echo "$output" | grep -qE "File.*Hub.*Local.*Action.*Reason"
+}
+
+@test "AC-15: retrofit-check surfaces section-merge-create-delimiters for mature CLAUDE.md" {
+  _mature_fixture
+  cat > "$NODE/CLAUDE.md" <<'EOF'
+# App
+EOF
+  git -C "$NODE" add -A
+  git -C "$NODE" -c user.email=t@t -c user.name=t commit -q -m "add CLAUDE.md"
+
+  run bash "$NODE/.ccanvil/scripts/ccanvil-sync.sh" retrofit-check "$HUB_ROOT"
+  [ "$status" -eq 0 ]
+  echo "$output" | grep "CLAUDE.md" | grep -q "section-merge-create-delimiters"
+}
+
+@test "AC-15: retrofit-check is read-only — no filesystem changes" {
+  _mature_fixture
+  local before
+  before=$(find "$NODE" -type f -not -path '*/.git/*' | sort | xargs shasum | shasum)
+
+  bash "$NODE/.ccanvil/scripts/ccanvil-sync.sh" retrofit-check "$HUB_ROOT" >/dev/null
+
+  local after
+  after=$(find "$NODE" -type f -not -path '*/.git/*' | sort | xargs shasum | shasum)
+  [ "$before" = "$after" ]
+}
+
+@test "AC-15: retrofit-check on fresh directory reports fresh mode" {
+  # No fixture — bare node with just the bootstrap script.
+  run bash "$NODE/.ccanvil/scripts/ccanvil-sync.sh" retrofit-check "$HUB_ROOT"
+  [ "$status" -eq 0 ]
+  echo "$output" | grep -qE "^Detected mode: fresh"
+}
+
 @test "AC-25: prose mention of HUB-MANAGED-START is not treated as delimiter" {
   _mature_fixture
   cat > "$NODE/CLAUDE.md" <<'EOF'

@@ -1564,6 +1564,61 @@ cmd_legacy_refs_scan() {
   return 0
 }
 
+# cmd_idea_upgrade — One-command downstream node adoption of the /idea system.
+#
+# Collapses the 4-step manual sequence (pull-apply -> idea-setup -> idea-migrate
+# -> git commit) into a single invocation. Idempotent: re-running on an
+# already-upgraded node is a no-op.
+#
+# Usage:
+#   idea-upgrade --provider local                                  [project-dir]
+#   idea-upgrade --provider linear --team TEAM --project PROJECT   [project-dir]
+# ---------------------------------------------------------------------------
+cmd_idea_upgrade() {
+  local provider=""
+  local team=""
+  local project=""
+  local project_dir="."
+
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --provider) provider="$2"; shift 2 ;;
+      --team)     team="$2";     shift 2 ;;
+      --project)  project="$2";  shift 2 ;;
+      *)          project_dir="$1"; shift ;;
+    esac
+  done
+
+  case "$provider" in
+    local) ;;
+    linear)
+      [[ -n "$team" && -n "$project" ]] || {
+        echo "ERROR: --provider linear requires --team and --project" >&2
+        return 1
+      }
+      ;;
+    "")  echo "ERROR: --provider is required (local|linear)" >&2; return 1 ;;
+    *)   echo "ERROR: unknown provider '$provider' (must be local|linear)" >&2; return 1 ;;
+  esac
+
+  # Delegate the config + gitignore write to cmd_idea_setup. Suppress its
+  # next-step text (idea-upgrade emits its own summary).
+  if [[ "$provider" == "linear" ]]; then
+    cmd_idea_setup --provider linear --team "$team" --project "$project" "$project_dir" >/dev/null
+  else
+    cmd_idea_setup --provider local "$project_dir" >/dev/null
+  fi
+
+  # Stage and commit the config + gitignore change in one commit.
+  (
+    cd "$project_dir" || return 1
+    git add .claude/ccanvil.local.json .gitignore
+    git commit -q -m "chore(idea-upgrade): configure $provider provider"
+  )
+
+  echo "UPGRADE: node configured with provider=$provider"
+}
+
 # cmd_title_from_body — Derive a concise title from an idea body.
 #
 # Usage:
@@ -1671,10 +1726,11 @@ case "$cmd" in
   idea-sync)         cmd_idea_sync "$@" ;;
   idea-migrate)      cmd_idea_migrate "$@" ;;
   idea-setup)        cmd_idea_setup "$@" ;;
+  idea-upgrade)      cmd_idea_upgrade "$@" ;;
   title-from-body)   cmd_title_from_body "$@" ;;
   legacy-refs-scan)  cmd_legacy_refs_scan "$@" ;;
   *)
-    echo "Usage: docs-check.sh {status|validate|recommend|audit-session|config-get|list-specs|activate|complete|land|idea-add|idea-list|idea-count|idea-update|idea-sync|idea-migrate|idea-setup|title-from-body|legacy-refs-scan} [args...]" >&2
+    echo "Usage: docs-check.sh {status|validate|recommend|audit-session|config-get|list-specs|activate|complete|land|idea-add|idea-list|idea-count|idea-update|idea-sync|idea-migrate|idea-setup|idea-upgrade|title-from-body|legacy-refs-scan} [args...]" >&2
     exit 1
     ;;
 esac

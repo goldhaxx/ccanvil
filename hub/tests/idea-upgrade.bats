@@ -152,3 +152,53 @@ JSON
   [ "$status" -ne 0 ]
   [[ "$output" = *"title-map"* ]]
 }
+
+# =========================================================================
+# AC-1, AC-2: idea-upgrade command skeleton for both providers
+# =========================================================================
+
+# Helper: initialize $PROJECT as a minimal git repo.
+_init_git() {
+  git -C "$PROJECT" init -q -b main
+  git -C "$PROJECT" config user.email "test@example.com"
+  git -C "$PROJECT" config user.name "Test"
+  git -C "$PROJECT" commit --allow-empty -q -m "init"
+}
+
+@test "AC-1: idea-upgrade --provider local writes config, .gitignore, commits" {
+  _init_git
+  run bash "$DOCS_CHECK" idea-upgrade --provider local "$PROJECT"
+  [ "$status" -eq 0 ]
+
+  # Config written with routing.idea = local
+  run jq -r '.integrations.routing.idea' "$PROJECT/.claude/ccanvil.local.json"
+  [ "$output" = "local" ]
+
+  # .gitignore has the three expected entries
+  grep -qxF ".ccanvil/ideas.log" "$PROJECT/.gitignore"
+  grep -qxF ".ccanvil/ideas-pending.log" "$PROJECT/.gitignore"
+  grep -qxF "docs/ideas.md" "$PROJECT/.gitignore"
+
+  # Exactly one new commit with the expected message prefix
+  run git -C "$PROJECT" log --oneline
+  [ "$status" -eq 0 ]
+  [[ "$output" = *"chore(idea-upgrade): configure local provider"* ]]
+}
+
+@test "AC-2: idea-upgrade --provider linear writes routing + provider config, commits" {
+  _init_git
+  run bash "$DOCS_CHECK" idea-upgrade --provider linear --team "Acme" --project "Alpha" "$PROJECT"
+  [ "$status" -eq 0 ]
+
+  run jq -r '.integrations.routing.idea' "$PROJECT/.claude/ccanvil.local.json"
+  [ "$output" = "linear" ]
+
+  run jq -r '.integrations.providers.linear.team' "$PROJECT/.claude/ccanvil.local.json"
+  [ "$output" = "Acme" ]
+
+  run jq -r '.integrations.providers.linear.project' "$PROJECT/.claude/ccanvil.local.json"
+  [ "$output" = "Alpha" ]
+
+  run git -C "$PROJECT" log --oneline
+  [[ "$output" = *"chore(idea-upgrade): configure linear provider"* ]]
+}

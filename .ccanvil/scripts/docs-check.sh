@@ -1578,11 +1578,42 @@ cmd_legacy_refs_scan() {
 #   - Longer / multi-line, no CLI → first 80 chars of first line
 #                                    (deterministic fallback).
 cmd_title_from_body() {
+  local title_map=''
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --title-map)
+        title_map="$2"
+        shift 2
+        ;;
+      --)
+        shift
+        break
+        ;;
+      *)
+        break
+        ;;
+    esac
+  done
+
+  if [[ -n "$title_map" && ! -f "$title_map" ]]; then
+    echo "ERROR: --title-map file not found: $title_map" >&2
+    return 1
+  fi
+
   local body
   if [[ $# -gt 0 ]]; then
     body="$1"
   else
     body=$(cat)
+  fi
+
+  if [[ -n "$title_map" ]]; then
+    local mapped
+    mapped=$(jq -r --arg b "$body" '.[$b] // empty' "$title_map" 2>/dev/null || echo '')
+    if [[ -n "$mapped" ]]; then
+      printf '%s' "$mapped"
+      return 0
+    fi
   fi
 
   if [[ -z "$body" ]]; then

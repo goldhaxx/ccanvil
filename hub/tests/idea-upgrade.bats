@@ -108,3 +108,47 @@ _no_claude() {
   [ "$status" -eq 0 ]
   [ "${#output}" -eq 80 ]
 }
+
+# =========================================================================
+# AC-11: title-from-body --title-map override
+# =========================================================================
+
+@test "AC-11: --title-map returns mapped title for matching body" {
+  cat > "$PROJECT/map.json" <<'JSON'
+{
+  "some long body text that would otherwise hit the stochastic path": "Manual Title"
+}
+JSON
+  body='some long body text that would otherwise hit the stochastic path'
+  run bash "$DOCS_CHECK" title-from-body --title-map "$PROJECT/map.json" "$body"
+  [ "$status" -eq 0 ]
+  [ "$output" = "Manual Title" ]
+}
+
+@test "AC-11: --title-map falls through to fast path for unmapped body" {
+  _no_claude
+  cat > "$PROJECT/map.json" <<'JSON'
+{"other body": "Other Title"}
+JSON
+  run bash "$DOCS_CHECK" title-from-body --title-map "$PROJECT/map.json" "short body"
+  [ "$status" -eq 0 ]
+  [ "$output" = "short body" ]
+}
+
+@test "AC-11: --title-map falls through to fallback for unmapped long body, no claude" {
+  _no_claude
+  cat > "$PROJECT/map.json" <<'JSON'
+{"keyed body": "Keyed Title"}
+JSON
+  body=$(printf 'a%.0s' {1..150})
+  run bash "$DOCS_CHECK" title-from-body --title-map "$PROJECT/map.json" "$body"
+  [ "$status" -eq 0 ]
+  [ "${#output}" -eq 80 ]
+  [ "$output" = "$(printf 'a%.0s' {1..80})" ]
+}
+
+@test "AC-11: --title-map with missing file exits non-zero" {
+  run bash "$DOCS_CHECK" title-from-body --title-map "$PROJECT/absent.json" "body"
+  [ "$status" -ne 0 ]
+  [[ "$output" = *"title-map"* ]]
+}

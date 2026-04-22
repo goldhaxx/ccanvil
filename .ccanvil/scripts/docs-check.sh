@@ -1564,6 +1564,45 @@ cmd_legacy_refs_scan() {
   return 0
 }
 
+# cmd_title_from_body — Derive a concise title from an idea body.
+#
+# Usage:
+#   title-from-body "<body>"
+#   echo "<body>" | title-from-body
+#
+# Behavior (step 1):
+#   - Empty body          → stdout empty, exit 0
+#   - <=80 chars + single-line → stdout is the body verbatim (fast path)
+#   - Longer / multi-line → first 80 chars of first line (deterministic
+#                            fallback; step 2 adds the claude CLI path
+#                            in front of this fallback).
+cmd_title_from_body() {
+  local body
+  if [[ $# -gt 0 ]]; then
+    body="$1"
+  else
+    body=$(cat)
+  fi
+
+  if [[ -z "$body" ]]; then
+    printf ''
+    return 0
+  fi
+
+  local has_newline=0
+  case "$body" in *$'\n'*) has_newline=1 ;; esac
+
+  if [[ $has_newline -eq 0 && "${#body}" -le 80 ]]; then
+    printf '%s' "$body"
+    return 0
+  fi
+
+  local first_line
+  first_line="${body%%$'\n'*}"
+  printf '%s' "${first_line:0:80}"
+  return 0
+}
+
 # ---------------------------------------------------------------------------
 # Dispatch
 # ---------------------------------------------------------------------------
@@ -1589,9 +1628,10 @@ case "$cmd" in
   idea-sync)         cmd_idea_sync "$@" ;;
   idea-migrate)      cmd_idea_migrate "$@" ;;
   idea-setup)        cmd_idea_setup "$@" ;;
+  title-from-body)   cmd_title_from_body "$@" ;;
   legacy-refs-scan)  cmd_legacy_refs_scan "$@" ;;
   *)
-    echo "Usage: docs-check.sh {status|validate|recommend|audit-session|config-get|list-specs|activate|complete|land|idea-add|idea-list|idea-count|idea-update|idea-sync|idea-migrate|idea-setup|legacy-refs-scan} [args...]" >&2
+    echo "Usage: docs-check.sh {status|validate|recommend|audit-session|config-get|list-specs|activate|complete|land|idea-add|idea-list|idea-count|idea-update|idea-sync|idea-migrate|idea-setup|title-from-body|legacy-refs-scan} [args...]" >&2
     exit 1
     ;;
 esac

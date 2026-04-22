@@ -1,0 +1,202 @@
+#!/usr/bin/env bats
+# Tests for the ideas-to-linear feature.
+# Covers the provider-routing layer for idea.* operations (Step 1 of the plan).
+# Later steps extend this file with coverage for docs-check.sh rewiring,
+# skill grep assertions, migration, and broadcast hints.
+
+SCRIPT="$BATS_TEST_DIRNAME/../../.ccanvil/scripts/operations.sh"
+
+setup() {
+  export TMPDIR="${BATS_TEST_TMPDIR}"
+  PROJECT=$(mktemp -d)
+}
+
+teardown() {
+  rm -rf "$PROJECT"
+}
+
+# Helper: write a Linear-routed config
+_linear_config() {
+  mkdir -p "$PROJECT/.claude"
+  cat > "$PROJECT/.claude/ccanvil.json" <<'JSON'
+{
+  "integrations": {
+    "providers": {
+      "linear": {
+        "mechanism": "mcp",
+        "project": "Test Project",
+        "team": "Test Team",
+        "idea_label": "idea",
+        "idea_status": "Idea",
+        "icebox_status": "Icebox"
+      }
+    },
+    "routing": {
+      "idea": "linear"
+    }
+  }
+}
+JSON
+}
+
+# =========================================================================
+# AC-14: is_valid_operation recognizes idea.{add,list,triage,sync}
+# =========================================================================
+
+@test "AC-14: idea.add is a valid operation (resolves with no config)" {
+  run bash "$SCRIPT" resolve idea.add --project-dir "$PROJECT"
+  [ "$status" -eq 0 ]
+}
+
+@test "AC-14: idea.list is a valid operation" {
+  run bash "$SCRIPT" resolve idea.list --project-dir "$PROJECT"
+  [ "$status" -eq 0 ]
+}
+
+@test "AC-14: idea.triage is a valid operation" {
+  run bash "$SCRIPT" resolve idea.triage --project-dir "$PROJECT"
+  [ "$status" -eq 0 ]
+}
+
+@test "AC-14: idea.sync is a valid operation" {
+  run bash "$SCRIPT" resolve idea.sync --project-dir "$PROJECT"
+  [ "$status" -eq 0 ]
+}
+
+# =========================================================================
+# AC-16: local_adapter — no-config + routing=local → bash targeting docs-check.sh
+# =========================================================================
+
+@test "AC-16: idea.add with no config resolves to local bash adapter" {
+  run bash "$SCRIPT" resolve idea.add --project-dir "$PROJECT"
+  [ "$status" -eq 0 ]
+  echo "$output" | jq -e '.provider == "local"'
+  echo "$output" | jq -e '.mechanism == "bash"'
+  echo "$output" | jq -e '.invocation.command | test("docs-check.sh idea-add")'
+}
+
+@test "AC-16: idea.list with no config resolves to local bash adapter" {
+  run bash "$SCRIPT" resolve idea.list --project-dir "$PROJECT"
+  [ "$status" -eq 0 ]
+  echo "$output" | jq -e '.provider == "local"'
+  echo "$output" | jq -e '.mechanism == "bash"'
+  echo "$output" | jq -e '.invocation.command | test("docs-check.sh idea-list")'
+}
+
+@test "AC-16: idea.triage with no config resolves to local bash adapter" {
+  run bash "$SCRIPT" resolve idea.triage --project-dir "$PROJECT"
+  [ "$status" -eq 0 ]
+  echo "$output" | jq -e '.provider == "local"'
+  echo "$output" | jq -e '.mechanism == "bash"'
+  echo "$output" | jq -e '.invocation.command | test("docs-check.sh idea-list")'
+}
+
+@test "AC-16: idea.sync with no config resolves to local bash no-op" {
+  run bash "$SCRIPT" resolve idea.sync --project-dir "$PROJECT"
+  [ "$status" -eq 0 ]
+  echo "$output" | jq -e '.provider == "local"'
+  echo "$output" | jq -e '.mechanism == "bash"'
+  # Local sync is a no-op — just needs to exit 0
+}
+
+@test "AC-16: idea operations contract declares output fields" {
+  run bash "$SCRIPT" resolve idea.add --project-dir "$PROJECT"
+  echo "$output" | jq -e '.contract.output | length > 0'
+}
+
+# =========================================================================
+# AC-15: linear_mcp_adapter — idea.* → correct MCP tool + params
+# =========================================================================
+
+@test "AC-15: idea.add with Linear routing → save_issue MCP tool" {
+  _linear_config
+  run bash "$SCRIPT" resolve idea.add --project-dir "$PROJECT"
+  [ "$status" -eq 0 ]
+  echo "$output" | jq -e '.provider == "linear"'
+  echo "$output" | jq -e '.mechanism == "mcp"'
+  echo "$output" | jq -e '.invocation.tool == "mcp__claude_ai_Linear__save_issue"'
+  echo "$output" | jq -e '.invocation.params.team == "Test Team"'
+  echo "$output" | jq -e '.invocation.params.project == "Test Project"'
+  echo "$output" | jq -e '.invocation.params.state == "Idea"'
+  echo "$output" | jq -e '.invocation.params.labels[0] == "idea"'
+}
+
+@test "AC-15: idea.list with Linear routing → list_issues MCP tool" {
+  _linear_config
+  run bash "$SCRIPT" resolve idea.list --project-dir "$PROJECT"
+  [ "$status" -eq 0 ]
+  echo "$output" | jq -e '.invocation.tool == "mcp__claude_ai_Linear__list_issues"'
+  echo "$output" | jq -e '.invocation.params.label == "idea"'
+  echo "$output" | jq -e '.invocation.params.project == "Test Project"'
+}
+
+@test "AC-15: idea.triage with Linear routing → list_issues filtered to Idea state" {
+  _linear_config
+  run bash "$SCRIPT" resolve idea.triage --project-dir "$PROJECT"
+  [ "$status" -eq 0 ]
+  echo "$output" | jq -e '.invocation.tool == "mcp__claude_ai_Linear__list_issues"'
+  echo "$output" | jq -e '.invocation.params.state == "Idea"'
+  echo "$output" | jq -e '.invocation.params.label == "idea"'
+}
+
+@test "AC-15: idea.sync with Linear routing → local bash orchestration" {
+  # sync drains the pending log — orchestration, not a single MCP call.
+  # Resolves to local bash even when Linear is configured.
+  _linear_config
+  run bash "$SCRIPT" resolve idea.sync --project-dir "$PROJECT"
+  [ "$status" -eq 0 ]
+  echo "$output" | jq -e '.provider == "local"'
+  echo "$output" | jq -e '.mechanism == "bash"'
+  echo "$output" | jq -e '.invocation.command | test("docs-check.sh idea-sync")'
+}
+
+# =========================================================================
+# AC-21: missing config fallback — routing unset or "local" → local adapter
+# =========================================================================
+
+@test "AC-21: routing.idea unset → local provider (no error)" {
+  mkdir -p "$PROJECT/.claude"
+  cat > "$PROJECT/.claude/ccanvil.json" <<'JSON'
+{
+  "integrations": {
+    "providers": {},
+    "routing": {
+      "backlog": "linear"
+    }
+  }
+}
+JSON
+  run bash "$SCRIPT" resolve idea.add --project-dir "$PROJECT"
+  [ "$status" -eq 0 ]
+  echo "$output" | jq -e '.provider == "local"'
+}
+
+@test "AC-21: routing.idea = \"local\" explicitly → local provider" {
+  mkdir -p "$PROJECT/.claude"
+  cat > "$PROJECT/.claude/ccanvil.json" <<'JSON'
+{
+  "integrations": {
+    "providers": {},
+    "routing": {"idea": "local"}
+  }
+}
+JSON
+  run bash "$SCRIPT" resolve idea.add --project-dir "$PROJECT"
+  [ "$status" -eq 0 ]
+  echo "$output" | jq -e '.provider == "local"'
+}
+
+@test "AC-21: routing.idea = \"linear\" without provider entry → error" {
+  mkdir -p "$PROJECT/.claude"
+  cat > "$PROJECT/.claude/ccanvil.json" <<'JSON'
+{
+  "integrations": {
+    "providers": {},
+    "routing": {"idea": "linear"}
+  }
+}
+JSON
+  run bash "$SCRIPT" resolve idea.add --project-dir "$PROJECT"
+  [ "$status" -eq 1 ]
+  echo "$output" | grep -q 'ERROR: provider "linear" is configured for idea'
+}

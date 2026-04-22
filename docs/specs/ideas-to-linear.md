@@ -2,7 +2,7 @@
 
 > Feature: ideas-to-linear
 > Created: 1776826648
-> Status: In Progress
+> Status: Complete
 
 ## Summary
 

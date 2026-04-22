@@ -688,13 +688,53 @@ cmd_list_specs() {
 # Fails if: feature-id not found, another spec is In Progress, worktree dirty.
 # ---------------------------------------------------------------------------
 cmd_activate() {
-  local feature_id="${1:?Usage: activate <feature-id> [docs-dir]}"
-  local docs_dir="${2:-$DEFAULT_DOCS_DIR}"
+  # Parse args: <feature-id> [--force-local-ahead] [docs-dir]
+  # Flag can appear in any position among the positionals.
+  local feature_id=""
+  local docs_dir=""
+  local force_local_ahead=false
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --force-local-ahead) force_local_ahead=true; shift ;;
+      *)
+        if [[ -z "$feature_id" ]]; then feature_id="$1"
+        elif [[ -z "$docs_dir" ]]; then docs_dir="$1"
+        fi
+        shift
+        ;;
+    esac
+  done
+  [[ -n "$feature_id" ]] || { echo "Usage: activate <feature-id> [--force-local-ahead] [docs-dir]" >&2; exit 1; }
+  [[ -n "$docs_dir" ]] || docs_dir="$DEFAULT_DOCS_DIR"
   local specs_dir="$docs_dir/specs"
   local repo_root
   repo_root=$(cd "$docs_dir" 2>/dev/null && git rev-parse --show-toplevel 2>/dev/null) || {
     repo_root=$(cd "$docs_dir/.." 2>/dev/null && pwd)
   }
+
+  # Pre-activate push-guard (AC-17/18/19): halt if local main is ahead of
+  # origin/main. Unpushed commits on main become part of the feature branch's
+  # history on push and cause divergence at squash-merge time. If origin/main
+  # doesn't exist (no remote, or unpushed remote), this check is a no-op.
+  if ! $force_local_ahead; then
+    if git -C "$repo_root" rev-parse --verify origin/main >/dev/null 2>&1; then
+      local ahead_hashes
+      ahead_hashes=$(git -C "$repo_root" rev-list --reverse --format="%h %s" --no-commit-header origin/main..main 2>/dev/null || true)
+      if [[ -n "$ahead_hashes" ]]; then
+        echo "ERROR: local main is ahead of origin/main — unpushed commits would leak into the feature branch." >&2
+        echo "" >&2
+        echo "Unpushed commits:" >&2
+        echo "$ahead_hashes" | sed 's/^/  /' >&2
+        echo "" >&2
+        echo "Resolve by pushing main first:" >&2
+        echo "  git push origin main" >&2
+        echo "" >&2
+        echo "Or, if these commits are session-boundary artifacts that you know you want on the branch:" >&2
+        echo "  bash .ccanvil/scripts/docs-check.sh activate $feature_id --force-local-ahead" >&2
+        exit 1
+      fi
+    fi
+  fi
 
   # Find the spec file
   local spec_file=""

@@ -597,6 +597,45 @@ EOF
   [ "$status" -eq 0 ]
 }
 
+# =========================================================================
+# AC-25: cmd_activate dirty-worktree allowlist no longer tolerates ideas.md
+# =========================================================================
+
+@test "AC-25: activate halts when docs/ideas.md is uncommitted (no longer allowlisted)" {
+  # Build a minimal repo fixture with a valid spec so activate progresses
+  # past the spec-lookup step and reaches the dirty-worktree check.
+  local ACT
+  ACT=$(mktemp -d)
+  git -C "$ACT" init -q -b main
+  mkdir -p "$ACT/docs/specs"
+  cat > "$ACT/docs/specs/some-spec.md" <<'SPEC'
+# Feature: some-spec
+
+> Feature: some-spec
+> Created: 1776000000
+> Status: Draft
+
+## Summary
+
+Test fixture.
+SPEC
+  git -C "$ACT" add -A
+  git -C "$ACT" -c user.email=t@t -c user.name=t commit -q -m "init"
+
+  # Uncommitted docs/ideas.md — used to be allowed, now must block.
+  echo "- [ ] a1b2 1776000001: stale <!-- status:new -->" > "$ACT/docs/ideas.md"
+
+  cd "$ACT"
+  run bash "$DOCS_CHECK" activate some-spec "$ACT/docs"
+  [ "$status" -eq 1 ]
+  # Spec was found (dirty check runs after spec-lookup). Failure must be
+  # the dirty-worktree path, not spec-not-found.
+  ! echo "$output" | grep -q "not found in"
+  echo "$output" | grep -qiE "dirty|uncommitted|worktree|clean"
+
+  rm -rf "$ACT"
+}
+
 @test "AC-16: legacy docs/ideas.md is NOT consulted by new code paths" {
   # A stale docs/ideas.md should be ignored — the new store is
   # .ccanvil/ideas.log only.

@@ -782,7 +782,7 @@ cmd_activate() {
     fpath="${fpath%% -> *}"  # strip rename target
     case "$fpath" in
       "${docs_prefix}specs/"*|"${docs_prefix}spec.md") ;;                       # allowed: spec files
-      "${docs_prefix}ideas.md"|"${docs_prefix}roadmap.md") ;;                   # allowed: triage artifacts
+      "${docs_prefix}roadmap.md") ;;                                            # allowed: triage artifact
       *) dirty_non_spec="$fpath"; break ;;
     esac
   done < <(git -C "$repo_root" status --porcelain --untracked-files=all 2>/dev/null)

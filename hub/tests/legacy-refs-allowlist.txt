@@ -17,6 +17,10 @@
 # --- Node-local, per-user settings (not shipped) ---
 ^\.claude/settings\.local\.json:
 ^\.claude/ccanvil\.local\.json:
+# Gitignored local ideas store — content is user-authored and may reference
+# historical checkpoint/catchup concepts verbatim; not part of shipping code.
+^\.ccanvil/ideas\.log:
+^\.ccanvil/ideas-pending\.log:
 
 # --- Tests that exercise the legacy vocabulary ---
 # The scanner, migration, and allowlist tests contain the strings by design.

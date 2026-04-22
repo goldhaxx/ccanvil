@@ -317,3 +317,67 @@ _init_git() {
   run git -C "$PROJECT" log --oneline
   [ "$(echo "$output" | wc -l | tr -d ' ')" -eq 1 ]
 }
+
+# =========================================================================
+# AC-4, AC-5: idea-upgrade --from-legacy migration pipeline
+# =========================================================================
+
+# Helper: write a fixture docs/ideas.md with 3 entries (mix of short + long).
+_fixture_legacy_ideas() {
+  mkdir -p "$PROJECT/docs"
+  cat > "$PROJECT/docs/ideas.md" <<'MD'
+# Ideas
+
+- [ ] a1b2 1700000000: short idea text <!-- status:new -->
+- [ ] c3d4 1700000100: another short one <!-- status:new -->
+- [ ] e5f6 1700000200: a considerably longer idea body that exceeds eighty characters because it contains a lot of deliberately verbose description <!-- status:promoted -->
+MD
+  git -C "$PROJECT" add docs/ideas.md
+  git -C "$PROJECT" commit -q -m "add legacy ideas.md"
+}
+
+@test "AC-4: --from-legacy migrates entries with generated titles, removes source, one commit" {
+  _init_git
+  _fixture_legacy_ideas
+  _no_claude  # force deterministic titles (fast path for short, fallback for long)
+
+  baseline_count=$(git -C "$PROJECT" log --oneline | wc -l | tr -d ' ')
+
+  run bash "$DOCS_CHECK" idea-upgrade --provider local --from-legacy "$PROJECT"
+  [ "$status" -eq 0 ]
+
+  # docs/ideas.md removed
+  [ ! -f "$PROJECT/docs/ideas.md" ]
+
+  # .ccanvil/ideas.log has 3 JSONL entries (plus optional archive header — 0 for local)
+  [ -f "$PROJECT/.ccanvil/ideas.log" ]
+  entry_count=$(grep -c '^{' "$PROJECT/.ccanvil/ideas.log" || true)
+  [ "$entry_count" -eq 3 ]
+
+  # Each entry has a non-empty title (generated via title-from-body).
+  while IFS= read -r line; do
+    title=$(echo "$line" | jq -r '.title')
+    [ -n "$title" ]
+    [ "${#title}" -le 80 ]
+  done < <(grep '^{' "$PROJECT/.ccanvil/ideas.log")
+
+  # Exactly one new commit on top of baseline ("add legacy ideas.md" + upgrade).
+  new_count=$(git -C "$PROJECT" log --oneline | wc -l | tr -d ' ')
+  [ "$new_count" -eq $((baseline_count + 1)) ]
+
+  # Commit message mentions from-legacy path.
+  run git -C "$PROJECT" log -1 --format=%s
+  [[ "$output" = *"chore(idea-upgrade)"* ]]
+  [[ "$output" = *"migrate"* ]]
+}
+
+@test "AC-5: --from-legacy without docs/ideas.md proceeds with config-only upgrade" {
+  _init_git
+  run bash "$DOCS_CHECK" idea-upgrade --provider local --from-legacy "$PROJECT"
+  [ "$status" -eq 0 ]
+  [[ "$output" = *"Nothing to migrate"* ]]
+
+  # Config written as if --from-legacy was omitted.
+  run jq -r '.integrations.routing.idea' "$PROJECT/.claude/ccanvil.local.json"
+  [ "$output" = "local" ]
+}

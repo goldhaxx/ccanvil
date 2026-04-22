@@ -1581,6 +1581,7 @@ cmd_idea_upgrade() {
   local project_dir="."
   local dry_run=0
   local create_project=0
+  local from_legacy=0
 
   while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -1589,6 +1590,7 @@ cmd_idea_upgrade() {
       --project)        project="$2";  shift 2 ;;
       --dry-run)        dry_run=1;     shift ;;
       --create-project) create_project=1; shift ;;
+      --from-legacy)    from_legacy=1; shift ;;
       *)                project_dir="$1"; shift ;;
     esac
   done
@@ -1631,6 +1633,49 @@ cmd_idea_upgrade() {
     return 0
   fi
 
+  # --from-legacy: when docs/ideas.md is tracked, migrate it inline so the
+  # final commit is one-shot (config + removed source + gitignore).
+  local migrated_count=0
+  local legacy_present=0
+  if [[ $from_legacy -eq 1 ]]; then
+    if [[ -f "$project_dir/docs/ideas.md" ]]; then
+      legacy_present=1
+      mkdir -p "$project_dir/.ccanvil"
+      local ideas_log="$project_dir/.ccanvil/ideas.log"
+      while IFS= read -r line; do
+        local body=''
+        local uid='' created='' status=''
+        if [[ "$line" =~ ^-\ \[(.)\]\ ([0-9a-f]{4})\ ([0-9]+):\ (.*)\ \<!--\ status:([a-z:A-Z0-9_-]+)\ --\> ]]; then
+          uid="${BASH_REMATCH[2]}"
+          created="${BASH_REMATCH[3]}"
+          body="${BASH_REMATCH[4]}"
+          status="${BASH_REMATCH[5]}"
+        elif [[ "$line" =~ ^-\ \[(.)\]\ ([0-9]{4}-[0-9]{2}-[0-9]{2}):\ (.*)\ \<!--\ status:([a-z:A-Z0-9_-]+)\ --\> ]]; then
+          created="${BASH_REMATCH[2]}"
+          body="${BASH_REMATCH[3]}"
+          status="${BASH_REMATCH[4]}"
+        fi
+        [[ -z "$body" ]] && continue
+        local title
+        title=$(cmd_title_from_body "$body")
+        if [[ -n "$uid" ]]; then
+          jq -cn --arg uid "$uid" --argjson created "$created" \
+                 --arg title "$title" --arg body "$body" --arg status "$status" \
+            '{uid:$uid, created:$created, status:$status, title:$title, body:$body}' \
+            >> "$ideas_log"
+        else
+          jq -cn --arg created "$created" \
+                 --arg title "$title" --arg body "$body" --arg status "$status" \
+            '{created:$created, status:$status, title:$title, body:$body}' \
+            >> "$ideas_log"
+        fi
+        migrated_count=$((migrated_count + 1))
+      done < "$project_dir/docs/ideas.md"
+    else
+      echo "Nothing to migrate: docs/ideas.md not found"
+    fi
+  fi
+
   # Delegate the config + gitignore write to cmd_idea_setup. Suppress its
   # next-step text (idea-upgrade emits its own summary).
   if [[ "$provider" == "linear" ]]; then
@@ -1639,14 +1684,27 @@ cmd_idea_upgrade() {
     cmd_idea_setup --provider local "$project_dir" >/dev/null
   fi
 
-  # Stage and commit the config + gitignore change in one commit.
+  # Build the single commit. When --from-legacy migrated a tracked file,
+  # git rm it so the deletion is in the same commit as the config write.
+  local commit_msg="chore(idea-upgrade): configure $provider provider"
   (
     cd "$project_dir" || return 1
+    if [[ $legacy_present -eq 1 ]]; then
+      git rm -q docs/ideas.md 2>/dev/null || rm -f docs/ideas.md
+    fi
     git add .claude/ccanvil.local.json .gitignore
-    git commit -q -m "chore(idea-upgrade): configure $provider provider"
+    if [[ $legacy_present -eq 1 ]]; then
+      git commit -q -m "chore(idea-upgrade): configure $provider provider + migrate $migrated_count legacy entries"
+    else
+      git commit -q -m "$commit_msg"
+    fi
   )
 
-  echo "UPGRADE: node configured with provider=$provider"
+  if [[ $legacy_present -eq 1 ]]; then
+    echo "UPGRADE: node configured with provider=$provider; migrated $migrated_count entries to .ccanvil/ideas.log"
+  else
+    echo "UPGRADE: node configured with provider=$provider"
+  fi
 }
 
 # cmd_title_from_body — Derive a concise title from an idea body.

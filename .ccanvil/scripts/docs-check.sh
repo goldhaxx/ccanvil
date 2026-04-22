@@ -1199,13 +1199,39 @@ cmd_idea_add() {
 cmd_idea_list() {
   local filter_status=""
   local project_dir="."
+  local include_archive=0
 
   while [[ $# -gt 0 ]]; do
     case "$1" in
-      --status) filter_status="$2"; shift 2 ;;
-      *) project_dir="$1"; shift ;;
+      --status)          filter_status="$2"; shift 2 ;;
+      --include-archive) include_archive=1; shift ;;
+      *)                 project_dir="$1"; shift ;;
     esac
   done
+
+  # Linear-configured nodes: the live query goes through /idea list; this
+  # script surfaces the historical archive only when --include-archive is
+  # passed.
+  local local_cfg="$project_dir/.claude/ccanvil.local.json"
+  local routing=""
+  if [[ -f "$local_cfg" ]]; then
+    routing=$(jq -r '.integrations.routing.idea // ""' "$local_cfg" 2>/dev/null || echo '')
+  fi
+
+  if [[ "$routing" == "linear" ]]; then
+    echo "Linear-configured node — run /idea list for live queries."
+    if [[ $include_archive -eq 1 ]]; then
+      echo ""
+      echo "ARCHIVE:"
+      local ideas_log="$project_dir/.ccanvil/ideas.log"
+      if [[ -f "$ideas_log" ]]; then
+        grep -v '^# ' "$ideas_log" | jq -s "[.[] | {id: .uid, created: .created, title: .title, body: .body, status: .status}]" 2>/dev/null || echo "[]"
+      else
+        echo "[]"
+      fi
+    fi
+    return 0
+  fi
 
   local ideas_log="$project_dir/.ccanvil/ideas.log"
   if [[ ! -f "$ideas_log" ]]; then
@@ -1215,10 +1241,10 @@ cmd_idea_list() {
 
   local jq_shape='{id: .uid, created: .created, title: .title, body: .body, status: .status}'
   if [[ -n "$filter_status" ]]; then
-    jq -s --arg s "$filter_status" \
-      "[.[] | select(.status == \$s) | $jq_shape]" "$ideas_log"
+    grep -v '^# ' "$ideas_log" | jq -s --arg s "$filter_status" \
+      "[.[] | select(.status == \$s) | $jq_shape]"
   else
-    jq -s "[.[] | $jq_shape]" "$ideas_log"
+    grep -v '^# ' "$ideas_log" | jq -s "[.[] | $jq_shape]"
   fi
 }
 
@@ -1231,14 +1257,14 @@ cmd_idea_count() {
     return 0
   fi
 
-  jq -s '{
+  grep -v '^# ' "$ideas_log" | jq -s '{
     total:     length,
     new:       [.[] | select(.status == "new")]       | length,
     promoted:  [.[] | select(.status == "promoted")]  | length,
     parked:    [.[] | select(.status == "parked")]    | length,
     dismissed: [.[] | select(.status == "dismissed")] | length,
     merged:    [.[] | select(.status == "merged")]    | length
-  }' "$ideas_log"
+  }'
 }
 
 cmd_idea_update() {

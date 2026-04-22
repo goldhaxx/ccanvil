@@ -521,3 +521,54 @@ MD
   [ "$status" -eq 0 ]
   grep -q "unconfigured capture" "$PROJECT/.ccanvil/ideas.log"
 }
+
+# =========================================================================
+# AC-15: idea-list --include-archive surfacing on Linear-configured nodes
+# =========================================================================
+
+@test "AC-15: idea-list --include-archive on linear node emits note + ARCHIVE section" {
+  _init_git
+  # Seed a pre-existing log entry before upgrading to linear.
+  mkdir -p "$PROJECT/.ccanvil"
+  echo '{"uid":"a1b2","created":1700000000,"status":"promoted","title":"historical","body":"historical entry"}' > "$PROJECT/.ccanvil/ideas.log"
+
+  run bash "$DOCS_CHECK" idea-upgrade --provider linear --team "Acme" --project "Alpha" "$PROJECT"
+  [ "$status" -eq 0 ]
+
+  run bash "$DOCS_CHECK" idea-list --include-archive "$PROJECT"
+  [ "$status" -eq 0 ]
+
+  # (a) Note about /idea list for live queries
+  [[ "$output" = *"/idea list"* ]]
+  [[ "$output" = *"Linear"* ]]
+
+  # (b) ARCHIVE: section header
+  [[ "$output" = *"ARCHIVE:"* ]]
+
+  # Historical entry surfaced in the archive
+  [[ "$output" = *"historical"* ]]
+}
+
+@test "AC-15: idea-list --include-archive on local node falls through to normal listing" {
+  _init_git
+  run bash "$DOCS_CHECK" idea-upgrade --provider local "$PROJECT"
+  [ "$status" -eq 0 ]
+
+  run bash "$DOCS_CHECK" idea-add "local one" "$PROJECT"
+  [ "$status" -eq 0 ]
+
+  run bash "$DOCS_CHECK" idea-list --include-archive "$PROJECT"
+  [ "$status" -eq 0 ]
+  [[ "$output" = *"local one"* ]]
+}
+
+@test "AC-15: idea-list without --include-archive on linear node emits note only (no ARCHIVE)" {
+  _init_git
+  run bash "$DOCS_CHECK" idea-upgrade --provider linear --team "Acme" --project "Alpha" "$PROJECT"
+  [ "$status" -eq 0 ]
+
+  run bash "$DOCS_CHECK" idea-list "$PROJECT"
+  [ "$status" -eq 0 ]
+  [[ "$output" = *"/idea list"* ]]
+  [[ "$output" != *"ARCHIVE:"* ]]
+}

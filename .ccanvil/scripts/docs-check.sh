@@ -1633,6 +1633,18 @@ cmd_idea_upgrade() {
     return 0
   fi
 
+  # Idempotency: if the config already routes to the target provider, exit
+  # cleanly instead of trying to commit an empty diff.
+  local cfg="$project_dir/.claude/ccanvil.local.json"
+  if [[ -f "$cfg" ]]; then
+    local current_routing
+    current_routing=$(jq -r '.integrations.routing.idea // ""' "$cfg" 2>/dev/null || echo '')
+    if [[ "$current_routing" == "$provider" && $from_legacy -eq 0 ]]; then
+      echo "Already upgraded: $project_dir is configured with provider=$provider"
+      return 0
+    fi
+  fi
+
   # --from-legacy: when docs/ideas.md is tracked, migrate it inline so the
   # final commit is one-shot (config + removed source + gitignore).
   local migrated_count=0

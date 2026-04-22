@@ -381,3 +381,56 @@ MD
   run jq -r '.integrations.routing.idea' "$PROJECT/.claude/ccanvil.local.json"
   [ "$output" = "local" ]
 }
+
+# =========================================================================
+# AC-7: idempotency
+# =========================================================================
+
+@test "AC-7: second run on already-upgraded node exits 0 with 'Already upgraded' and no new commit" {
+  _init_git
+  run bash "$DOCS_CHECK" idea-upgrade --provider local "$PROJECT"
+  [ "$status" -eq 0 ]
+
+  baseline=$(git -C "$PROJECT" log --oneline | wc -l | tr -d ' ')
+
+  run bash "$DOCS_CHECK" idea-upgrade --provider local "$PROJECT"
+  [ "$status" -eq 0 ]
+  [[ "$output" = *"Already upgraded"* ]]
+
+  after=$(git -C "$PROJECT" log --oneline | wc -l | tr -d ' ')
+  [ "$baseline" -eq "$after" ]
+}
+
+@test "AC-7: second run with linear provider is also a no-op when already-upgraded" {
+  _init_git
+  run bash "$DOCS_CHECK" idea-upgrade --provider linear --team "Acme" --project "Alpha" "$PROJECT"
+  [ "$status" -eq 0 ]
+
+  baseline=$(git -C "$PROJECT" log --oneline | wc -l | tr -d ' ')
+
+  run bash "$DOCS_CHECK" idea-upgrade --provider linear --team "Acme" --project "Alpha" "$PROJECT"
+  [ "$status" -eq 0 ]
+  [[ "$output" = *"Already upgraded"* ]]
+
+  after=$(git -C "$PROJECT" log --oneline | wc -l | tr -d ' ')
+  [ "$baseline" -eq "$after" ]
+}
+
+@test "AC-7: changing provider from local to linear on second run is NOT idempotent (re-upgrade allowed)" {
+  _init_git
+  run bash "$DOCS_CHECK" idea-upgrade --provider local "$PROJECT"
+  [ "$status" -eq 0 ]
+
+  baseline=$(git -C "$PROJECT" log --oneline | wc -l | tr -d ' ')
+
+  run bash "$DOCS_CHECK" idea-upgrade --provider linear --team "Acme" --project "Alpha" "$PROJECT"
+  [ "$status" -eq 0 ]
+  [[ "$output" != *"Already upgraded"* ]]
+
+  after=$(git -C "$PROJECT" log --oneline | wc -l | tr -d ' ')
+  [ "$after" -eq $((baseline + 1)) ]
+
+  # Routing is now linear.
+  run jq -r '.integrations.routing.idea' "$PROJECT/.claude/ccanvil.local.json"
+  [ "$output" = "linear" ]
+}

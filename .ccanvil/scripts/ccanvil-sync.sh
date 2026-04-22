@@ -462,6 +462,72 @@ cmd_init() {
   cmd_register 2>/dev/null || echo "WARNING: Hub registration failed (non-fatal)"
 }
 
+# detect_project_mode
+# Classifies the current working directory into one of five project modes
+# so /ccanvil-init can pick mode-aware defaults. Pure — reads filesystem
+# (and .git/ via `git rev-parse`) only, never writes.
+#
+# Classification order (most specific first):
+#   1. already-initialized — .ccanvil/ccanvil.lock + bootstrap script both exist
+#   2. partial-ccanvil     — has .claude/, CLAUDE.md, or non-bootstrap .ccanvil/ content; no lockfile
+#   3. mature-repo         — .git/ + HEAD reachable, no partial-ccanvil markers
+#   4. source-no-git       — source files present but no .git/ (or .git/ with no commits)
+#   5. fresh               — nothing else matches
+detect_project_mode() {
+  # 1. already-initialized
+  if [[ -f ".ccanvil/ccanvil.lock" && -f ".ccanvil/scripts/ccanvil-sync.sh" ]]; then
+    echo "already-initialized"
+    return
+  fi
+
+  # 2. partial-ccanvil — any ccanvil-meaningful marker beyond the bootstrap script
+  local has_partial=false
+  if [[ -d ".claude" ]]; then
+    has_partial=true
+  elif [[ -f "CLAUDE.md" ]]; then
+    has_partial=true
+  elif [[ -d ".ccanvil" ]]; then
+    # .ccanvil/ counts only if it contains something beyond the bootstrap script
+    while IFS= read -r f; do
+      case "$f" in
+        .ccanvil/scripts|.ccanvil/scripts/ccanvil-sync.sh) continue ;;
+        *) has_partial=true; break ;;
+      esac
+    done < <(find .ccanvil -mindepth 1 2>/dev/null)
+  fi
+  if $has_partial; then
+    echo "partial-ccanvil"
+    return
+  fi
+
+  # 3. mature-repo — .git/ + HEAD; AC-24 tiebreaker: .git/ without HEAD → source-no-git
+  if [[ -d ".git" ]]; then
+    if git rev-parse HEAD >/dev/null 2>&1; then
+      echo "mature-repo"
+      return
+    fi
+    echo "source-no-git"
+    return
+  fi
+
+  # 4. source-no-git — at least one file that isn't .DS_Store, .gitignore,
+  #    README.md, CLAUDE.md, or inside .git/.claude/.ccanvil/
+  while IFS= read -r f; do
+    f="${f#./}"
+    case "$f" in
+      .DS_Store|.gitignore|README.md|CLAUDE.md) continue ;;
+      .git/*|.claude/*|.ccanvil/*) continue ;;
+      *)
+        echo "source-no-git"
+        return
+        ;;
+    esac
+  done < <(find . -type f 2>/dev/null)
+
+  # 5. fresh
+  echo "fresh"
+}
+
 cmd_init_preflight() {
   local hub_path="${1:?Usage: ccanvil-sync.sh init-preflight <hub-path>}"
   hub_path="${hub_path/#\~/$HOME}"
@@ -495,6 +561,11 @@ cmd_init_preflight() {
   dist_root="$hub_path"
   local github_tpl_root="$dist_root/.ccanvil/templates/github"
 
+  # Detect project mode before classifying files so /ccanvil-init can
+  # branch on it (mature-repo vs fresh vs already-initialized, etc.).
+  local project_mode
+  project_mode=$(detect_project_mode)
+
   local plan="[]"
   local seen_files=()
 
@@ -518,20 +589,47 @@ cmd_init_preflight() {
         plan=$(echo "$plan" | jq --arg f "$local_file" \
           '. + [{"file": $f, "source": "both", "recommended_action": "skip", "reason": "Already matches hub"}]')
       else
-        # Different — check for section-merge delimiter
-        local has_delimiter=false
-        if [[ "$local_file" == *.md ]] && \
-           (grep -qx '<!-- NODE-SPECIFIC-START -->' "$hub_file" 2>/dev/null || \
-            grep -qx '<!-- HUB-MANAGED-START -->' "$hub_file" 2>/dev/null); then
-          has_delimiter=true
+        # AC-4: Mode-aware overrides for mature-repo / partial-ccanvil.
+        # These run before the standard delimiter check so retrofit defaults
+        # don't clobber node-specific content by accident.
+        local mature_applied=false
+        if [[ "$project_mode" == "mature-repo" || "$project_mode" == "partial-ccanvil" ]]; then
+          case "$local_file" in
+            CLAUDE.md)
+              # If local CLAUDE.md lacks an exact-line delimiter (AC-25),
+              # flag as section-merge-create-delimiters so init-apply can
+              # wrap existing content as the node section.
+              if ! grep -qx '<!-- HUB-MANAGED-START -->' "$local_file" 2>/dev/null && \
+                 ! grep -qx '<!-- NODE-SPECIFIC-START -->' "$local_file" 2>/dev/null; then
+                plan=$(echo "$plan" | jq --arg f "$local_file" \
+                  '. + [{"file": $f, "source": "both", "recommended_action": "section-merge-create-delimiters", "reason": "Mature-repo CLAUDE.md has no delimiter; will wrap existing content as node section"}]')
+                mature_applied=true
+              fi
+              ;;
+            README.md|CONTRIBUTING.md)
+              plan=$(echo "$plan" | jq --arg f "$local_file" \
+                '. + [{"file": $f, "source": "both", "recommended_action": "skip", "reason": "Mature-repo mode: keep local node-specific content"}]')
+              mature_applied=true
+              ;;
+          esac
         fi
 
-        if [[ "$has_delimiter" == "true" ]]; then
-          plan=$(echo "$plan" | jq --arg f "$local_file" \
-            '. + [{"file": $f, "source": "both", "recommended_action": "section-merge", "reason": "Both versions exist; can merge hub and local sections"}]')
-        else
-          plan=$(echo "$plan" | jq --arg f "$local_file" \
-            '. + [{"file": $f, "source": "both", "recommended_action": "review", "reason": "Local differs from hub; needs user decision"}]')
+        if [[ "$mature_applied" == "false" ]]; then
+          # Different — check for section-merge delimiter (default path)
+          local has_delimiter=false
+          if [[ "$local_file" == *.md ]] && \
+             (grep -qx '<!-- NODE-SPECIFIC-START -->' "$hub_file" 2>/dev/null || \
+              grep -qx '<!-- HUB-MANAGED-START -->' "$hub_file" 2>/dev/null); then
+            has_delimiter=true
+          fi
+
+          if [[ "$has_delimiter" == "true" ]]; then
+            plan=$(echo "$plan" | jq --arg f "$local_file" \
+              '. + [{"file": $f, "source": "both", "recommended_action": "section-merge", "reason": "Both versions exist; can merge hub and local sections"}]')
+          else
+            plan=$(echo "$plan" | jq --arg f "$local_file" \
+              '. + [{"file": $f, "source": "both", "recommended_action": "review", "reason": "Local differs from hub; needs user decision"}]')
+          fi
         fi
       fi
     fi
@@ -622,8 +720,9 @@ cmd_init_preflight() {
   auto=$(echo "$plan" | jq '[.[] | select(.recommended_action != "review")] | length')
   total=$(echo "$plan" | jq 'length')
 
-  jq -n --argjson conflicts "$conflicts" --argjson auto "$auto" --argjson total "$total" --argjson plan "$plan" \
-    '{"summary": {"conflicts": $conflicts, "auto": $auto, "total": $total}, "plan": $plan}'
+  jq -n --argjson conflicts "$conflicts" --argjson auto "$auto" --argjson total "$total" \
+        --argjson plan "$plan" --arg mode "$project_mode" \
+    '{"project_mode": $mode, "summary": {"conflicts": $conflicts, "auto": $auto, "total": $total}, "plan": $plan}'
 }
 
 cmd_init_apply() {
@@ -729,6 +828,50 @@ cmd_init_apply() {
           }
         fi
         ;;
+      section-merge-create-delimiters)
+        # AC-6: wrap local content as node section and append hub's hub-managed
+        # section below an inserted <!-- HUB-MANAGED-START --> delimiter.
+        # AC-7: if delimiters are already present, dispatch to standard
+        # section-merge (no double-wrapping).
+        # AC-25: detect delimiters by exact-line match only (grep -qx).
+        if [[ -z "$hub_file" || ! -f "$hub_file" ]]; then
+          echo "ERROR: Hub source not found for $file" >&2
+          errors=$((errors + 1))
+          i=$((i + 1)); continue
+        fi
+        if [[ ! -f "$file" ]]; then
+          mkdir -p "$(dirname "$file")"
+          cp "$hub_file" "$file"
+          copied=$((copied + 1))
+          echo "COPIED: $file (no local to merge)"
+        elif grep -qx '<!-- HUB-MANAGED-START -->' "$file" 2>/dev/null || \
+             grep -qx '<!-- NODE-SPECIFIC-START -->' "$file" 2>/dev/null; then
+          # Delimiters already present — fall through to standard section-merge
+          local merge_result
+          merge_result=$(cmd_section_merge "$hub_file" "$file" 2>/dev/null) && {
+            echo "$merge_result" > "$file"
+            merged=$((merged + 1))
+            echo "MERGED: $file (delimiters already present)"
+          } || {
+            echo "ERROR: Section-merge failed for $file" >&2
+            errors=$((errors + 1))
+          }
+        else
+          # AC-6: wrap local as node section, append hub's delimiter-onwards.
+          local tmp
+          tmp=$(mktemp)
+          cat "$file" > "$tmp"
+          # Guarantee a trailing newline between node content and the delimiter.
+          if [[ -s "$tmp" && $(tail -c 1 "$tmp" | wc -l) -eq 0 ]]; then
+            echo "" >> "$tmp"
+          fi
+          # Append hub's HUB-MANAGED-START line through EOF. Exact-line anchor.
+          sed -n '/^<!-- HUB-MANAGED-START -->$/,$p' "$hub_file" >> "$tmp"
+          mv "$tmp" "$file"
+          merged=$((merged + 1))
+          echo "MERGED: $file (delimiters inserted)"
+        fi
+        ;;
       *)
         echo "UNKNOWN ACTION: $action for $file — skipping" >&2
         skipped=$((skipped + 1))
@@ -739,6 +882,44 @@ cmd_init_apply() {
 
   jq -n --argjson copied "$copied" --argjson skipped "$skipped" --argjson merged "$merged" --argjson errors "$errors" \
     '{"copied": $copied, "skipped": $skipped, "merged": $merged, "errors": $errors}'
+}
+
+# format_preflight_table
+# Renders init-preflight JSON output as a human-readable table.
+# Reads JSON from stdin, writes table to stdout.
+# Shared between cmd_retrofit_check and /ccanvil-init's in-skill rendering.
+format_preflight_table() {
+  local json
+  json=$(cat)
+
+  local mode
+  mode=$(echo "$json" | jq -r '.project_mode // "unknown"')
+  echo "Detected mode: $mode"
+  echo ""
+
+  printf "%-50s %-5s %-7s %-34s %s\n" "File" "Hub" "Local" "Action" "Reason"
+  printf "%-50s %-5s %-7s %-34s %s\n" "----" "---" "-----" "------" "------"
+
+  echo "$json" | jq -r '.plan[] | [.file, .source, .recommended_action, .reason] | @tsv' | \
+    while IFS=$'\t' read -r file source action reason; do
+      local hub="-" lcl="-"
+      case "$source" in
+        hub-only)    hub="Y"; lcl="-" ;;
+        both)        hub="Y"; lcl="Y" ;;
+        local-only)  hub="-"; lcl="Y" ;;
+        stack:*)     hub="Y"; lcl="-" ;;
+      esac
+      printf "%-50s %-5s %-7s %-34s %s\n" "$file" "$hub" "$lcl" "$action" "$reason"
+    done
+}
+
+# cmd_retrofit_check — AC-15
+# Thin wrapper around init-preflight that emits a human-readable table
+# instead of JSON. Read-only: no files created, no lockfile touched.
+cmd_retrofit_check() {
+  local hub_path="${1:?Usage: ccanvil-sync.sh retrofit-check <hub-path>}"
+  cmd_init_preflight "$hub_path" | format_preflight_table
+  return 0
 }
 
 cmd_status() {
@@ -2759,6 +2940,7 @@ case "${1:-}" in
   # --- Init preflight/apply ---
   init-preflight)   shift; cmd_init_preflight "$@" ;;
   init-apply)       shift; cmd_init_apply "$@" ;;
+  retrofit-check)   shift; cmd_retrofit_check "$@" ;;
 
   # --- Compound commands (replace manual orchestration) ---
   pre-check)        cmd_pre_check ;;

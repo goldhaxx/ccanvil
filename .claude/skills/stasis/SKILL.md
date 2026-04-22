@@ -10,8 +10,16 @@ Run at the end of a session, immediately before `/compact`. Writes `docs/stasis.
 ## Pre-flight halt check
 
 1. Run `bash .ccanvil/scripts/docs-check.sh validate` and read the `.result` field.
-   - If the result is `aligned` or `missing-determinism-review` → continue.
-   - If the result is `stale-plan`, `mismatched`, `unlinked`, or any other non-aligned state → **STOP**. Report the validate output to the user and ask them to fix the lifecycle state before running stasis. Do not write a clean snapshot on top of a broken lifecycle.
+   - **Benign states — continue:**
+     - `aligned` — mid-feature, lifecycle clean
+     - `missing-determinism-review` — stasis will populate the required section
+     - `no-active-spec` — between features (specs/ has backlog items, none active)
+     - `no docs` / missing spec+plan+stasis entirely — fresh session before any feature
+   - **Corruption states — STOP and surface the failure:**
+     - `stale-plan` — spec changed after plan was written
+     - `mismatched` — feature_ids disagree across docs
+     - `unlinked` — docs exist but have no lifecycle metadata
+   - Do not write a clean stasis snapshot on top of a broken lifecycle. If halting, report the validate output and ask the user to fix the lifecycle state first.
 
 ## Data gathering (deterministic)
 

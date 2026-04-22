@@ -40,7 +40,8 @@
 |---------|-------------|
 | `/ccanvil-audit` | Analyzes configuration for stochastic-to-deterministic improvement opportunities. Calls `manifest-check.sh check` for deterministic README verification. Includes permissions audit and context budget check. |
 | `/fix-certs` | Diagnoses and repairs Cloudflare WARP TLS certificate issues |
-| `/init` | Initializes a new project from the ccanvil hub (global command) |
+| `/ccanvil-init` | Initializes a new project from the ccanvil hub, or retrofits it onto an existing project. Mode-aware: detects one of five `project_mode` values (fresh, source-no-git, mature-repo, partial-ccanvil, already-initialized) and branches its behavior. Mature-repo mode preserves `CLAUDE.md`, git history, and in-progress lifecycle docs. |
+| `ccanvil-sync.sh retrofit-check <hub>` | Read-only dry-run of `/ccanvil-init` — prints the detected mode and the per-file plan (File / Hub / Local / Action / Reason) without modifying anything. |
 
 ## Permissions Audit Scripts
 

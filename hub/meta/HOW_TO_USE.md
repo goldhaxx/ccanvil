@@ -12,6 +12,28 @@ You don't need to learn special syntax. You don't need to make technical decisio
 
 ---
 
+## Adding ccanvil to an existing project
+
+ccanvil works on mature repos too, not just greenfield ones. When you run `/ccanvil-init` in an existing project:
+
+- Your `CLAUDE.md` is preserved — if it doesn't have delimiters, the skill inserts `<!-- HUB-MANAGED-START -->` and keeps your existing content as the node section.
+- Your `.git/` history is preserved — `/ccanvil-init` will not re-run `git init` on a mature repo.
+- Your `README.md` and `CONTRIBUTING.md` are kept as-is — they're treated as node-specific.
+- Any in-progress `docs/spec.md`, `docs/plan.md`, `docs/stasis.md`, or `docs/roadmap.md` is preserved (logged as `PRESERVED:`), not overwritten.
+- Custom `.github/workflows/ci.yml` triggers a `review` action — you decide per-file.
+
+The skill detects one of five **project modes** (fresh, source-no-git, mature-repo, partial-ccanvil, already-initialized) and picks defaults that won't clobber your work. If `/ccanvil-init` sees an existing lockfile (`already-initialized`), it offers an update menu instead of trying to initialize.
+
+To preview what `/ccanvil-init` would do without running anything:
+
+```bash
+bash .ccanvil/scripts/ccanvil-sync.sh retrofit-check ~/projects/ccanvil
+```
+
+This prints the detected mode and the per-file plan table, read-only.
+
+---
+
 ## Your First Feature
 
 Open Claude Code in your project directory and describe what you want:

@@ -828,6 +828,50 @@ cmd_init_apply() {
           }
         fi
         ;;
+      section-merge-create-delimiters)
+        # AC-6: wrap local content as node section and append hub's hub-managed
+        # section below an inserted <!-- HUB-MANAGED-START --> delimiter.
+        # AC-7: if delimiters are already present, dispatch to standard
+        # section-merge (no double-wrapping).
+        # AC-25: detect delimiters by exact-line match only (grep -qx).
+        if [[ -z "$hub_file" || ! -f "$hub_file" ]]; then
+          echo "ERROR: Hub source not found for $file" >&2
+          errors=$((errors + 1))
+          i=$((i + 1)); continue
+        fi
+        if [[ ! -f "$file" ]]; then
+          mkdir -p "$(dirname "$file")"
+          cp "$hub_file" "$file"
+          copied=$((copied + 1))
+          echo "COPIED: $file (no local to merge)"
+        elif grep -qx '<!-- HUB-MANAGED-START -->' "$file" 2>/dev/null || \
+             grep -qx '<!-- NODE-SPECIFIC-START -->' "$file" 2>/dev/null; then
+          # Delimiters already present — fall through to standard section-merge
+          local merge_result
+          merge_result=$(cmd_section_merge "$hub_file" "$file" 2>/dev/null) && {
+            echo "$merge_result" > "$file"
+            merged=$((merged + 1))
+            echo "MERGED: $file (delimiters already present)"
+          } || {
+            echo "ERROR: Section-merge failed for $file" >&2
+            errors=$((errors + 1))
+          }
+        else
+          # AC-6: wrap local as node section, append hub's delimiter-onwards.
+          local tmp
+          tmp=$(mktemp)
+          cat "$file" > "$tmp"
+          # Guarantee a trailing newline between node content and the delimiter.
+          if [[ -s "$tmp" && $(tail -c 1 "$tmp" | wc -l) -eq 0 ]]; then
+            echo "" >> "$tmp"
+          fi
+          # Append hub's HUB-MANAGED-START line through EOF. Exact-line anchor.
+          sed -n '/^<!-- HUB-MANAGED-START -->$/,$p' "$hub_file" >> "$tmp"
+          mv "$tmp" "$file"
+          merged=$((merged + 1))
+          echo "MERGED: $file (delimiters inserted)"
+        fi
+        ;;
       *)
         echo "UNKNOWN ACTION: $action for $file — skipping" >&2
         skipped=$((skipped + 1))

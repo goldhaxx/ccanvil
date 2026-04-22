@@ -396,6 +396,78 @@ EOF
   echo "$output" | jq -e '.provider == "local"'
 }
 
+# =========================================================================
+# AC-4/5/6/7/8/22/23: /idea skill wiring for the dual-provider flow
+# Grep assertions on .claude/skills/idea/SKILL.md.
+# =========================================================================
+
+SKILL_FILE="$BATS_TEST_DIRNAME/../../.claude/skills/idea/SKILL.md"
+
+@test "AC-23: skill file exists and has yaml frontmatter" {
+  [ -f "$SKILL_FILE" ]
+  head -5 "$SKILL_FILE" | grep -q '^name: idea$'
+}
+
+@test "AC-23: skill references operations.sh resolve idea.add" {
+  grep -q 'operations.sh resolve idea.add' "$SKILL_FILE"
+}
+
+@test "AC-23: skill references operations.sh resolve idea.list / idea.triage / idea.sync" {
+  grep -q 'operations.sh resolve idea.list' "$SKILL_FILE"
+  grep -q 'operations.sh resolve idea.triage' "$SKILL_FILE"
+  grep -q 'operations.sh resolve idea.sync' "$SKILL_FILE"
+}
+
+@test "AC-23: skill branches on the mechanism field" {
+  grep -qE 'mechanism.*(mcp|bash)|\.mechanism' "$SKILL_FILE"
+  grep -q 'mcp' "$SKILL_FILE"
+  grep -q 'bash' "$SKILL_FILE"
+}
+
+@test "AC-23: skill calls Linear MCP tools by exact name" {
+  grep -q 'mcp__claude_ai_Linear__save_issue' "$SKILL_FILE"
+  grep -q 'mcp__claude_ai_Linear__list_issues' "$SKILL_FILE"
+}
+
+@test "AC-23: skill writes to .ccanvil/ideas.log for the local path" {
+  grep -q '.ccanvil/ideas.log' "$SKILL_FILE"
+}
+
+@test "AC-4: skill describes title-summarization step" {
+  grep -qiE 'summar|concise title|title.*body' "$SKILL_FILE"
+}
+
+@test "AC-22: skill describes short-text fast path (no summarization)" {
+  grep -qE '80 chars|short.*(skip|direct)|single-line' "$SKILL_FILE"
+}
+
+@test "AC-5: skill documents that capture avoids git entirely" {
+  grep -qiE 'no (git|commits|branch)|without a (commit|branch)|never (commits|touches git)' "$SKILL_FILE"
+}
+
+@test "AC-6: skill reports Linear issue ID on capture" {
+  grep -qE 'BTS-|issue ID|\.identifier' "$SKILL_FILE"
+}
+
+@test "AC-8: skill maps triage outcomes to Linear actions" {
+  grep -qiE 'promote' "$SKILL_FILE"
+  grep -qiE 'merge.*duplicate|Mark.*duplicate|duplicateOf' "$SKILL_FILE"
+  grep -qiE 'park.*Icebox|Icebox' "$SKILL_FILE"
+  grep -qiE 'dismiss.*Cancel|state.*Cancel|Decline' "$SKILL_FILE"
+}
+
+@test "AC-7: skill documents idea.list rendering" {
+  grep -qE 'ID.*Created.*Title|ID.*Title.*Status|table' "$SKILL_FILE"
+}
+
+@test "AC-9/20: skill describes pending-log fallback on MCP failure" {
+  grep -q 'ideas-pending.log' "$SKILL_FILE"
+}
+
+@test "AC-23: skill file remains a hub-shared asset (has NODE-SPECIFIC-START delimiter)" {
+  grep -q '<!-- NODE-SPECIFIC-START -->' "$SKILL_FILE"
+}
+
 @test "AC-16: legacy docs/ideas.md is NOT consulted by new code paths" {
   # A stale docs/ideas.md should be ignored — the new store is
   # .ccanvil/ideas.log only.

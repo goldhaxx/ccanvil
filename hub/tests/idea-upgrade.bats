@@ -572,3 +572,26 @@ MD
   [[ "$output" = *"/idea list"* ]]
   [[ "$output" != *"ARCHIVE:"* ]]
 }
+
+# =========================================================================
+# AC-17, AC-18: documentation
+# =========================================================================
+
+@test "AC-17: command-reference.md documents idea-upgrade and title-from-body" {
+  ref="$BATS_TEST_DIRNAME/../../.ccanvil/guide/command-reference.md"
+  grep -q "docs-check.sh idea-upgrade" "$ref"
+  grep -q "docs-check.sh title-from-body" "$ref"
+  # The idea-list row mentions --include-archive (AC-15 docs).
+  grep -q -- "--include-archive" "$ref"
+}
+
+@test "AC-18: ideas-migration.md opens with the one-command flow, keeps manual alternative" {
+  guide="$BATS_TEST_DIRNAME/../../.ccanvil/guide/ideas-migration.md"
+  # One-command path visible early (within the first 40 lines).
+  head -40 "$guide" | grep -q "idea-upgrade"
+  # Manual alternative section still documented.
+  grep -q "Manual alternative" "$guide"
+  # Original 4 steps still discoverable.
+  grep -q "idea-setup" "$guide"
+  grep -q "idea-migrate" "$guide"
+}

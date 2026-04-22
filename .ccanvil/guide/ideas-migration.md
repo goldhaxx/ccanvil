@@ -1,74 +1,54 @@
 # Migrating to the Linear-backed `/idea` system
 
-This guide walks a downstream node through adopting the new idea pipeline shipped in `ideas-to-linear`. Before this change, `/idea` captures lived in a tracked `docs/ideas.md` and every capture eventually pressured a direct-to-main commit. After this change:
+This guide walks a downstream node through adopting the ccanvil idea pipeline. Before the migration, `/idea` captures lived in a tracked `docs/ideas.md` and every capture eventually pressured a direct-to-main commit. After:
 
 - Captures route through `.ccanvil/scripts/operations.sh` to one of two providers: a local gitignored JSONL log, or Linear Triage via MCP.
 - `/idea` never touches git — no commits, no branches.
-- The hub ships the common Linear provider defaults; each node opts in per its own `.claude/ccanvil.local.json`.
+- On Linear-configured nodes, `.ccanvil/ideas.log` becomes an archive-only record of pre-migration entries; new captures flow straight to Linear.
 
-## 1. Pull the update
+## Quick path: `idea-upgrade` (one command)
+
+For most nodes this is all you need:
 
 ```bash
 /ccanvil-pull
-```
-
-Picks up the new `docs-check.sh` subcommands, the rewritten `/idea` skill, and the shared provider defaults in `.claude/ccanvil.json`.
-
-## 2. Decide the provider
-
-**Default — Local provider.** Captures write to `.ccanvil/ideas.log` (JSONL, gitignored). Zero network, zero external dependency, zero config. Good for private repos, experimental projects, or anything where ideas don't need to escape the machine.
-
-**Opt-in — Linear provider.** Captures create issues in Linear's Triage queue with an `idea` label and an `Idea` status. Use when the project's backlog already lives in Linear and you want ideas to join that flow naturally.
-
-A node can switch between the two later by re-running `idea-setup` — the state is just a file.
-
-## 3. Run `idea-setup`
-
-**Local:**
-
-```bash
-bash .ccanvil/scripts/docs-check.sh idea-setup --provider local
-```
-
-**Linear:**
-
-```bash
-bash .ccanvil/scripts/docs-check.sh idea-setup \
+bash .ccanvil/scripts/docs-check.sh idea-upgrade \
   --provider linear \
   --team "<Linear team name>" \
-  --project "<Linear project name>"
+  --project "<Linear project name>" \
+  --from-legacy
 ```
 
-This writes (or deep-merges into) `.claude/ccanvil.local.json` with the right shape and adds `.ccanvil/ideas.log`, `.ccanvil/ideas-pending.log`, and `docs/ideas.md` to `.gitignore` (idempotent — safe to re-run).
+What it does, in one commit:
 
-## 4. Linear only — create the custom statuses
+- Writes `.claude/ccanvil.local.json` with the provider config.
+- Adds `.ccanvil/ideas.log`, `.ccanvil/ideas-pending.log`, and `docs/ideas.md` to `.gitignore`.
+- If `docs/ideas.md` is tracked, parses each entry, generates a concise title via `title-from-body` (uses the local `claude` CLI when present, deterministic fallback otherwise), writes JSONL to `.ccanvil/ideas.log`, and `git rm`s the source file.
+- Prepends a `# ARCHIVE: read-only after <date>` header to `.ccanvil/ideas.log` (Linear only), so the log's archive-only role is self-documenting.
 
-Statuses in Linear are team-scoped. If your node routes to the same team as the hub (Blocktech Solutions / BTS), the `Idea` and `Icebox` statuses already exist and you can skip this step.
+Flag quick-reference:
 
-Otherwise, create both statuses manually in the Linear UI:
+| Flag | Purpose |
+|------|---------|
+| `--provider local`  | Gitignored JSONL at `.ccanvil/ideas.log`. Zero network, zero config. |
+| `--provider linear` | Routes captures to Linear Triage via MCP. Requires `--team` and `--project`. |
+| `--from-legacy`     | Migrate an existing tracked `docs/ideas.md`. Safe to include even when no legacy file exists. |
+| `--create-project`  | Emit a `save_project` intent on stdout (Linear only); the /idea skill layer dispatches it via MCP. |
+| `--dry-run`         | Print the plan without making changes. Combines with any flag. |
+
+Idempotent — re-running with the same provider is a no-op (`Already upgraded`).
+
+### Linear-only: custom statuses
+
+Statuses in Linear are team-scoped. If your node routes to the same team as the hub (Blocktech Solutions / BTS), the `Idea` and `Icebox` statuses already exist — nothing to do.
+
+Otherwise, create both statuses manually in the Linear UI (MCP doesn't expose status creation yet):
 
 1. Open **Team Settings → <your team> → Issue statuses & automations**.
 2. Click **+** in the **Backlog** category. Name it `Idea`. Save.
-3. Click **+** in the **Backlog** category again. Name it `Icebox`. Save.
+3. Repeat: click **+** in the **Backlog** category. Name it `Icebox`. Save.
 
-(Linear's MCP currently doesn't expose status creation — this is the one unavoidable manual step. `idea-setup`'s output reminds you of it.)
-
-## 5. Migrate legacy `docs/ideas.md`
-
-If your node still has a tracked `docs/ideas.md` from before the migration:
-
-```bash
-bash .ccanvil/scripts/docs-check.sh idea-migrate
-```
-
-Behavior:
-
-- **Local provider nodes**: parses the markdown checkbox entries, appends each as a JSONL line to `.ccanvil/ideas.log`, `git rm`s the old file, and ensures `.gitignore` covers the new stores.
-- **Linear provider nodes**: the same command will move entries to the local store. If you want those entries promoted to Linear, run `idea-migrate --extract` and iterate the emitted intents through the `/idea` skill — or use `/idea triage` once the entries surface there. For most nodes the historical entries have already been triaged; preserving them locally in log form is usually enough.
-
-`idea-migrate` is idempotent — rerunning when `docs/ideas.md` is absent exits 0 with "Nothing to migrate".
-
-## 6. Smoke-test a capture
+### Smoke-test
 
 ```
 /idea test capture via the new flow
@@ -79,15 +59,41 @@ Behavior:
 
 If Linear is configured but a capture falls through to `.ccanvil/ideas-pending.log`, the MCP call failed (usually auth expiry). Fix the MCP connection and run `/idea sync` to drain the pending entries.
 
+## Manual alternative
+
+When you need fine-grained control — e.g., migrating without committing, or wiring up a node that requires bespoke steps — the original 4-step path still works. `idea-upgrade` is a wrapper around it.
+
+1. **Pull the update**: `/ccanvil-pull`.
+2. **Configure the provider**:
+   ```bash
+   bash .ccanvil/scripts/docs-check.sh idea-setup --provider local
+   # or:
+   bash .ccanvil/scripts/docs-check.sh idea-setup --provider linear --team T --project P
+   ```
+3. **Migrate legacy entries** (only if `docs/ideas.md` is tracked):
+   ```bash
+   bash .ccanvil/scripts/docs-check.sh idea-migrate
+   ```
+   Idempotent — exits 0 with `Nothing to migrate` if the file is absent.
+4. **Commit the change**:
+   ```bash
+   git add .claude/ccanvil.local.json .gitignore docs/ideas.md
+   git commit -m "chore(idea-migration): ..."
+   ```
+
+The manual path doesn't auto-generate titles for migrated entries (title = body), doesn't add the archive header, and requires two commits to land cleanly. Prefer `idea-upgrade` unless one of those matters.
+
 ## Troubleshooting
 
-**`/idea` exits with "missing Linear config"** — `routing.idea = "linear"` is set but `providers.linear.{project, team}` is missing. Re-run `idea-setup --provider linear --team ... --project ...`.
+**`/idea` exits with "missing Linear config"** — `routing.idea = "linear"` is set but `providers.linear.{project, team}` is missing. Re-run `idea-upgrade --provider linear --team ... --project ...`.
 
-**Broadcast prints a "docs/ideas.md still tracked" hint for the node** — that node hasn't run `idea-migrate` yet. Each node migrates itself; `broadcast` only surfaces the need.
+**Broadcast prints a "docs/ideas.md still tracked" hint for the node** — that node hasn't run `idea-upgrade --from-legacy` yet. Each node migrates itself; `broadcast` only surfaces the need.
 
-**Statuses don't exist in the target Linear team** — see step 4. `save_issue` will reject the capture until the statuses exist.
+**Statuses don't exist in the target Linear team** — see step "Linear-only: custom statuses" above. `save_issue` will reject the capture until the statuses exist.
 
-**Want to change providers later?** Just re-run `idea-setup` with different flags. The command is idempotent and deep-merges with the existing config.
+**Want to change providers later?** Re-run `idea-upgrade` with different flags. Provider-change (local → linear or vice versa) is NOT idempotent — the upgrade proceeds and creates a new commit.
+
+**`idea-add` refuses with "Linear-configured" on a Linear node** — that's defense-in-depth. Captures on Linear-configured nodes must go through `/idea` so they route to Linear. The local log is archive-only.
 
 <!-- NODE-SPECIFIC-START -->
 <!-- Add project-specific content below this line. -->

@@ -50,6 +50,26 @@ For the full setup guide with explanations, see below.
 
 ---
 
+## Retrofitting an existing project
+
+/ccanvil-init is safe to run on an established repo — custom CLAUDE.md, existing git history, in-progress lifecycle files, and custom CI workflows are all preserved. The skill detects one of five project modes and branches its behavior:
+
+- **fresh** — empty directory. Runs full init with git init and an initial commit.
+- **source-no-git** — source files present but no .git directory. Same as fresh, plus git init.
+- **mature-repo** — .git directory with commit history, no ccanvil markers. Skips git init and commits as `chore(ccanvil): retrofit preset onto existing project`.
+- **partial-ccanvil** — has .claude/ or CLAUDE.md but no lockfile. Same behavior as mature-repo.
+- **already-initialized** — ccanvil.lock already present. Offers an update / re-register / abort menu — no init commit.
+
+For a read-only dry-run that shows what /ccanvil-init would do without modifying anything:
+
+```bash
+bash .ccanvil/scripts/ccanvil-sync.sh retrofit-check ~/projects/ccanvil
+```
+
+This prints the detected mode and the per-file plan table (File / Hub / Local / Action / Reason) the skill would present.
+
+---
+
 ## Detailed Setup (5 minutes)
 
 ### Step 1: One-time personal setup

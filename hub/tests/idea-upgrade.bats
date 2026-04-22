@@ -434,3 +434,56 @@ MD
   run jq -r '.integrations.routing.idea' "$PROJECT/.claude/ccanvil.local.json"
   [ "$output" = "linear" ]
 }
+
+# =========================================================================
+# AC-13, AC-16: archive header on Linear upgrade
+# =========================================================================
+
+@test "AC-13: --provider linear prepends archive header to .ccanvil/ideas.log" {
+  _init_git
+  run bash "$DOCS_CHECK" idea-upgrade --provider linear --team "Acme" --project "Alpha" "$PROJECT"
+  [ "$status" -eq 0 ]
+
+  [ -f "$PROJECT/.ccanvil/ideas.log" ]
+  head1=$(head -1 "$PROJECT/.ccanvil/ideas.log")
+  [[ "$head1" =~ ^\#\ ARCHIVE:\ read-only\ after\ [0-9]{4}-[0-9]{2}-[0-9]{2} ]]
+}
+
+@test "AC-13: existing log entries are preserved below the prepended header" {
+  _init_git
+  # Simulate a project with pre-existing local log entries.
+  mkdir -p "$PROJECT/.ccanvil"
+  echo '{"uid":"a1b2","created":1700000000,"status":"new","title":"old","body":"old"}' > "$PROJECT/.ccanvil/ideas.log"
+
+  run bash "$DOCS_CHECK" idea-upgrade --provider linear --team "Acme" --project "Alpha" "$PROJECT"
+  [ "$status" -eq 0 ]
+
+  head1=$(head -1 "$PROJECT/.ccanvil/ideas.log")
+  [[ "$head1" =~ ^\#\ ARCHIVE: ]]
+  # Original entry still present.
+  grep -q '"uid":"a1b2"' "$PROJECT/.ccanvil/ideas.log"
+}
+
+@test "AC-16: archive header is not duplicated on idempotent re-run" {
+  _init_git
+  run bash "$DOCS_CHECK" idea-upgrade --provider linear --team "Acme" --project "Alpha" "$PROJECT"
+  [ "$status" -eq 0 ]
+
+  # Re-run the upgrade — since config matches, this is the idempotent path.
+  run bash "$DOCS_CHECK" idea-upgrade --provider linear --team "Acme" --project "Alpha" "$PROJECT"
+  [ "$status" -eq 0 ]
+
+  archive_header_count=$(grep -c '^# ARCHIVE:' "$PROJECT/.ccanvil/ideas.log" || true)
+  [ "$archive_header_count" -eq 1 ]
+}
+
+@test "AC-13: --provider local does NOT prepend the archive header" {
+  _init_git
+  run bash "$DOCS_CHECK" idea-upgrade --provider local "$PROJECT"
+  [ "$status" -eq 0 ]
+
+  # Log file may not exist yet, or if it exists it must not have the header.
+  if [[ -f "$PROJECT/.ccanvil/ideas.log" ]]; then
+    ! grep -q '^# ARCHIVE:' "$PROJECT/.ccanvil/ideas.log"
+  fi
+}

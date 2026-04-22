@@ -1696,6 +1696,26 @@ cmd_idea_upgrade() {
     cmd_idea_setup --provider local "$project_dir" >/dev/null
   fi
 
+  # Archive-only semantic: Linear-configured nodes get a read-only header
+  # prepended to .ccanvil/ideas.log. The log stays in place for historical
+  # reference but new captures route through Linear. Idempotent — the header
+  # is never duplicated on re-runs.
+  if [[ "$provider" == "linear" ]]; then
+    local ideas_log_archive="$project_dir/.ccanvil/ideas.log"
+    mkdir -p "$(dirname "$ideas_log_archive")"
+    touch "$ideas_log_archive"
+    if ! grep -q '^# ARCHIVE:' "$ideas_log_archive" 2>/dev/null; then
+      local iso_date
+      iso_date=$(date -u +%Y-%m-%d)
+      local tmp_log="${ideas_log_archive}.tmp.$$"
+      {
+        printf '# ARCHIVE: read-only after %s\n' "$iso_date"
+        cat "$ideas_log_archive"
+      } > "$tmp_log"
+      mv "$tmp_log" "$ideas_log_archive"
+    fi
+  fi
+
   # Build the single commit. When --from-legacy migrated a tracked file,
   # git rm it so the deletion is in the same commit as the config write.
   local commit_msg="chore(idea-upgrade): configure $provider provider"

@@ -256,9 +256,11 @@ JSON
 EOF
   run bash "$DOCS_CHECK" idea-list "$PROJECT"
   [ "$status" -eq 0 ]
+  # Default view now excludes terminal states (canceled/dismissed, etc.) —
+  # superseded by idea-triage-native AC-9. Expect 2 entries, not 3.
   local count
   count=$(echo "$output" | jq 'length')
-  [ "$count" -eq 3 ]
+  [ "$count" -eq 2 ]
   echo "$output" | jq -e '.[0].id == "a1b2"'
   echo "$output" | jq -e '.[0].created == 1776000001'
   echo "$output" | jq -e '.[0].status == "new"'

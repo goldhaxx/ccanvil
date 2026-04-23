@@ -1314,7 +1314,11 @@ cmd_idea_list() {
     grep -v '^# ' "$ideas_log" | jq -s --argjson set "$equivalents" \
       "[.[] | select(.status as \$s | \$set | index(\$s)) | $jq_shape]"
   else
-    grep -v '^# ' "$ideas_log" | jq -s "[.[] | $jq_shape]"
+    # Default view: exclude terminal (canceled, duplicate) + deferred (icebox)
+    # states, plus their legacy aliases. Surface them via explicit --status.
+    local excluded='["icebox","parked","canceled","dismissed","duplicate","merged"]'
+    grep -v '^# ' "$ideas_log" | jq -s --argjson exc "$excluded" \
+      "[.[] | select(.status as \$s | \$exc | index(\$s) | not) | $jq_shape]"
   fi
 }
 

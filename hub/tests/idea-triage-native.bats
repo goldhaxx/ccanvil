@@ -182,6 +182,41 @@ EOF
 }
 
 # =========================================================================
+# Step 7 — Default idea-list excludes terminal + deferred states (AC-9).
+# =========================================================================
+
+@test "Step 7: idea-list default excludes icebox, canceled, duplicate" {
+  local ideas_log="$PROJECT/.ccanvil/ideas.log"
+  cat > "$ideas_log" <<'EOF'
+{"uid":"a","created":1,"status":"triage","title":"t","body":"t"}
+{"uid":"b","created":2,"status":"backlog","title":"b","body":"b"}
+{"uid":"c","created":3,"status":"icebox","title":"i","body":"i"}
+{"uid":"d","created":4,"status":"canceled","title":"c","body":"c"}
+{"uid":"e","created":5,"status":"duplicate","title":"d","body":"d"}
+EOF
+  run bash "$DOCS_CHECK" idea-list "$PROJECT"
+  [ "$status" -eq 0 ]
+  # Default: only triage + backlog (2 entries).
+  echo "$output" | jq -e 'length == 2'
+  echo "$output" | jq -e '[.[].id] | contains(["a","b"])'
+  echo "$output" | jq -e '[.[].id] | any(. == "c") | not'
+  echo "$output" | jq -e '[.[].id] | any(. == "d") | not'
+  echo "$output" | jq -e '[.[].id] | any(. == "e") | not'
+}
+
+@test "Step 7: idea-list --status icebox surfaces iceboxed items" {
+  local ideas_log="$PROJECT/.ccanvil/ideas.log"
+  cat > "$ideas_log" <<'EOF'
+{"uid":"a","created":1,"status":"triage","title":"t","body":"t"}
+{"uid":"c","created":3,"status":"icebox","title":"i","body":"i"}
+EOF
+  run bash "$DOCS_CHECK" idea-list --status icebox "$PROJECT"
+  [ "$status" -eq 0 ]
+  echo "$output" | jq -e 'length == 1'
+  echo "$output" | jq -e '.[0].id == "c"'
+}
+
+# =========================================================================
 # Step 6 — cmd_idea_update accepts new vocab; rejects unknowns.
 # =========================================================================
 

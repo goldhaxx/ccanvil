@@ -1009,6 +1009,28 @@ cmd_land() {
     echo "Main updated to $sha."
   fi
 
+  # Post-merge safety net: if the landed branch maps to a spec archive that's
+  # still In Progress on main, transition it to Complete. Covers the case
+  # where /pr was skipped (PR merged directly from the GitHub UI, etc.).
+  if [[ "$branch" =~ ^claude/[^/]+/(.+)$ ]]; then
+    local safety_feature_id="${BASH_REMATCH[1]}"
+    local safety_spec_file="${DEFAULT_DOCS_DIR}/specs/${safety_feature_id}.md"
+    if [[ -f "$safety_spec_file" ]]; then
+      local safety_status
+      safety_status=$(parse_metadata "$safety_spec_file" | jq -r '.status // empty')
+      if [[ "$safety_status" == "In Progress" ]]; then
+        update_metadata_status "$safety_spec_file" "Complete"
+        ALLOW_MAIN=1 git add "$safety_spec_file" 2>/dev/null
+        ALLOW_MAIN=1 git -c commit.gpgsign=false commit -q \
+          -m "docs(lifecycle): complete ${safety_feature_id} — post-merge cleanup" 2>/dev/null
+        if git remote get-url origin >/dev/null 2>&1; then
+          git push origin main 2>/dev/null || true
+        fi
+        echo "Safety net: transitioned '${safety_feature_id}' to Complete."
+      fi
+    fi
+  fi
+
   # Delete local branch
   git branch -d "$branch" 2>/dev/null || git branch -D "$branch" 2>/dev/null || true
   echo "Deleted local branch '$branch'."

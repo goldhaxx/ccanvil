@@ -1101,6 +1101,41 @@ EOF
   [ -z "$output" ]
 }
 
+@test "land: safety net transitions matching In Progress spec (AC-3)" {
+  cd "$PROJECT"
+  cat > "$PROJECT/docs/specs/demo.md" <<'EOF'
+# Feature: Demo
+
+> Feature: demo
+> Created: 1774200000
+> Status: Ready
+
+## Summary
+Demo feature.
+EOF
+
+  "$PROJECT/.ccanvil/scripts/docs-check.sh" activate demo "$PROJECT/docs" >/dev/null 2>&1
+
+  # Implementation commit without pr-cleanup — archive stays In Progress.
+  echo "work" > "$PROJECT/work.txt"
+  git -C "$PROJECT" add -A && git -C "$PROJECT" commit -q -m "feat: implement demo"
+  git -C "$PROJECT" push -u origin claude/feat/demo 2>/dev/null
+
+  # Simulate squash-merge on main, push, then return to feature branch so land
+  # exercises the post-merge path.
+  git -C "$PROJECT" checkout main -q
+  git -C "$PROJECT" merge --squash claude/feat/demo
+  git -C "$PROJECT" commit -q -m "feat(demo): implement demo (#1)"
+  git -C "$PROJECT" push origin main 2>/dev/null
+  git -C "$PROJECT" checkout claude/feat/demo -q
+
+  run "$PROJECT/.ccanvil/scripts/docs-check.sh" land --force
+  [ "$status" -eq 0 ]
+
+  # Safety net flipped archive to Complete on main
+  grep -q "Status: Complete" "$PROJECT/docs/specs/demo.md"
+}
+
 @test "land: handles no remote gracefully" {
   cd "$PROJECT"
   git remote remove origin

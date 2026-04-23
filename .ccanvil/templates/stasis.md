@@ -1,10 +1,14 @@
 # Stasis
 
-> Feature: [feature-id]
+> Feature: [feature-id or session-YYYY-MM-DD-<slug>-ship]
+> Work: [provider:id — only on feature-kind stasis; omit on session-kind]
+> Kind: [feature | session]
 > Last updated: [epoch]
-> Plan hash: [hash]
+> Plan hash: [hash — only on feature-kind stasis]
 > Session objective: [what we set out to do]
 <!-- Reminder: if no plan exists yet, run /plan before /stasis (plan before stasis). -->
+<!-- Kind: `feature` when an active spec+plan exists (mid-feature stasis); `session` when on main between features (ambient session-boundary stasis). Session-kind stasis is excluded from validator feature alignment. -->
+<!-- Work: mirrors the active spec's `> Work:` when Kind=feature; omitted when Kind=session. -->
 
 ## Accomplished
 

@@ -35,6 +35,26 @@ Collect these inputs via scripts — all deterministic, all cheap:
 9. `git log --oneline -20` — recent commit history.
 10. `git show HEAD~1:docs/stasis.md 2>/dev/null || true` — the prior stasis snapshot, if any. If the command fails (no prior), proceed and note "First stasis — no prior state to compare" in the Cross-Session Patterns section.
 
+## Determine stasis kind — feature vs session
+
+Before synthesizing, pick the stasis kind from the lifecycle state:
+
+- **Feature-kind stasis** — write when `docs/spec.md` AND `docs/plan.md` both exist (mid-feature). Metadata carries:
+  - `> Feature: <feature-id>` (from spec.md)
+  - `> Work: <provider>:<id>` (inherited from spec.md's `> Work:` line; omit if spec is legacy/no Work:)
+  - `> Kind: feature`
+  - `> Plan hash: <plan-hash>`
+- **Session-kind stasis** — write when NO active spec+plan on the current branch (typically at a session boundary on main, between features). Metadata carries:
+  - `> Feature: session-YYYY-MM-DD-<short-slug>-ship`
+  - `> Kind: session`
+  - `> Last updated: <epoch>`
+  - **NO `> Work:` field** — session-stasis is ambient state, not feature state
+  - **NO `> Plan hash: <hash>`** — no plan to hash against
+
+The validator excludes `Kind: session` stasis from feature alignment, so the old BTS-120 trap (session-stasis tripping `/pr` validate) is gone. Absence of `Kind:` defaults to feature-kind for backward-compat with pre-BTS-130 stasis files.
+
+Inherit `> Work:` when feature-kind by reading `bash .ccanvil/scripts/docs-check.sh status` and copying `.spec.work` verbatim.
+
 ## Synthesis — write docs/stasis.md
 
 Copy `.ccanvil/templates/stasis.md` to `docs/stasis.md` and fill each section:

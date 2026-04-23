@@ -189,14 +189,34 @@ local_adapter() {
   # shape used by other ops) — it IS the result, not a plan to fetch one.
   if [[ "$op" == "work.resolve" ]]; then
     local wid="$OP_ARGS"
-    # Strip explicit `local:` prefix if caller used it.
-    [[ "$wid" == local:* ]] && wid="${wid#local:}"
+    local had_prefix=false
+    if [[ "$wid" == local:* ]]; then
+      wid="${wid#local:}"
+      had_prefix=true
+    fi
     if [[ -z "$wid" ]]; then
       echo "ERROR: work.resolve requires a work id argument" >&2
       exit 1
     fi
+    # Whitespace rejects — a work id is an opaque identifier, not a description.
+    if [[ "$wid" =~ [[:space:]] ]]; then
+      echo "ERROR: work id '$wid' contains whitespace (looks like a description, not a reference)" >&2
+      exit 1
+    fi
+    # Strict format check for BARE local IDs. Explicit `local:` prefix trusts caller.
+    # Local bare IDs must look like an idea UID: letters+digits, at least one digit.
+    if ! $had_prefix; then
+      if [[ ! "$wid" =~ ^[a-z][a-z0-9-]*$ ]] || [[ ! "$wid" =~ [0-9] ]]; then
+        echo "ERROR: '$wid' is not a recognizable work reference on a local-provider node (expected e.g. idea-29). Use 'local:<id>' to bypass this check." >&2
+        exit 1
+      fi
+    fi
     local slug
     slug=$(slug_from_work_id "$wid")
+    if [[ -z "$slug" ]]; then
+      echo "ERROR: work id '$wid' derives to an empty slug" >&2
+      exit 1
+    fi
     jq -n --arg id "$wid" --arg slug "$slug" \
       '{"provider":"local","id":$id,"slug":$slug,"url":""}'
     return 0
@@ -377,13 +397,33 @@ linear_mcp_adapter() {
   # work.resolve emits a direct identity shape (see local_adapter for rationale).
   if [[ "$op" == "work.resolve" ]]; then
     local wid="$op_args"
-    [[ "$wid" == linear:* ]] && wid="${wid#linear:}"
+    local had_prefix=false
+    if [[ "$wid" == linear:* ]]; then
+      wid="${wid#linear:}"
+      had_prefix=true
+    fi
     if [[ -z "$wid" ]]; then
       echo "ERROR: work.resolve requires a work id argument" >&2
       exit 1
     fi
+    if [[ "$wid" =~ [[:space:]] ]]; then
+      echo "ERROR: work id '$wid' contains whitespace (looks like a description, not a reference)" >&2
+      exit 1
+    fi
+    # Strict format check for BARE Linear IDs: must match TEAM-N (e.g., BTS-130).
+    # Explicit `linear:` prefix trusts caller intent and bypasses the check.
+    if ! $had_prefix; then
+      if [[ ! "$wid" =~ ^[A-Z]+-[0-9]+$ ]]; then
+        echo "ERROR: '$wid' is not a valid Linear ticket key (expected e.g. BTS-130). Use 'linear:<id>' to bypass this check." >&2
+        exit 1
+      fi
+    fi
     local slug url=""
     slug=$(slug_from_work_id "$wid")
+    if [[ -z "$slug" ]]; then
+      echo "ERROR: work id '$wid' derives to an empty slug" >&2
+      exit 1
+    fi
     [[ -n "$workspace" ]] && url="https://linear.app/${workspace}/issue/${wid}"
     jq -n --arg id "$wid" --arg slug "$slug" --arg url "$url" \
       '{"provider":"linear","id":$id,"slug":$slug,"url":$url}'

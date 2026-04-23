@@ -301,8 +301,10 @@ cmd_validate() {
     stasis_participates=false
   fi
 
-  # Collect present feature_ids for mismatch check (excluding session-stasis).
-  # fids is used for priority checks (unlinked, mismatched) and downstream logic.
+  # Collect present feature_ids for the unlinked check below (fids[] counts
+  # how many docs carry any metadata at all; session-stasis feature_ids are
+  # still counted for "unlinked" detection because those are about metadata
+  # presence, not feature alignment). Alignment proper uses align_keys[].
   local fids=()
   [[ -n "$spec_fid" ]] && fids+=("$spec_fid")
   [[ -n "$plan_fid" ]] && fids+=("$plan_fid")

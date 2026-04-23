@@ -82,8 +82,8 @@ EOF
 # ===========================================================================
 
 @test "BTS-130 Phase 4: work.resolve slug is suitable for filename prefix" {
-  # No config → local provider path
-  run bash "$OPS" resolve work.resolve BTS-130 --project-dir "$REPO"
+  # Use explicit prefix so this test doesn't depend on the repo's routing config.
+  run bash "$OPS" resolve work.resolve linear:BTS-130 --project-dir "$REPO"
   [ "$status" -eq 0 ]
   local slug
   slug=$(echo "$output" | jq -r '.slug')

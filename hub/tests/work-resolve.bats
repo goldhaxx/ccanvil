@@ -121,3 +121,49 @@ _local_config() {
   [ "$status" -eq 0 ]
   echo "$output" | jq -e '.slug == "idea-1776973070"'
 }
+
+# ===========================================================================
+# Review feedback — format validation: reject inputs that look like
+# descriptions, not work refs (closes /spec stop-condition gap)
+# ===========================================================================
+
+@test "BTS-130 validation: bare Linear ID with wrong format rejected" {
+  _linear_config
+  # Lowercase letters are not a valid Linear ticket key
+  run bash "$OPS" resolve work.resolve not-a-ticket --project-dir "$PROJECT"
+  [ "$status" -ne 0 ]
+}
+
+@test "BTS-130 validation: multi-word input rejected (reads as description)" {
+  _local_config
+  run bash "$OPS" resolve work.resolve "my description here" --project-dir "$PROJECT"
+  [ "$status" -ne 0 ]
+}
+
+@test "BTS-130 validation: bare 'idea' (without number) rejected on local node" {
+  _local_config
+  run bash "$OPS" resolve work.resolve idea --project-dir "$PROJECT"
+  [ "$status" -ne 0 ]
+}
+
+@test "BTS-130 validation: pathological input producing empty slug rejected" {
+  _local_config
+  run bash "$OPS" resolve work.resolve "!!!" --project-dir "$PROJECT"
+  [ "$status" -ne 0 ]
+}
+
+@test "BTS-130 validation: explicit provider prefix bypasses strict validation" {
+  _local_config
+  # With explicit prefix, caller is asserting intent — trust the id.
+  run bash "$OPS" resolve work.resolve "linear:anything-goes" --project-dir "$PROJECT"
+  [ "$status" -eq 0 ]
+  echo "$output" | jq -e '.provider == "linear"'
+}
+
+@test "BTS-130 validation: local:<id> explicit prefix also bypasses strict" {
+  _linear_config
+  run bash "$OPS" resolve work.resolve "local:custom-format-999" --project-dir "$PROJECT"
+  [ "$status" -eq 0 ]
+  echo "$output" | jq -e '.provider == "local"'
+  echo "$output" | jq -e '.id == "custom-format-999"'
+}

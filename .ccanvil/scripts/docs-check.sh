@@ -1363,6 +1363,52 @@ cmd_idea_count() {
     }'
 }
 
+# cmd_idea_migrate_state — rewrite legacy-vocab status values in ideas.log.
+#
+# Translates new→triage, promoted→backlog, parked→icebox, dismissed→canceled,
+# merged→duplicate. Writes a timestamped backup before mutating. Idempotent:
+# a second run against a log with no legacy entries reports 0 migrations.
+cmd_idea_migrate_state() {
+  local project_dir="${1:-.}"
+  local ideas_log="$project_dir/.ccanvil/ideas.log"
+
+  if [[ ! -f "$ideas_log" ]]; then
+    echo "0 entries migrated (no ideas.log at $ideas_log)"
+    return 0
+  fi
+
+  # Count legacy entries up front for the idempotency signal.
+  local legacy_count
+  legacy_count=$(grep -cE '"status":"(new|promoted|parked|dismissed|merged)"' "$ideas_log" || true)
+
+  if [[ "$legacy_count" -eq 0 ]]; then
+    echo "0 entries migrated (no legacy entries in $ideas_log)"
+    return 0
+  fi
+
+  # Timestamped backup before mutation.
+  local ts
+  ts=$(date +%Y%m%d-%H%M%S)
+  cp "$ideas_log" "${ideas_log}.${ts}.bak"
+
+  local tmp
+  tmp=$(mktemp)
+  jq -c '
+    . + {status:
+      (if   .status == "new"       then "triage"
+       elif .status == "promoted"  then "backlog"
+       elif .status == "parked"    then "icebox"
+       elif .status == "dismissed" then "canceled"
+       elif .status == "merged"    then "duplicate"
+       else .status
+       end)
+    }
+  ' "$ideas_log" > "$tmp"
+  mv "$tmp" "$ideas_log"
+
+  echo "$legacy_count entries migrated (backup at ${ideas_log}.${ts}.bak)"
+}
+
 # cmd_idea_review_icebox — list icebox entries older than 60 days.
 #
 # Outputs a JSON array (same shape as idea-list) for entries whose status
@@ -2020,6 +2066,7 @@ case "$cmd" in
   idea-update)       cmd_idea_update "$@" ;;
   idea-sync)         cmd_idea_sync "$@" ;;
   idea-review-icebox) cmd_idea_review_icebox "$@" ;;
+  idea-migrate-state) cmd_idea_migrate_state "$@" ;;
   idea-migrate)      cmd_idea_migrate "$@" ;;
   idea-setup)        cmd_idea_setup "$@" ;;
   idea-upgrade)      cmd_idea_upgrade "$@" ;;

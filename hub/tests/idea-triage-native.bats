@@ -182,6 +182,45 @@ EOF
 }
 
 # =========================================================================
+# Step 10 — Legacy migration (AC-7).
+# =========================================================================
+
+@test "Step 10: idea-migrate-state rewrites legacy vocab + creates backup" {
+  local ideas_log="$PROJECT/.ccanvil/ideas.log"
+  cat > "$ideas_log" <<'EOF'
+{"uid":"u1","created":1,"status":"new","title":"a","body":"a"}
+{"uid":"u2","created":2,"status":"promoted","title":"b","body":"b"}
+{"uid":"u3","created":3,"status":"parked","title":"c","body":"c"}
+{"uid":"u4","created":4,"status":"dismissed","title":"d","body":"d"}
+{"uid":"u5","created":5,"status":"merged","title":"e","body":"e"}
+EOF
+  run bash "$DOCS_CHECK" idea-migrate-state "$PROJECT"
+  [ "$status" -eq 0 ]
+  # Log now carries new vocab.
+  run jq -r '.status' "$ideas_log"
+  [ "$status" -eq 0 ]
+  # Every status should now be new-vocab (no legacy names).
+  grep -qE 'status":"(triage|backlog|icebox|canceled|duplicate)"' "$ideas_log"
+  ! grep -qE 'status":"(new|promoted|parked|dismissed|merged)"' "$ideas_log"
+  # A timestamped backup file was created.
+  local backup_count
+  backup_count=$(find "$PROJECT/.ccanvil" -name 'ideas.log.*.bak' | wc -l | tr -d ' ')
+  [ "$backup_count" -ge 1 ]
+}
+
+@test "Step 10: idea-migrate-state is idempotent (second run reports zero migrations)" {
+  local ideas_log="$PROJECT/.ccanvil/ideas.log"
+  cat > "$ideas_log" <<'EOF'
+{"uid":"u1","created":1,"status":"new","title":"a","body":"a"}
+EOF
+  run bash "$DOCS_CHECK" idea-migrate-state "$PROJECT"
+  [ "$status" -eq 0 ]
+  run bash "$DOCS_CHECK" idea-migrate-state "$PROJECT"
+  [ "$status" -eq 0 ]
+  echo "$output" | grep -qE '0 entries migrated|no legacy entries'
+}
+
+# =========================================================================
 # Step 9 — radar-gather surfaces Icebox-stale count (AC-6 local half).
 # =========================================================================
 

@@ -182,6 +182,19 @@ EOF
 }
 
 # =========================================================================
+# Step 13 — command-reference.md documents new subcommands + five-state model.
+# =========================================================================
+
+@test "Step 13: command-reference documents idea-review-icebox and idea-migrate-state" {
+  local ref="$BATS_TEST_DIRNAME/../../.ccanvil/guide/command-reference.md"
+  [ -f "$ref" ]
+  grep -q 'idea-review-icebox' "$ref"
+  grep -q 'idea-migrate-state' "$ref"
+  grep -q 'state_ids' "$ref"
+  grep -qE 'five-state|triage.*backlog.*icebox' "$ref"
+}
+
+# =========================================================================
 # Step 12 — Skill prose references the new model (grep assertions).
 # =========================================================================
 

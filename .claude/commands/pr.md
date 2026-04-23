@@ -23,7 +23,7 @@ This command ensures the branch is ready for merge: tests pass, docs are validat
    ```bash
    bash .ccanvil/scripts/docs-check.sh pr-cleanup
    ```
-   When `docs/spec.md` is present, this invokes `cmd_complete` — flipping the spec archive (`docs/specs/<id>.md`) from `In Progress` to `Complete`, removing the active lifecycle docs, and committing on the feature branch. The archive transition rides the squash-merge into main — no manual `complete` follow-up needed.
+   When `docs/spec.md` is present, this invokes `cmd_complete` — flipping the spec archive (`docs/specs/<id>.md`) from `In Progress` to `Complete`, removing the active lifecycle docs (`docs/spec.md`, `docs/plan.md`, `docs/stasis.md`), and committing on the feature branch. The archive transition rides the squash-merge into main — no manual `complete` follow-up needed.
    When no `docs/spec.md` exists (e.g., PR doesn't correspond to a ccanvil spec), it falls back to removing any lingering lifecycle docs + commit.
    If the call exits non-zero, STOP and surface the error — do not proceed to push.
 

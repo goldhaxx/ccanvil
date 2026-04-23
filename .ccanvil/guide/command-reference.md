@@ -107,9 +107,11 @@ The `/idea` skill routes captures through `operations.sh` based on the node's pr
 | Command | What it does |
 |---------|-------------|
 | `docs-check.sh idea-add "<body>" [--title TITLE] [project-dir]` | Append a JSONL entry to `.ccanvil/ideas.log` (local provider). `--title` defaults to body when omitted (short-text fast path). |
-| `docs-check.sh idea-list [--status <status>] [project-dir]` | List ideas as JSON array. Filter: `new`, `promoted`, `parked`, `dismissed`, `merged` |
-| `docs-check.sh idea-count [project-dir]` | Count ideas by status → JSON `{total, new, promoted, parked, dismissed, merged}` |
-| `docs-check.sh idea-update <uid> <status> [project-dir]` | Update an entry's status by UID |
+| `docs-check.sh idea-list [--status <status>] [project-dir]` | List ideas as JSON array. Default view excludes `icebox`, `canceled`, `duplicate` (and legacy `parked`, `dismissed`, `merged`). Explicit `--status <x>` accepts five-state vocab (`triage`, `backlog`, `icebox`, `canceled`, `duplicate`) and legacy aliases (`new`, `promoted`, `parked`, `dismissed`, `merged`). |
+| `docs-check.sh idea-count [project-dir]` | Count ideas by status → JSON `{total, triage, backlog, icebox, canceled, duplicate, icebox_stale_count, new, promoted, parked, dismissed, merged}`. Legacy counters retained for back-compat; legacy entries fold into the corresponding new-vocab counter. |
+| `docs-check.sh idea-update <uid> <status> [project-dir]` | Update an entry's status by UID. Accepts five-state vocab + legacy aliases. Unknown status values are rejected. |
+| `docs-check.sh idea-review-icebox [project-dir]` | List Icebox entries (status `icebox` or legacy `parked`) older than 60 days. Feeds `/idea review-icebox` and the `/radar` ambient icebox-stale surface. |
+| `docs-check.sh idea-migrate-state [project-dir]` | One-shot translation of legacy status vocab (`new`/`promoted`/`parked`/`dismissed`/`merged`) to new vocab (`triage`/`backlog`/`icebox`/`canceled`/`duplicate`) in `.ccanvil/ideas.log`. Timestamped backup preserved (`ideas.log.YYYYMMDD-HHMMSS.bak`). Idempotent: re-running on a migrated log reports `0 entries migrated`. |
 | `docs-check.sh idea-sync [--ack <ts>] [project-dir]` | Without args → emit `{pending, entries}` from `.ccanvil/ideas-pending.log`. With `--ack <ts>` → remove the matching pending entry. Replay is driven by `/idea sync` (Linear MCP orchestration in the skill). |
 | `docs-check.sh idea-migrate [--extract\|--finalize] [project-dir]` | Move legacy `docs/ideas.md` entries to `.ccanvil/ideas.log`, `git rm` the source, update `.gitignore`. `--extract` emits JSONL intents for skill-level Linear dispatch; `--finalize` does the filesystem cleanup alone. Idempotent. |
 | `docs-check.sh idea-setup --provider local\|linear [--team TEAM --project PROJECT] [project-dir]` | One-shot per-node scaffolder. Deep-merges `integrations.routing.idea` + `integrations.providers.linear` into `.claude/ccanvil.local.json` and adds the `.gitignore` entries. Idempotent; safe to re-run to change providers. |
@@ -118,6 +120,10 @@ The `/idea` skill routes captures through `operations.sh` based on the node's pr
 | `docs-check.sh idea-list [--include-archive] [--status <status>] [project-dir]` | On local/unconfigured nodes: returns a JSON array of ideas (filterable by status). On Linear-configured nodes: prints a pointer to `/idea list` for live queries and, with `--include-archive`, surfaces the historical local log under an `ARCHIVE:` header. |
 
 **Provider config:** `.claude/ccanvil.json` ships Linear provider defaults (mechanism, label, statuses). Each node opts in by setting `integrations.routing.idea = "linear"` and `integrations.providers.linear.{project, team}` in its own `.claude/ccanvil.local.json` — usually via `docs-check.sh idea-upgrade`. Unconfigured nodes use the local provider.
+
+**State-ID config:** for the Linear provider, `integrations.providers.linear.state_ids` maps lifecycle roles to Linear workflow-state UUIDs (`triage`, `backlog`, `icebox`, `canceled`, `duplicate`). `/idea` uses these IDs to dispatch triage outcomes, sidestepping the name-vs-type resolver collision that silently no-ops name-based state transitions. Lookup via `mcp__claude_ai_Linear__list_issue_statuses` once per workspace.
+
+**Five-state lifecycle:** `Triage → Backlog / Icebox / Canceled / Duplicate`. Capture lands in Triage (Linear auto-routes API-created issues; local log writes `status:"triage"`). `/idea triage` moves items to one of the four outcomes via state-ID mutations.
 
 **Archive-only semantic (Linear nodes):** on nodes with `routing.idea = "linear"`, `.ccanvil/ideas.log` is read-only after `idea-upgrade`. New captures route through Linear via the `/idea` skill; `cmd_idea_add` refuses direct writes. The pending log (`.ccanvil/ideas-pending.log`) remains the MCP-failure fallback, drained by `/idea sync`.
 

@@ -2,7 +2,7 @@
 
 > Feature: idea-triage-native
 > Created: 1776918080
-> Status: In Progress
+> Status: Complete
 
 ## Summary
 

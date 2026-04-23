@@ -1,8 +1,11 @@
 # Feature: [Name]
 
 > Feature: [feature-id]
+> Work: [provider:id e.g. linear:BTS-130 or local:idea-29]
 > Created: [epoch]
 > Status: Draft | In Progress | Complete
+
+<!-- Work: is the canonical coordination key. `feature-id` should be derived as `<slug>-<kebab-name>` where slug comes from `operations.sh resolve work.resolve <ref>`. Legacy specs without Work: are grandfathered by the validator. -->
 
 ## Summary
 

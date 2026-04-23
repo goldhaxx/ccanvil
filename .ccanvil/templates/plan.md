@@ -1,6 +1,7 @@
 # Implementation Plan: [Feature Name]
 
 > Feature: [feature-id]
+> Work: [provider:id — mirror the active spec's Work:]
 > Created: [epoch]
 > Spec hash: [hash]
 > Based on: docs/spec.md

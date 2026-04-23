@@ -1,6 +1,7 @@
 # Implementation Plan: Provider-neutral work identity
 
 > Feature: bts-130-work-identity
+> Work: linear:BTS-130
 > Created: 1776973070
 > Spec hash: bd040012
 > Based on: docs/spec.md

@@ -66,6 +66,9 @@
 | Command | What it does |
 |---------|-------------|
 | `operations.sh resolve <operation> [--project-dir DIR]` | Resolve operation to provider/mechanism/invocation JSON based on `.claude/ccanvil.json` routing config. Returns local bash adapter when no config exists. |
+| `operations.sh resolve work.resolve <ref> [--project-dir DIR]` | Resolve a work reference to `{provider, id, slug, url}`. Accepts bare IDs (`BTS-130`, `idea-29`) or explicit prefixes (`linear:BTS-130`, `local:idea-29`). Provider-routed: bare IDs use `integrations.routing.work` (fallback: `integrations.routing.idea`); explicit prefix overrides. Exits non-zero on empty input. |
+
+**Work identity schema (BTS-130):** Every spec, plan, and feature-kind stasis carries a `> Work: <provider>:<id>` metadata line — the canonical coordination key linking lifecycle docs to their provider source-of-truth (Linear ticket, local JSONL UID, future GitHub/Jira/etc.). The validator aligns on `Work:` equality when all participating docs carry it; falls back to `feature_id` alignment when any doc lacks it (legacy grandfather). Stasis gains a `> Kind: feature | session` discriminator — session-kind stasis (ambient, written between features) is excluded from feature alignment entirely, structurally preventing the BTS-120 "validate halt on session-boundary stasis" trap. Feature-ids derive as `<slug>-<kebab-name>` where slug comes from the work ref (lowercased, filesystem-safe), so the substring appears in branch names and satisfies Linear's GitHub-integration auto-linker.
 
 ## Registry & Node Identity
 

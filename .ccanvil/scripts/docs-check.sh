@@ -934,6 +934,14 @@ cmd_pr_cleanup() {
       exit 1
     fi
     cmd_complete "$feature_id" "$docs_dir"
+  else
+    # Fallback: no active spec (e.g. `/pr` run on a branch without lifecycle spec).
+    # Remove any lingering lifecycle docs and commit so nothing rides the merge.
+    local repo_root
+    repo_root=$(cd "$docs_dir" 2>/dev/null && git rev-parse --show-toplevel 2>/dev/null) || repo_root="."
+    rm -f "$docs_dir/spec.md" "$docs_dir/plan.md" "$docs_dir/stasis.md"
+    (cd "$repo_root" && git add -A "$docs_dir/" 2>/dev/null || true)
+    git -C "$repo_root" commit -q -m "docs(lifecycle): clean up lifecycle docs before merge" 2>/dev/null || true
   fi
 }
 

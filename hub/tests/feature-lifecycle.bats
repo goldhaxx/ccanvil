@@ -575,6 +575,26 @@ EOF
 # pr-cleanup (auto-complete-spec-on-merge: AC-1, AC-2, AC-7)
 # ---------------------------------------------------------------------------
 
+@test "pr-cleanup: fallback cleanup when no docs/spec.md (AC-2)" {
+  # A feature branch with only plan/stasis (no active spec)
+  git -C "$PROJECT" checkout -b claude/feat/no-spec-demo -q
+  echo "plan content" > "$PROJECT/docs/plan.md"
+  echo "stasis content" > "$PROJECT/docs/stasis.md"
+  git -C "$PROJECT" add -A && git -C "$PROJECT" commit -q -m "seed plan + stasis"
+
+  run "$PROJECT/.ccanvil/scripts/docs-check.sh" pr-cleanup "$PROJECT/docs"
+  [ "$status" -eq 0 ]
+
+  # Lifecycle docs removed
+  [ ! -f "$PROJECT/docs/plan.md" ]
+  [ ! -f "$PROJECT/docs/stasis.md" ]
+
+  # Commit created with fallback message
+  local last_msg
+  last_msg=$(git -C "$PROJECT" log -1 --pretty=%s)
+  [[ "$last_msg" == "docs(lifecycle): clean up lifecycle docs before merge" ]]
+}
+
 @test "pr-cleanup: flips archive to Complete when docs/spec.md exists (AC-1)" {
   cat > "$PROJECT/docs/specs/auth-system.md" <<'EOF'
 # Feature: Auth System

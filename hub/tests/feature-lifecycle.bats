@@ -1136,6 +1136,48 @@ EOF
   grep -q "Status: Complete" "$PROJECT/docs/specs/demo.md"
 }
 
+@test "land: safety net commits post-merge cleanup and pushes (AC-4)" {
+  cd "$PROJECT"
+  cat > "$PROJECT/docs/specs/demo.md" <<'EOF'
+# Feature: Demo
+
+> Feature: demo
+> Created: 1774200000
+> Status: Ready
+
+## Summary
+Demo feature.
+EOF
+
+  "$PROJECT/.ccanvil/scripts/docs-check.sh" activate demo "$PROJECT/docs" >/dev/null 2>&1
+
+  echo "work" > "$PROJECT/work.txt"
+  git -C "$PROJECT" add -A && git -C "$PROJECT" commit -q -m "feat: implement demo"
+  git -C "$PROJECT" push -u origin claude/feat/demo 2>/dev/null
+
+  git -C "$PROJECT" checkout main -q
+  git -C "$PROJECT" merge --squash claude/feat/demo
+  git -C "$PROJECT" commit -q -m "feat(demo): implement demo (#1)"
+  git -C "$PROJECT" push origin main 2>/dev/null
+  git -C "$PROJECT" checkout claude/feat/demo -q
+
+  "$PROJECT/.ccanvil/scripts/docs-check.sh" land --force
+
+  # HEAD on main is the safety-net commit
+  local last_msg
+  last_msg=$(git -C "$PROJECT" log -1 --pretty=%s main)
+  [ "$last_msg" = "docs(lifecycle): complete demo — post-merge cleanup" ]
+
+  # Push reached origin — clone the bare remote and confirm
+  local verify
+  verify=$(mktemp -d)
+  git clone -q "$REMOTE" "$verify"
+  local origin_msg
+  origin_msg=$(git -C "$verify" log -1 --pretty=%s main)
+  [ "$origin_msg" = "docs(lifecycle): complete demo — post-merge cleanup" ]
+  rm -rf "$verify"
+}
+
 @test "land: handles no remote gracefully" {
   cd "$PROJECT"
   git remote remove origin

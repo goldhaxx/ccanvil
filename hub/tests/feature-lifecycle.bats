@@ -575,6 +575,32 @@ EOF
 # pr-cleanup (auto-complete-spec-on-merge: AC-1, AC-2, AC-7)
 # ---------------------------------------------------------------------------
 
+@test "pr-cleanup: halts non-zero when cmd_complete fails (AC-7)" {
+  cat > "$PROJECT/docs/specs/auth-system.md" <<'EOF'
+# Feature: Auth System
+
+> Feature: auth-system
+> Created: 1774200000
+> Status: Ready
+
+## Summary
+Auth feature.
+EOF
+
+  "$PROJECT/.ccanvil/scripts/docs-check.sh" activate auth-system "$PROJECT/docs" >/dev/null 2>&1
+
+  # Simulate a broken archive: spec.md present, but specs/auth-system.md removed.
+  # cmd_complete will fail with "spec with feature_id not found".
+  rm "$PROJECT/docs/specs/auth-system.md"
+  git -C "$PROJECT" add -A && git -C "$PROJECT" commit -q -m "break archive"
+
+  run "$PROJECT/.ccanvil/scripts/docs-check.sh" pr-cleanup "$PROJECT/docs"
+  [ "$status" -ne 0 ]
+
+  # No partial cleanup: docs/spec.md still present
+  [ -f "$PROJECT/docs/spec.md" ]
+}
+
 @test "pr-cleanup: fallback cleanup when no docs/spec.md (AC-2)" {
   # A feature branch with only plan/stasis (no active spec)
   git -C "$PROJECT" checkout -b claude/feat/no-spec-demo -q

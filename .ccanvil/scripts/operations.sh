@@ -292,6 +292,15 @@ local_adapter() {
 # MCP adapter definitions (Linear)
 # ---------------------------------------------------------------------------
 
+# linear_state_id — read a state UUID by role from the Linear provider config.
+# Roles: triage | backlog | icebox | canceled | duplicate.
+# Prints the empty string when the role is not configured so callers can
+# treat absence as "not yet populated; fall back to name-based dispatch".
+linear_state_id() {
+  local provider_config="$1" role="$2"
+  echo "$provider_config" | jq -r --arg r "$role" '.state_ids[$r] // ""'
+}
+
 linear_mcp_adapter() {
   local op="$1" provider_config="$2" op_args="$3"
   local tool="" output_contract="" field_map=""
@@ -342,10 +351,24 @@ linear_mcp_adapter() {
     idea.triage)
       tool="mcp__claude_ai_Linear__list_issues"
       output_contract='["id","title","status","createdAt"]'
+      local triage_state_id
+      triage_state_id=$(linear_state_id "$provider_config" "triage")
       jq -n --arg tool "$tool" --arg project "$project" --arg team "$team" \
         --arg label "$idea_label" --arg state "$idea_status" \
+        --arg state_id "$triage_state_id" \
         --argjson output "$output_contract" \
-        '{"provider":"linear","mechanism":"mcp","invocation":{"tool":$tool,"params":{"project":$project,"team":$team,"label":$label,"state":$state}},"contract":{"output":$output}}'
+        '{
+          "provider":"linear",
+          "mechanism":"mcp",
+          "invocation":{
+            "tool":$tool,
+            "params":(
+              {"project":$project,"team":$team,"label":$label,"state":$state}
+              + (if $state_id != "" then {"stateId":$state_id} else {} end)
+            )
+          },
+          "contract":{"output":$output}
+        }'
       ;;
     idea.sync)
       # Sync is orchestration (drain the pending log, retry via MCP per entry).

@@ -16,6 +16,56 @@ teardown() {
   rm -rf "$PROJECT"
 }
 
+# Helper: write a Linear-routed config with optional state_ids block.
+_linear_config_with_state_ids() {
+  mkdir -p "$PROJECT/.claude"
+  cat > "$PROJECT/.claude/ccanvil.json" <<'JSON'
+{
+  "integrations": {
+    "providers": {
+      "linear": {
+        "mechanism": "mcp",
+        "project": "Test Project",
+        "team": "Test Team",
+        "idea_label": "idea",
+        "idea_status": "Idea",
+        "icebox_status": "Icebox",
+        "state_ids": {
+          "triage":    "aaaaaaaa-0000-0000-0000-000000000001",
+          "backlog":   "bbbbbbbb-0000-0000-0000-000000000002",
+          "icebox":    "cccccccc-0000-0000-0000-000000000003",
+          "canceled":  "dddddddd-0000-0000-0000-000000000004",
+          "duplicate": "eeeeeeee-0000-0000-0000-000000000005"
+        }
+      }
+    },
+    "routing": { "idea": "linear" }
+  }
+}
+JSON
+}
+
+# Helper: write a Linear-routed config WITHOUT state_ids.
+_linear_config_no_state_ids() {
+  mkdir -p "$PROJECT/.claude"
+  cat > "$PROJECT/.claude/ccanvil.json" <<'JSON'
+{
+  "integrations": {
+    "providers": {
+      "linear": {
+        "mechanism": "mcp",
+        "project": "Test Project",
+        "team": "Test Team",
+        "idea_label": "idea",
+        "idea_status": "Idea"
+      }
+    },
+    "routing": { "idea": "linear" }
+  }
+}
+JSON
+}
+
 # =========================================================================
 # Step 1 — Local-log status vocabulary (triage/backlog/icebox/canceled/duplicate)
 # Covers AC-1 (local half): capture writes status="triage".
@@ -42,6 +92,26 @@ EOF
   [ "$status" -eq 0 ]
   echo "$output" | jq -e 'length == 2'
   echo "$output" | jq -e '[.[].id] | contains(["l1", "n1"])'
+}
+
+# =========================================================================
+# Step 2 — State-ID config shape + lookup helper
+# Covers AC-4 foundation: resolve emits params.stateId when config carries it.
+# =========================================================================
+
+@test "Step 2: idea.triage resolve includes state_ids.triage as params.stateId" {
+  _linear_config_with_state_ids
+  run bash "$OPS" resolve idea.triage --project-dir "$PROJECT"
+  [ "$status" -eq 0 ]
+  echo "$output" | jq -e '.invocation.params.stateId == "aaaaaaaa-0000-0000-0000-000000000001"'
+}
+
+@test "Step 2: idea.triage resolve stateId is null when config lacks state_ids" {
+  _linear_config_no_state_ids
+  run bash "$OPS" resolve idea.triage --project-dir "$PROJECT"
+  [ "$status" -eq 0 ]
+  # Either absent or null — both are acceptable "no configured ID" signals.
+  echo "$output" | jq -e '(.invocation.params.stateId // null) == null'
 }
 
 @test "Step 1: cmd_idea_count sums legacy + new vocab into new-named counters" {

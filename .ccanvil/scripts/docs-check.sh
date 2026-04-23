@@ -285,11 +285,55 @@ cmd_validate() {
   plan_fid=$(echo "$status_json" | jq -r '.plan.feature_id // empty')
   stasis_fid=$(echo "$status_json" | jq -r '.stasis.feature_id // empty')
 
-  # Collect present feature_ids for mismatch check
+  # Extract Work: and Kind: (BTS-130 — provider-neutral work identity)
+  local spec_work plan_work stasis_work stasis_kind
+  spec_work=$(echo "$status_json" | jq -r '.spec.work // empty')
+  plan_work=$(echo "$status_json" | jq -r '.plan.work // empty')
+  stasis_work=$(echo "$status_json" | jq -r '.stasis.work // empty')
+  stasis_kind=$(echo "$status_json" | jq -r '.stasis.kind // empty')
+
+  # Determine which docs participate in feature alignment.
+  # Session-kind stasis is AMBIENT state (written between features), not
+  # feature state — it is excluded from alignment entirely. Absence of kind
+  # defaults to feature-kind for backward-compat with pre-BTS-130 stasis files.
+  local stasis_participates=true
+  if [[ "$stasis_exists" == "true" && "$stasis_kind" == "session" ]]; then
+    stasis_participates=false
+  fi
+
+  # Collect present feature_ids for mismatch check (excluding session-stasis).
+  # fids is used for priority checks (unlinked, mismatched) and downstream logic.
   local fids=()
   [[ -n "$spec_fid" ]] && fids+=("$spec_fid")
   [[ -n "$plan_fid" ]] && fids+=("$plan_fid")
-  [[ -n "$stasis_fid" ]] && fids+=("$stasis_fid")
+  if $stasis_participates && [[ -n "$stasis_fid" ]]; then
+    fids+=("$stasis_fid")
+  fi
+
+  # Pick alignment mode: prefer Work: equality when ALL participating docs
+  # carry Work:; fall back to feature_id when any participating doc lacks it
+  # (legacy grandfather — preserves existing projects pre-BTS-130 unchanged).
+  local align_keys=()
+  local use_work=true
+  if [[ "$spec_exists" == "true" && -z "$spec_work" ]]; then use_work=false; fi
+  if [[ "$plan_exists" == "true" && -z "$plan_work" ]]; then use_work=false; fi
+  if $stasis_participates && [[ "$stasis_exists" == "true" && -z "$stasis_work" ]]; then
+    use_work=false
+  fi
+
+  if $use_work; then
+    [[ "$spec_exists" == "true" && -n "$spec_work" ]] && align_keys+=("$spec_work")
+    [[ "$plan_exists" == "true" && -n "$plan_work" ]] && align_keys+=("$plan_work")
+    if $stasis_participates && [[ "$stasis_exists" == "true" && -n "$stasis_work" ]]; then
+      align_keys+=("$stasis_work")
+    fi
+  else
+    [[ -n "$spec_fid" ]] && align_keys+=("$spec_fid")
+    [[ -n "$plan_fid" ]] && align_keys+=("$plan_fid")
+    if $stasis_participates && [[ -n "$stasis_fid" ]]; then
+      align_keys+=("$stasis_fid")
+    fi
+  fi
 
   # Multi-spec: if no spec.md exists, check if specs/ has any specs
   # If so, this is "no-active-spec" (not an error — just no feature activated)
@@ -336,19 +380,25 @@ cmd_validate() {
     result="unlinked"
   fi
 
-  # Check feature_id mismatch (only among docs that have feature_ids)
-  if [[ ${#fids[@]} -ge 2 ]]; then
-    local first="${fids[0]}"
+  # Check alignment mismatch across participating docs.
+  # align_keys contains Work: values when all docs have Work:, else feature_ids.
+  # Session-kind stasis is never in align_keys (excluded above).
+  if [[ ${#align_keys[@]} -ge 2 ]]; then
+    local first="${align_keys[0]}"
     local mismatch=false
-    for fid in "${fids[@]}"; do
-      if [[ "$fid" != "$first" ]]; then
+    for k in "${align_keys[@]}"; do
+      if [[ "$k" != "$first" ]]; then
         mismatch=true
         break
       fi
     done
     if $mismatch; then
       result="mismatched"
-      details=$(echo "$details" | jq '. + ["feature_ids do not match across documents"]')
+      if $use_work; then
+        details=$(echo "$details" | jq '. + ["Work: references do not match across documents"]')
+      else
+        details=$(echo "$details" | jq '. + ["feature_ids do not match across documents"]')
+      fi
     fi
   fi
 

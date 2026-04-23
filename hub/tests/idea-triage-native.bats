@@ -182,6 +182,29 @@ EOF
 }
 
 # =========================================================================
+# Step 12 — Skill prose references the new model (grep assertions).
+# =========================================================================
+
+@test "Step 12: /idea skill names all four triage outcomes via operations.sh resolvers" {
+  local skill="$BATS_TEST_DIRNAME/../../.claude/skills/idea/SKILL.md"
+  [ -f "$skill" ]
+  grep -q 'idea\.promote' "$skill"
+  grep -q 'idea\.defer'   "$skill"
+  grep -q 'idea\.dismiss' "$skill"
+  grep -q 'idea\.merge'   "$skill"
+  # Agentic: stateId, not state names.
+  grep -qE 'params\.stateId|stateId:' "$skill"
+  grep -q 'review-icebox' "$skill"
+}
+
+@test "Step 12: /radar skill references icebox_stale_count surface" {
+  local skill="$BATS_TEST_DIRNAME/../../.claude/skills/radar/SKILL.md"
+  [ -f "$skill" ]
+  grep -q 'icebox_stale_count' "$skill"
+  grep -q 'review-icebox' "$skill"
+}
+
+# =========================================================================
 # Step 11 — Pending log carries op-agnostic intents (AC-8).
 # =========================================================================
 

@@ -30,6 +30,8 @@ Longer-term items from roadmap "Horizon" section and backlog tickets that aren't
 ### Ideas
 If there are untriaged ideas (ideas.new > 0), list them and note any that connect to current themes. Suggest running `/idea triage` if count > 3.
 
+If `ideas.icebox_stale_count > 0`, surface it as an ambient re-evaluation nudge: "N icebox items older than 60 days — run `/idea review-icebox`." When the count is 0, stay silent (no noise).
+
 ### Health
 - Context budget status (run `bash .ccanvil/scripts/context-budget.sh check --text` if available)
 - Test count trend (if known from recent commits)

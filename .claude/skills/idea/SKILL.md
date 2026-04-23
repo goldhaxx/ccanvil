@@ -1,30 +1,41 @@
 ---
 name: idea
-description: Capture, list, or triage project ideas via the configured provider (Linear MCP or gitignored local JSONL).
+description: Capture, list, triage, review-icebox, or sync project ideas via the configured provider (Linear MCP native-Triage or gitignored local JSONL). Fully agentic — no Linear UI required.
 ---
 
-Capture, list, triage, or sync project ideas. The skill resolves each operation through `.ccanvil/scripts/operations.sh`, which picks a provider based on `.claude/ccanvil.json` + `.claude/ccanvil.local.json`:
+Capture, list, triage, review-icebox, or sync project ideas. The skill resolves each operation through `.ccanvil/scripts/operations.sh`, which picks a provider based on `.claude/ccanvil.json` + `.claude/ccanvil.local.json`:
 
-- **Linear provider** — projects whose `ccanvil.local.json` sets `integrations.routing.idea = "linear"` route captures to Linear Triage via MCP.
-- **Local provider** (default) — everything else writes to `.ccanvil/ideas.log` (JSONL, gitignored, never committed).
+- **Linear provider** — projects whose `ccanvil.local.json` sets `integrations.routing.idea = "linear"` capture directly into Linear's native Triage intake surface via MCP. All mutations (promote, defer, dismiss, merge) transition issues by **state ID** — never by name — so no Linear UI interaction is ever required.
+- **Local provider** (default) — everything else writes to `.ccanvil/ideas.log` (JSONL, gitignored, never committed). Same five-state vocabulary: triage / backlog / icebox / canceled / duplicate.
 
 Either way, `/idea` never touches git. No commits. No branch creation. Capture works from any branch, including main.
+
+## Lifecycle states
+
+| State | Meaning |
+|-------|---------|
+| **Triage** | Captured, not yet reviewed. The inbox. |
+| **Backlog** | Reviewed, will be worked. Has priority. |
+| **Icebox** | Reviewed, deferred long-term. Re-evaluated on cadence via `/idea review-icebox` and `/radar`. |
+| **Canceled** | Reviewed, dead. |
+| **Duplicate** | Merged into another issue. |
 
 ## Usage
 
 - `/idea <text>` — capture (default)
-- `/idea list` — show all ideas (Triage + Idea on Linear, or new/promoted/etc. locally)
-- `/idea triage` — review untriaged ideas against roadmap + backlog
-- `/idea sync` — replay any `.ccanvil/ideas-pending.log` entries (Linear users, after MCP downtime)
+- `/idea list` — show non-terminal, non-deferred ideas (triage + backlog). Filter by status with `--status icebox`, etc.
+- `/idea triage` — review items in Triage and take one of four outcomes per item (promote / defer / dismiss / merge).
+- `/idea review-icebox` — surface Icebox items older than 60d for re-evaluation.
+- `/idea sync` — replay any `.ccanvil/ideas-pending.log` entries (Linear users, after MCP downtime).
 
 ## Capture: `/idea <text>`
 
-If the first arg is not `list`, `triage`, or `sync`, treat everything after `/idea` as the idea text.
+If the first arg is not `list`, `triage`, `review-icebox`, or `sync`, treat everything after `/idea` as the idea text.
 
 ### Step 1 — generate a title
 
-- If the raw text is ≤80 chars and single-line, the title = the raw text (short-text fast path; no Claude round-trip needed).
-- Otherwise, generate a concise summary title (≤80 chars, intent-preserving) from the raw text. Same stochastic step as `/spec` title derivation.
+- If the raw text is ≤80 chars and single-line, the title = the raw text (short-text fast path; no Claude round-trip).
+- Otherwise, generate a concise summary title (≤80 chars, intent-preserving) from the raw text.
 
 ### Step 2 — resolve the provider
 
@@ -32,11 +43,9 @@ If the first arg is not `list`, `triage`, or `sync`, treat everything after `/id
 bash .ccanvil/scripts/operations.sh resolve idea.add --project-dir .
 ```
 
-Read the JSON result's `.mechanism` field to pick the path.
-
 ### Step 3a — Linear path (`mechanism == "mcp"`)
 
-Extract `.invocation.tool`, `.invocation.params.project`, `.invocation.params.team`, `.invocation.params.state`, `.invocation.params.labels` from the resolution.
+Extract `.invocation.tool`, `.invocation.params.project`, `.invocation.params.team`, `.invocation.params.labels` from the resolution. Note: **no `state` param** — Linear auto-routes API-created issues to the team's native Triage intake when the Triage feature is enabled.
 
 Call the MCP tool directly:
 
@@ -44,36 +53,35 @@ Call the MCP tool directly:
 mcp__claude_ai_Linear__save_issue
   team:        <params.team>
   project:     <params.project>
-  state:       <params.state>            # typically "Idea"
-  labels:      <params.labels>           # typically ["idea"]
+  labels:      <params.labels>      # typically ["idea"]
   title:       <generated title>
   description: <original raw text, verbatim>
 ```
 
-On success: echo `Captured: <identifier> — <title>` (e.g., `Captured: BTS-123 — add retrofit-check --json flag`). The `.identifier` / issue ID surfaces in the tool response.
+On success: echo `Captured: <identifier> — <title>`.
 
-**On failure** (network error, auth expired, Linear server issue): append to the pending log and fall through gracefully:
+**On failure** (network, auth, server error): append to pending log:
 
 ```bash
 echo '{"op":"add","args":{"title":"<title>","body":"<body>"},"ts":'"$(date +%s)"'}' \
   >> .ccanvil/ideas-pending.log
 ```
 
-Then echo `PENDING: <title> (<N> total pending)` where N = line count of `.ccanvil/ideas-pending.log`. Exit 0 — capture MUST succeed from the user's perspective.
+Echo `PENDING: <title> (<N> total pending)`. Exit 0 — capture MUST succeed from the user's perspective.
 
 ### Step 3b — local path (`mechanism == "bash"`)
 
-Run the resolved command, passing the body and the generated title explicitly:
+Run the resolved command:
 
 ```bash
 bash .ccanvil/scripts/docs-check.sh idea-add "<body>" --title "<title>" .
 ```
 
-The script appends one JSONL line to `.ccanvil/ideas.log`.
+The script appends one JSONL line with `status:"triage"`.
 
 ### Step 4 — return
 
-Echo a one-line confirmation. Do NOT discuss the idea further unless asked. Return to whatever was in progress.
+Echo a one-line confirmation. Return to whatever was in progress.
 
 ## List: `/idea list`
 
@@ -82,38 +90,77 @@ Echo a one-line confirmation. Do NOT discuss the idea further unless asked. Retu
 3. If `.mechanism == "bash"`: run the returned command (`docs-check.sh idea-list`).
 4. Render as a table: `ID | Created | Title | Status`.
 
+Default view excludes terminal (Canceled, Duplicate) and deferred (Icebox) states. Pass `--status icebox` / `--status canceled` / etc. to surface them explicitly.
+
 ## Triage: `/idea triage`
 
-Batched review of untriaged ideas.
+Batched review of items in Triage state. **Fully agentic** — every outcome is a programmatic state-ID transition via MCP (Linear) or local bash (log rewrite). No Linear UI interaction.
 
-1. Resolve: `bash .ccanvil/scripts/operations.sh resolve idea.triage --project-dir .`
-2. Pull untriaged ideas:
-   - mcp: `mcp__claude_ai_Linear__list_issues` with the returned params (filtered to `state: Idea`).
-   - bash: run the returned command (`docs-check.sh idea-list --status new`).
-3. Load context: read `docs/roadmap.md` (if present); run `bash .ccanvil/scripts/operations.sh exec backlog.list` for existing backlog.
-4. Present recommendations as a table. Ask for approval.
-5. For each approved outcome, apply via MCP (Linear) or local bash:
+1. **Resolve:** `bash .ccanvil/scripts/operations.sh resolve idea.triage --project-dir .`
+2. **List Triage items:**
+   - mcp: call `mcp__claude_ai_Linear__list_issues` with `.invocation.params` (includes `stateId` when configured — disambiguation-proof).
+   - bash: run `docs-check.sh idea-list --status triage`.
+3. **Load context:** read `docs/roadmap.md` (if present); run `bash .ccanvil/scripts/operations.sh exec backlog.list` for existing backlog.
+4. **Present a table of recommendations.** One row per item. Ask for approval.
+5. **For each approved outcome, resolve the verb and dispatch:**
 
-| Outcome | Linear action (`save_issue`) | Local action |
-|---------|------------------------------|--------------|
-| **promote** | `{id, state: "Backlog", priority: <1-4>}` | `idea-update <uid> promoted` |
-| **merge**   | `{id, duplicateOf: "<parent-id>"}` (Linear marks as Canceled/Duplicate) | `idea-update <uid> merged` |
-| **park**    | `{id, state: "Icebox"}` | `idea-update <uid> parked` |
-| **dismiss** | `{id, state: "Canceled"}` (optionally add a comment with the reason) | `idea-update <uid> dismissed` |
+| Outcome | `operations.sh resolve` | Linear dispatch (`save_issue`) | Local dispatch |
+|---------|-------------------------|--------------------------------|----------------|
+| **promote** | `idea.promote` → params.stateId (backlog) | `{id, stateId: <params.stateId>, priority: <1-4>}` | `idea-update <uid> backlog` |
+| **defer**   | `idea.defer` → params.stateId (icebox)     | `{id, stateId: <params.stateId>}`                 | `idea-update <uid> icebox` |
+| **dismiss** | `idea.dismiss` → params.stateId (canceled) | `{id, stateId: <params.stateId>}`                 | `idea-update <uid> canceled` |
+| **merge**   | `idea.merge <target-id>` → params.stateId (duplicate) + duplicateOf | `{id, stateId: <params.stateId>, duplicateOf: <params.duplicateOf>}` | `idea-update <uid> duplicate` |
+
+Always pass `stateId` from the resolver — never pass `state: "<name>"`. State names collide with type names in Linear's workflow resolver and silently become no-ops.
+
+**On MCP failure for any outcome**, append to pending log:
+
+```bash
+echo '{"op":"promote","args":{"id":"BTS-X","priority":3},"ts":'"$(date +%s)"'}' \
+  >> .ccanvil/ideas-pending.log
+```
+
+Exit 0 per item. `/idea sync` replays these later.
+
+## Review Icebox: `/idea review-icebox`
+
+Re-evaluate Icebox items older than 60d. Prevents graveyard drift.
+
+1. Resolve: `bash .ccanvil/scripts/operations.sh resolve idea.review-icebox --project-dir .`
+2. Pull stale items:
+   - mcp: `mcp__claude_ai_Linear__list_issues` with `params.stateId` (icebox); filter locally by `createdAt <= now - 60d`.
+   - bash: run `docs-check.sh idea-review-icebox`.
+3. Present a table. For each, ask: **promote back to Backlog**, **keep in Icebox** (re-stamp review timestamp — future), **dismiss** (canceled), or **merge** into another issue.
+4. Dispatch outcomes using the same rubric as `/idea triage` above.
 
 ## Sync: `/idea sync`
 
 Only meaningful when the Linear provider is configured and `.ccanvil/ideas-pending.log` has entries.
 
 1. Resolve: `bash .ccanvil/scripts/operations.sh resolve idea.sync --project-dir .`
-2. Run the returned command (always local bash: `docs-check.sh idea-sync`). The command iterates the pending log, replays each entry via MCP, removes successes.
-3. Report the summary line: `SYNCED: N / PENDING: M`.
+2. Run the returned command (always local bash: `docs-check.sh idea-sync`).
+3. For each entry, dispatch by `op`:
+   - `add` → `save_issue` with title/body/labels (capture).
+   - `promote` → `save_issue` with id + stateId(backlog) + priority.
+   - `defer` / `dismiss` → `save_issue` with id + target stateId.
+   - `merge` → `save_issue` with id + stateId(duplicate) + duplicateOf.
+4. On success per entry: `docs-check.sh idea-sync --ack <ts>`.
+5. Report: `SYNCED: N / PENDING: M`.
+
+## Legacy migration (one-shot)
+
+For projects that pre-date this change, items may still live in the deprecated custom "Idea" state (Linear) or legacy status values (local).
+
+- **Local log:** `bash .ccanvil/scripts/docs-check.sh idea-migrate-state .` — rewrites legacy vocab in `.ccanvil/ideas.log`, timestamped backup preserved. Idempotent.
+- **Linear workspace:** iterate issues in the deprecated custom Idea state, promote each to Backlog via `save_issue` with stateId. Then delete the custom state in Linear's workflow config (manual operator step — Linear may block deletion of states with historical refs).
 
 ## Rules
 
-- `/idea` NEVER commits. NEVER creates a branch. The whole point is to avoid git-divergence from capture.
-- On Linear failure, fall back to `.ccanvil/ideas-pending.log`. Never surface MCP errors to the user — pending is a successful capture outcome.
+- `/idea` NEVER commits. NEVER creates a branch. Never touches git.
+- On Linear failure, fall back to `.ccanvil/ideas-pending.log`. Never surface MCP errors as user errors — pending is a successful capture outcome.
+- Always dispatch mutations by **state ID**, never by state name. Name-based dispatch silently no-ops when names collide with state types.
 - Respect the provider resolution. Don't bypass `operations.sh` by calling MCP or local bash directly based on a hunch.
+- The full workflow — capture, list, triage, review, dispatch — is agent-reachable. Never delegate a transition to the Linear UI.
 
 <!-- NODE-SPECIFIC-START -->
 <!-- Add project-specific content below this line. -->

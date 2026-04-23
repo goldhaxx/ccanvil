@@ -1140,11 +1140,16 @@ cmd_radar_gather() {
   result=$(echo "$result" | jq --argjson c "$completed" '. + {"completed_recent": $c}')
 
   # Idea count — ideas.log lives at <project>/.ccanvil/ideas.log (one level above docs_dir).
-  local idea_counts='{"total":0,"new":0}'
+  local idea_counts='{"total":0,"new":0,"icebox_stale_count":0}'
   local project_dir
   project_dir=$(dirname "$docs_dir")
   if [[ -f "$project_dir/.ccanvil/ideas.log" ]]; then
     idea_counts=$(cmd_idea_count "$project_dir")
+    # Augment with icebox-stale count (icebox items older than 60d) so
+    # /radar can surface re-evaluation candidates ambiently.
+    local stale_count
+    stale_count=$(cmd_idea_review_icebox "$project_dir" | jq 'length')
+    idea_counts=$(echo "$idea_counts" | jq --argjson n "$stale_count" '. + {"icebox_stale_count": $n}')
   fi
   result=$(echo "$result" | jq --argjson i "$idea_counts" '. + {"ideas": $i}')
 
@@ -1249,7 +1254,7 @@ cmd_idea_add() {
 
   jq -cn --arg uid "$uid" --argjson created "$epoch" \
          --arg title "$title" --arg body "$body" \
-    '{uid:$uid, created:$created, status:"new", title:$title, body:$body}' \
+    '{uid:$uid, created:$created, status:"triage", title:$title, body:$body}' \
     >> "$ideas_log"
 
   echo "Captured: $title"
@@ -1300,10 +1305,25 @@ cmd_idea_list() {
 
   local jq_shape='{id: .uid, created: .created, title: .title, body: .body, status: .status}'
   if [[ -n "$filter_status" ]]; then
-    grep -v '^# ' "$ideas_log" | jq -s --arg s "$filter_status" \
-      "[.[] | select(.status == \$s) | $jq_shape]"
+    # Translation table: five-state vocab → matching set including legacy alias.
+    # Legacy names remain valid filter inputs (resolve to their new-vocab set).
+    local equivalents
+    case "$filter_status" in
+      triage|new)              equivalents='["triage","new"]' ;;
+      backlog|promoted)        equivalents='["backlog","promoted"]' ;;
+      icebox|parked)           equivalents='["icebox","parked"]' ;;
+      canceled|dismissed)      equivalents='["canceled","dismissed"]' ;;
+      duplicate|merged)        equivalents='["duplicate","merged"]' ;;
+      *)                       equivalents=$(printf '%s' "$filter_status" | jq -Rs '[.]') ;;
+    esac
+    grep -v '^# ' "$ideas_log" | jq -s --argjson set "$equivalents" \
+      "[.[] | select(.status as \$s | \$set | index(\$s)) | $jq_shape]"
   else
-    grep -v '^# ' "$ideas_log" | jq -s "[.[] | $jq_shape]"
+    # Default view: exclude terminal (canceled, duplicate) + deferred (icebox)
+    # states, plus their legacy aliases. Surface them via explicit --status.
+    local excluded='["icebox","parked","canceled","dismissed","duplicate","merged"]'
+    grep -v '^# ' "$ideas_log" | jq -s --argjson exc "$excluded" \
+      "[.[] | select(.status as \$s | \$exc | index(\$s) | not) | $jq_shape]"
   fi
 }
 
@@ -1311,19 +1331,108 @@ cmd_idea_count() {
   local project_dir="${1:-.}"
   local ideas_log="$project_dir/.ccanvil/ideas.log"
 
+  # Five-state vocab: triage/backlog/icebox/canceled/duplicate.
+  # Legacy vocab folds in: new→triage, promoted→backlog, parked→icebox,
+  # dismissed→canceled, merged→duplicate. `new` stays as a back-compat alias
+  # for the triage counter so existing callers (radar-gather et al.) don't
+  # regress.
   if [[ ! -f "$ideas_log" ]]; then
-    jq -n '{total:0, new:0, promoted:0, parked:0, dismissed:0, merged:0}'
+    jq -n '{total:0, triage:0, backlog:0, icebox:0, canceled:0, duplicate:0, new:0, promoted:0, parked:0, dismissed:0, merged:0}'
     return 0
   fi
 
-  grep -v '^# ' "$ideas_log" | jq -s '{
-    total:     length,
-    new:       [.[] | select(.status == "new")]       | length,
-    promoted:  [.[] | select(.status == "promoted")]  | length,
-    parked:    [.[] | select(.status == "parked")]    | length,
-    dismissed: [.[] | select(.status == "dismissed")] | length,
-    merged:    [.[] | select(.status == "merged")]    | length
-  }'
+  grep -v '^# ' "$ideas_log" | jq -s '
+    def triage_set: ["triage", "new"];
+    def backlog_set: ["backlog", "promoted"];
+    def icebox_set: ["icebox", "parked"];
+    def canceled_set: ["canceled", "dismissed"];
+    def duplicate_set: ["duplicate", "merged"];
+    {
+      total:     length,
+      triage:    [.[] | select(.status as $s | triage_set    | index($s))] | length,
+      backlog:   [.[] | select(.status as $s | backlog_set   | index($s))] | length,
+      icebox:    [.[] | select(.status as $s | icebox_set    | index($s))] | length,
+      canceled:  [.[] | select(.status as $s | canceled_set  | index($s))] | length,
+      duplicate: [.[] | select(.status as $s | duplicate_set | index($s))] | length,
+      # Legacy aliases — retained for radar-gather + existing callers.
+      new:       [.[] | select(.status as $s | triage_set    | index($s))] | length,
+      promoted:  [.[] | select(.status as $s | backlog_set   | index($s))] | length,
+      parked:    [.[] | select(.status as $s | icebox_set    | index($s))] | length,
+      dismissed: [.[] | select(.status as $s | canceled_set  | index($s))] | length,
+      merged:    [.[] | select(.status as $s | duplicate_set | index($s))] | length
+    }'
+}
+
+# cmd_idea_migrate_state — rewrite legacy-vocab status values in ideas.log.
+#
+# Translates new→triage, promoted→backlog, parked→icebox, dismissed→canceled,
+# merged→duplicate. Writes a timestamped backup before mutating. Idempotent:
+# a second run against a log with no legacy entries reports 0 migrations.
+cmd_idea_migrate_state() {
+  local project_dir="${1:-.}"
+  local ideas_log="$project_dir/.ccanvil/ideas.log"
+
+  if [[ ! -f "$ideas_log" ]]; then
+    echo "0 entries migrated (no ideas.log at $ideas_log)"
+    return 0
+  fi
+
+  # Count legacy entries up front for the idempotency signal.
+  local legacy_count
+  legacy_count=$(grep -cE '"status":"(new|promoted|parked|dismissed|merged)"' "$ideas_log" || true)
+
+  if [[ "$legacy_count" -eq 0 ]]; then
+    echo "0 entries migrated (no legacy entries in $ideas_log)"
+    return 0
+  fi
+
+  # Timestamped backup before mutation.
+  local ts
+  ts=$(date +%Y%m%d-%H%M%S)
+  cp "$ideas_log" "${ideas_log}.${ts}.bak"
+
+  local tmp
+  tmp=$(mktemp)
+  jq -c '
+    . + {status:
+      (if   .status == "new"       then "triage"
+       elif .status == "promoted"  then "backlog"
+       elif .status == "parked"    then "icebox"
+       elif .status == "dismissed" then "canceled"
+       elif .status == "merged"    then "duplicate"
+       else .status
+       end)
+    }
+  ' "$ideas_log" > "$tmp"
+  mv "$tmp" "$ideas_log"
+
+  echo "$legacy_count entries migrated (backup at ${ideas_log}.${ts}.bak)"
+}
+
+# cmd_idea_review_icebox — list icebox entries older than 60 days.
+#
+# Outputs a JSON array (same shape as idea-list) for entries whose status
+# is icebox (or legacy alias "parked") and whose `created` epoch is at
+# least 60 days (5184000s) in the past. Used by /idea review-icebox and
+# surfaced as a count via radar-gather.
+cmd_idea_review_icebox() {
+  local project_dir="${1:-.}"
+  local ideas_log="$project_dir/.ccanvil/ideas.log"
+  local now threshold
+  now=$(date +%s)
+  threshold=$((now - 5184000))
+
+  if [[ ! -f "$ideas_log" ]]; then
+    echo "[]"
+    return 0
+  fi
+
+  grep -v '^# ' "$ideas_log" | jq -s --argjson t "$threshold" '
+    [ .[]
+      | select((.status == "icebox" or .status == "parked") and .created <= $t)
+      | {id: .uid, created: .created, title: .title, body: .body, status: .status}
+    ]
+  '
 }
 
 cmd_idea_update() {
@@ -1331,6 +1440,18 @@ cmd_idea_update() {
   local new_status="${2:?Usage: idea-update <uid> <status> [project-dir]}"
   local project_dir="${3:-.}"
   local ideas_log="$project_dir/.ccanvil/ideas.log"
+
+  # Accept new vocab (triage/backlog/icebox/canceled/duplicate) and legacy
+  # aliases (new/promoted/parked/dismissed/merged). Reject anything else
+  # so typos fail loudly instead of silently corrupting the log.
+  case "$new_status" in
+    triage|backlog|icebox|canceled|duplicate) ;;
+    new|promoted|parked|dismissed|merged) ;;
+    *)
+      echo "ERROR: unknown status '$new_status' (expected one of: triage, backlog, icebox, canceled, duplicate)" >&2
+      exit 1
+      ;;
+  esac
 
   [[ -f "$ideas_log" ]] || { echo "ERROR: $ideas_log not found" >&2; exit 1; }
 
@@ -1353,9 +1474,20 @@ cmd_idea_update() {
 # ---------------------------------------------------------------------------
 # cmd_idea_sync — Read/ack primitives for .ccanvil/ideas-pending.log.
 #
-# The pending log holds intents for Linear captures that failed (network,
-# auth, etc.). Replay is orchestrated by the /idea skill — this script
-# exposes the deterministic read + remove operations.
+# The pending log holds intents for Linear operations that failed (network,
+# auth, server error). Replay is orchestrated by the /idea skill — this
+# script exposes op-agnostic read + remove primitives; the skill dispatches
+# each entry's `op` to the matching MCP tool.
+#
+# Supported ops (written by /idea skill when the corresponding MCP call
+# fails; replayed by /idea sync):
+#   add       — failed capture: args = {title, body}
+#   promote   — failed triage-promote: args = {id, priority}
+#   defer     — failed triage-defer: args = {id}
+#   dismiss   — failed triage-dismiss: args = {id}
+#   merge     — failed triage-merge: args = {id, duplicateOf}
+#
+# Each entry has shape: {op, args, ts}
 #
 # Invocations:
 #   idea-sync [project-dir]             → print {pending, entries} JSON
@@ -1944,6 +2076,8 @@ case "$cmd" in
   idea-count)        cmd_idea_count "$@" ;;
   idea-update)       cmd_idea_update "$@" ;;
   idea-sync)         cmd_idea_sync "$@" ;;
+  idea-review-icebox) cmd_idea_review_icebox "$@" ;;
+  idea-migrate-state) cmd_idea_migrate_state "$@" ;;
   idea-migrate)      cmd_idea_migrate "$@" ;;
   idea-setup)        cmd_idea_setup "$@" ;;
   idea-upgrade)      cmd_idea_upgrade "$@" ;;

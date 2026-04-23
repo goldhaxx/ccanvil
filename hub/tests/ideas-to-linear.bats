@@ -119,7 +119,9 @@ JSON
   echo "$output" | jq -e '.invocation.tool == "mcp__claude_ai_Linear__save_issue"'
   echo "$output" | jq -e '.invocation.params.team == "Test Team"'
   echo "$output" | jq -e '.invocation.params.project == "Test Project"'
-  echo "$output" | jq -e '.invocation.params.state == "Idea"'
+  # state omitted — Linear routes API-created issues to native Triage.
+  # (Superseded by idea-triage-native AC-1; prior behavior set state="Idea".)
+  echo "$output" | jq -e '.invocation.params | has("state") | not'
   echo "$output" | jq -e '.invocation.params.labels[0] == "idea"'
 }
 
@@ -212,12 +214,13 @@ JSON
   run bash "$DOCS_CHECK" idea-add "a new idea" "$PROJECT"
   [ "$status" -eq 0 ]
   [ -f "$PROJECT/.ccanvil/ideas.log" ]
-  # One JSONL line with uid, created, status=new, title, body
+  # One JSONL line with uid, created, status=triage, title, body.
+  # (Superseded by idea-triage-native AC-1 — prior behavior wrote status="new".)
   local line
   line=$(cat "$PROJECT/.ccanvil/ideas.log")
   echo "$line" | jq -e '.uid | test("^[0-9a-f]{4}$")'
   echo "$line" | jq -e '.created | tonumber > 0'
-  echo "$line" | jq -e '.status == "new"'
+  echo "$line" | jq -e '.status == "triage"'
   echo "$line" | jq -e '.body == "a new idea"'
   # No --title → title defaults to body for short text (AC-22 path at CLI level)
   echo "$line" | jq -e '.title == "a new idea"'
@@ -253,9 +256,11 @@ JSON
 EOF
   run bash "$DOCS_CHECK" idea-list "$PROJECT"
   [ "$status" -eq 0 ]
+  # Default view now excludes terminal states (canceled/dismissed, etc.) —
+  # superseded by idea-triage-native AC-9. Expect 2 entries, not 3.
   local count
   count=$(echo "$output" | jq 'length')
-  [ "$count" -eq 3 ]
+  [ "$count" -eq 2 ]
   echo "$output" | jq -e '.[0].id == "a1b2"'
   echo "$output" | jq -e '.[0].created == 1776000001'
   echo "$output" | jq -e '.[0].status == "new"'
@@ -381,7 +386,9 @@ EOF
   echo "$output" | jq -e '.invocation.tool == "mcp__claude_ai_Linear__save_issue"'
   echo "$output" | jq -e '.invocation.params.project == "ccanvil"'
   echo "$output" | jq -e '.invocation.params.team == "Blocktech Solutions"'
-  echo "$output" | jq -e '.invocation.params.state == "Idea"'
+  # state omitted — Linear auto-routes API-created issues to native Triage.
+  # (Superseded by idea-triage-native AC-1.)
+  echo "$output" | jq -e '.invocation.params | has("state") | not'
   echo "$output" | jq -e '.invocation.params.labels[0] == "idea"'
 }
 

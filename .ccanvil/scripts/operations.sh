@@ -35,6 +35,8 @@ is_valid_operation() {
     pr.create|pr.list) return 0 ;;
     review.run) return 0 ;;
     idea.add|idea.list|idea.triage|idea.sync) return 0 ;;
+    idea.promote|idea.defer|idea.dismiss|idea.merge) return 0 ;;
+    idea.review-icebox) return 0 ;;
     *) return 1 ;;
   esac
 }
@@ -274,13 +276,41 @@ local_adapter() {
       output_contract='["uid","created","title","status"]'
       ;;
     idea.triage)
-      cmd=".ccanvil/scripts/docs-check.sh idea-list --status new"
+      # Uses new-vocab "triage" filter; cmd_idea_list translation table
+      # folds legacy status="new" entries in transparently.
+      cmd=".ccanvil/scripts/docs-check.sh idea-list --status triage"
       output_contract='["uid","created","title","status"]'
       ;;
     idea.sync)
       # Local sync is a no-op; the command exists for contract uniformity.
       cmd=".ccanvil/scripts/docs-check.sh idea-sync"
       output_contract='["synced","pending"]'
+      ;;
+    idea.review-icebox)
+      cmd=".ccanvil/scripts/docs-check.sh idea-review-icebox"
+      output_contract='["uid","created","title","status"]'
+      ;;
+    # --- triage-outcome mutations ---
+    # Each verb maps to idea-update <uid> <target-status>. OP_ARGS is the
+    # source idea uid; the skill substitutes it at dispatch time.
+    idea.promote)
+      cmd=".ccanvil/scripts/docs-check.sh idea-update ${OP_ARGS} backlog"
+      output_contract='["uid","status"]'
+      ;;
+    idea.defer)
+      cmd=".ccanvil/scripts/docs-check.sh idea-update ${OP_ARGS} icebox"
+      output_contract='["uid","status"]'
+      ;;
+    idea.dismiss)
+      cmd=".ccanvil/scripts/docs-check.sh idea-update ${OP_ARGS} canceled"
+      output_contract='["uid","status"]'
+      ;;
+    idea.merge)
+      # OP_ARGS is the SOURCE item uid being marked duplicate (uniform with
+      # promote/defer/dismiss). Merge target (duplicateOf) is only
+      # meaningful for Linear; the local log has no cross-entry link.
+      cmd=".ccanvil/scripts/docs-check.sh idea-update ${OP_ARGS} duplicate"
+      output_contract='["uid","status"]'
       ;;
   esac
 
@@ -291,6 +321,15 @@ local_adapter() {
 # ---------------------------------------------------------------------------
 # MCP adapter definitions (Linear)
 # ---------------------------------------------------------------------------
+
+# linear_state_id — read a state UUID by role from the Linear provider config.
+# Roles: triage | backlog | icebox | canceled | duplicate.
+# Prints the empty string when the role is not configured so callers can
+# treat absence as "not yet populated; fall back to name-based dispatch".
+linear_state_id() {
+  local provider_config="$1" role="$2"
+  echo "$provider_config" | jq -r --arg r "$role" '.state_ids[$r] // ""'
+}
 
 linear_mcp_adapter() {
   local op="$1" provider_config="$2" op_args="$3"
@@ -326,10 +365,14 @@ linear_mcp_adapter() {
     idea.add)
       tool="mcp__claude_ai_Linear__save_issue"
       output_contract='["id","title","status"]'
+      # No `state` param: Linear routes API-created issues to the team's
+      # native Triage intake surface automatically when Triage is enabled.
+      # Specifying a state here would bypass Triage and drop the item
+      # straight into the target state.
       jq -n --arg tool "$tool" --arg project "$project" --arg team "$team" \
-        --arg state "$idea_status" --arg label "$idea_label" \
+        --arg label "$idea_label" \
         --argjson output "$output_contract" \
-        '{"provider":"linear","mechanism":"mcp","invocation":{"tool":$tool,"params":{"project":$project,"team":$team,"state":$state,"labels":[$label]}},"contract":{"output":$output}}'
+        '{"provider":"linear","mechanism":"mcp","invocation":{"tool":$tool,"params":{"project":$project,"team":$team,"labels":[$label]}},"contract":{"output":$output}}'
       ;;
     idea.list)
       tool="mcp__claude_ai_Linear__list_issues"
@@ -340,18 +383,135 @@ linear_mcp_adapter() {
         '{"provider":"linear","mechanism":"mcp","invocation":{"tool":$tool,"params":{"project":$project,"team":$team,"label":$label}},"contract":{"output":$output}}'
       ;;
     idea.triage)
+      # stateId takes precedence over name-based state dispatch — when
+      # configured, omit `state` to avoid the name/type collision trap
+      # documented in the /idea skill's Rules section.
       tool="mcp__claude_ai_Linear__list_issues"
       output_contract='["id","title","status","createdAt"]'
+      local triage_state_id
+      triage_state_id=$(linear_state_id "$provider_config" "triage")
       jq -n --arg tool "$tool" --arg project "$project" --arg team "$team" \
         --arg label "$idea_label" --arg state "$idea_status" \
+        --arg state_id "$triage_state_id" \
         --argjson output "$output_contract" \
-        '{"provider":"linear","mechanism":"mcp","invocation":{"tool":$tool,"params":{"project":$project,"team":$team,"label":$label,"state":$state}},"contract":{"output":$output}}'
+        '{
+          "provider":"linear",
+          "mechanism":"mcp",
+          "invocation":{
+            "tool":$tool,
+            "params":(
+              {"project":$project,"team":$team,"label":$label}
+              + (if $state_id != ""
+                  then {"stateId":$state_id}
+                  else {"state":$state}
+                 end)
+            )
+          },
+          "contract":{"output":$output}
+        }'
       ;;
     idea.sync)
       # Sync is orchestration (drain the pending log, retry via MCP per entry).
       # Resolve to the local adapter even when Linear is configured — the local
       # command (`docs-check.sh idea-sync`) is responsible for the replay loop.
       local_adapter "$op"
+      ;;
+    # --- triage-outcome mutations ---
+    # Each verb emits save_issue with a target stateId (+ duplicateOf for
+    # merge). The skill fills in `id` (the source item being transitioned)
+    # and priority (promote only) at dispatch time.
+    # Each mutation resolver emits params.stateId only when state_ids is
+    # configured; omitting it falls through to the skill's name-based
+    # fallback (or surfaces the config gap as a visible error at dispatch).
+    # Passing `stateId: ""` to Linear is silently no-op / API error — always
+    # gate with the conditional merge pattern.
+    idea.promote)
+      tool="mcp__claude_ai_Linear__save_issue"
+      output_contract='["id","status","priority"]'
+      local backlog_state_id
+      backlog_state_id=$(linear_state_id "$provider_config" "backlog")
+      jq -n --arg tool "$tool" --arg state_id "$backlog_state_id" \
+        --argjson output "$output_contract" \
+        '{
+          "provider":"linear","mechanism":"mcp",
+          "invocation":{
+            "tool":$tool,
+            "params":(if $state_id != "" then {"stateId":$state_id} else {} end)
+          },
+          "contract":{"output":$output}
+        }'
+      ;;
+    idea.defer)
+      tool="mcp__claude_ai_Linear__save_issue"
+      output_contract='["id","status"]'
+      local icebox_state_id
+      icebox_state_id=$(linear_state_id "$provider_config" "icebox")
+      jq -n --arg tool "$tool" --arg state_id "$icebox_state_id" \
+        --argjson output "$output_contract" \
+        '{
+          "provider":"linear","mechanism":"mcp",
+          "invocation":{
+            "tool":$tool,
+            "params":(if $state_id != "" then {"stateId":$state_id} else {} end)
+          },
+          "contract":{"output":$output}
+        }'
+      ;;
+    idea.dismiss)
+      tool="mcp__claude_ai_Linear__save_issue"
+      output_contract='["id","status"]'
+      local canceled_state_id
+      canceled_state_id=$(linear_state_id "$provider_config" "canceled")
+      jq -n --arg tool "$tool" --arg state_id "$canceled_state_id" \
+        --argjson output "$output_contract" \
+        '{
+          "provider":"linear","mechanism":"mcp",
+          "invocation":{
+            "tool":$tool,
+            "params":(if $state_id != "" then {"stateId":$state_id} else {} end)
+          },
+          "contract":{"output":$output}
+        }'
+      ;;
+    idea.merge)
+      # OP_ARGS is the source item uid (uniform with promote/defer/dismiss).
+      # The merge target (duplicateOf) is NOT resolver-known — the skill
+      # pairs it in at dispatch time from user input. The resolver only
+      # tells the skill which tool + stateId to use.
+      tool="mcp__claude_ai_Linear__save_issue"
+      output_contract='["id","status","duplicateOf"]'
+      local dup_state_id
+      dup_state_id=$(linear_state_id "$provider_config" "duplicate")
+      jq -n --arg tool "$tool" --arg state_id "$dup_state_id" \
+        --argjson output "$output_contract" \
+        '{
+          "provider":"linear","mechanism":"mcp",
+          "invocation":{
+            "tool":$tool,
+            "params":(if $state_id != "" then {"stateId":$state_id} else {} end)
+          },
+          "contract":{"output":$output}
+        }'
+      ;;
+    idea.review-icebox)
+      tool="mcp__claude_ai_Linear__list_issues"
+      output_contract='["id","title","status","createdAt"]'
+      local icebox_state_id
+      icebox_state_id=$(linear_state_id "$provider_config" "icebox")
+      jq -n --arg tool "$tool" --arg project "$project" --arg team "$team" \
+        --arg state_id "$icebox_state_id" --arg label "$idea_label" \
+        --argjson output "$output_contract" \
+        '{
+          "provider":"linear","mechanism":"mcp",
+          "invocation":{
+            "tool":$tool,
+            "params":(
+              {"project":$project,"team":$team,"label":$label}
+              + (if $state_id != "" then {"stateId":$state_id} else {} end)
+            )
+          },
+          "contract":{"output":$output}
+        }'
       ;;
     *)
       # Unsupported operation for this provider — fall back to local

@@ -1140,11 +1140,16 @@ cmd_radar_gather() {
   result=$(echo "$result" | jq --argjson c "$completed" '. + {"completed_recent": $c}')
 
   # Idea count — ideas.log lives at <project>/.ccanvil/ideas.log (one level above docs_dir).
-  local idea_counts='{"total":0,"new":0}'
+  local idea_counts='{"total":0,"new":0,"icebox_stale_count":0}'
   local project_dir
   project_dir=$(dirname "$docs_dir")
   if [[ -f "$project_dir/.ccanvil/ideas.log" ]]; then
     idea_counts=$(cmd_idea_count "$project_dir")
+    # Augment with icebox-stale count (icebox items older than 60d) so
+    # /radar can surface re-evaluation candidates ambiently.
+    local stale_count
+    stale_count=$(cmd_idea_review_icebox "$project_dir" | jq 'length')
+    idea_counts=$(echo "$idea_counts" | jq --argjson n "$stale_count" '. + {"icebox_stale_count": $n}')
   fi
   result=$(echo "$result" | jq --argjson i "$idea_counts" '. + {"ideas": $i}')
 

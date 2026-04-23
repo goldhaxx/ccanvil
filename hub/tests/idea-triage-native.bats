@@ -182,6 +182,29 @@ EOF
 }
 
 # =========================================================================
+# Step 9 — radar-gather surfaces Icebox-stale count (AC-6 local half).
+# =========================================================================
+
+@test "Step 9: radar-gather emits ideas.icebox_stale_count" {
+  local ideas_log="$PROJECT/.ccanvil/ideas.log"
+  local now stale fresh
+  now=$(date +%s)
+  stale=$((now - 5184001))
+  fresh=$((now - 86400))
+  cat > "$ideas_log" <<EOF
+{"uid":"s1","created":$stale,"status":"icebox","title":"a","body":"a"}
+{"uid":"s2","created":$stale,"status":"icebox","title":"b","body":"b"}
+{"uid":"s3","created":$fresh,"status":"icebox","title":"c","body":"c"}
+{"uid":"s4","created":$stale,"status":"backlog","title":"d","body":"d"}
+EOF
+  # radar-gather targets a docs/ dir; stub one.
+  mkdir -p "$PROJECT/docs"
+  run bash "$DOCS_CHECK" radar-gather "$PROJECT/docs"
+  [ "$status" -eq 0 ]
+  echo "$output" | jq -e '.ideas.icebox_stale_count == 2'
+}
+
+# =========================================================================
 # Step 8 — Icebox review command (AC-5).
 # =========================================================================
 

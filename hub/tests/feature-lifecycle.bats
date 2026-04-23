@@ -575,6 +575,46 @@ EOF
 # pr-cleanup (auto-complete-spec-on-merge: AC-1, AC-2, AC-7)
 # ---------------------------------------------------------------------------
 
+@test "end-to-end: activate → pr-cleanup → merge → land yields Complete (AC-8)" {
+  cd "$PROJECT"
+  cat > "$PROJECT/docs/specs/e2e.md" <<'EOF'
+# Feature: E2E
+
+> Feature: e2e
+> Created: 1774200000
+> Status: Ready
+
+## Summary
+End-to-end demo.
+EOF
+
+  "$PROJECT/.ccanvil/scripts/docs-check.sh" activate e2e "$PROJECT/docs" >/dev/null 2>&1
+
+  echo "work" > "$PROJECT/work.txt"
+  git -C "$PROJECT" add -A && git -C "$PROJECT" commit -q -m "feat: implement e2e"
+
+  "$PROJECT/.ccanvil/scripts/docs-check.sh" pr-cleanup "$PROJECT/docs" >/dev/null
+
+  git -C "$PROJECT" push -u origin claude/feat/e2e 2>/dev/null
+
+  git -C "$PROJECT" checkout main -q
+  git -C "$PROJECT" merge --squash claude/feat/e2e
+  git -C "$PROJECT" commit -q -m "feat(e2e): implement (#1)"
+  git -C "$PROJECT" push origin main 2>/dev/null
+  git -C "$PROJECT" checkout claude/feat/e2e -q
+
+  "$PROJECT/.ccanvil/scripts/docs-check.sh" land --force
+
+  local specs_json
+  specs_json=$("$PROJECT/.ccanvil/scripts/docs-check.sh" list-specs "$PROJECT/docs")
+  local e2e_status in_progress_count
+  e2e_status=$(echo "$specs_json" | jq -r '.[] | select(.feature_id == "e2e") | .status')
+  in_progress_count=$(echo "$specs_json" | jq '[.[] | select(.status == "In Progress")] | length')
+
+  [ "$e2e_status" = "Complete" ]
+  [ "$in_progress_count" = "0" ]
+}
+
 @test "pr-cleanup: halts non-zero when cmd_complete fails (AC-7)" {
   cat > "$PROJECT/docs/specs/auth-system.md" <<'EOF'
 # Feature: Auth System

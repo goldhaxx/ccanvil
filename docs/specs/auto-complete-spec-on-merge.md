@@ -2,7 +2,7 @@
 
 > Feature: auto-complete-spec-on-merge
 > Created: 1776905781
-> Status: In Progress
+> Status: Complete
 
 ## Summary
 

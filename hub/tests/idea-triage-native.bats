@@ -474,16 +474,82 @@ EOF
 }
 
 # =========================================================================
-# Step 3 — Capture routes to Linear-native Triage via API auto-routing.
-# Covers AC-1 (Linear half): idea.add does NOT pass a state, letting the
-# Linear workspace's Triage feature route the API-created issue itself.
+# BTS-121 — idea.add routes Linear captures to Triage via stateId.
+# Empirically falsified the prior "Linear auto-routes API-created issues to
+# Triage" assumption; team default (Backlog) wins when no state is passed.
+# Resolver now injects stateId from state_ids.triage using the same
+# conditional-merge pattern as idea.{promote,defer,dismiss,merge}.
+# =========================================================================
+
+@test "BTS-121 AC-1: idea.add emits stateId when state_ids.triage is configured" {
+  _linear_config_with_state_ids
+  run bash "$OPS" resolve idea.add --project-dir "$PROJECT"
+  [ "$status" -eq 0 ]
+  echo "$output" | jq -e '.invocation.params.stateId == "aaaaaaaa-0000-0000-0000-000000000001"'
+}
+
+@test "BTS-121 AC-2: idea.add stateId is additive — project/team/labels still present" {
+  _linear_config_with_state_ids
+  run bash "$OPS" resolve idea.add --project-dir "$PROJECT"
+  [ "$status" -eq 0 ]
+  echo "$output" | jq -e '.invocation.params.project == "Test Project"'
+  echo "$output" | jq -e '.invocation.params.team == "Test Team"'
+  echo "$output" | jq -e '.invocation.params.labels == ["idea"]'
+  echo "$output" | jq -e '.invocation.params | has("stateId")'
+}
+
+@test "BTS-121 AC-3: idea.add omits stateId when state_ids absent" {
+  _linear_config_no_state_ids
+  run bash "$OPS" resolve idea.add --project-dir "$PROJECT"
+  [ "$status" -eq 0 ]
+  echo "$output" | jq -e '.invocation.params | has("stateId") | not'
+  # Existing contract still holds — project/team/labels present.
+  echo "$output" | jq -e '.invocation.params.project == "Test Project"'
+  echo "$output" | jq -e '.invocation.params.labels == ["idea"]'
+}
+
+@test "BTS-121 AC-5: idea.add omits stateId when state_ids.triage is empty string" {
+  mkdir -p "$PROJECT/.claude"
+  cat > "$PROJECT/.claude/ccanvil.json" <<'JSON'
+{
+  "integrations": {
+    "providers": {
+      "linear": {
+        "mechanism": "mcp",
+        "project": "Test Project",
+        "team": "Test Team",
+        "idea_label": "idea",
+        "idea_status": "Idea",
+        "state_ids": {
+          "triage": "",
+          "backlog": "bbbbbbbb-0000-0000-0000-000000000002"
+        }
+      }
+    },
+    "routing": { "idea": "linear" }
+  }
+}
+JSON
+  run bash "$OPS" resolve idea.add --project-dir "$PROJECT"
+  [ "$status" -eq 0 ]
+  # Empty string must be treated as unconfigured to avoid Linear API errors
+  # or silent no-ops from passing stateId:"".
+  echo "$output" | jq -e '.invocation.params | has("stateId") | not'
+}
+
+# =========================================================================
+# Step 3 — Capture routes to Linear-native Triage via explicit stateId.
+# Covers AC-1 (Linear half): idea.add passes stateId=triage when configured,
+# superseded by the BTS-121 block above but retained to assert contract
+# invariants (no legacy `state` name key; project/team/labels still present).
 # =========================================================================
 
 @test "Step 3: idea.add Linear resolver does NOT pass .invocation.params.state" {
   _linear_config_with_state_ids
   run bash "$OPS" resolve idea.add --project-dir "$PROJECT"
   [ "$status" -eq 0 ]
-  # state must be absent (Linear auto-routes API-created issues to Triage).
+  # state (name) must be absent — name-based dispatch is forbidden
+  # (Linear state-name/type collision documented in /idea skill Rules).
   echo "$output" | jq -e '.invocation.params | has("state") | not'
   # Project + team + labels still present.
   echo "$output" | jq -e '.invocation.params.project == "Test Project"'

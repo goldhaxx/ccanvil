@@ -365,14 +365,27 @@ linear_mcp_adapter() {
     idea.add)
       tool="mcp__claude_ai_Linear__save_issue"
       output_contract='["id","title","status"]'
-      # No `state` param: Linear routes API-created issues to the team's
-      # native Triage intake surface automatically when Triage is enabled.
-      # Specifying a state here would bypass Triage and drop the item
-      # straight into the target state.
+      # Explicit stateId dispatch targets Triage when state_ids.triage is
+      # configured; falls through to team default (typically Backlog) when
+      # unconfigured. The prior assumption that Linear auto-routes
+      # API-created issues to Triage was falsified empirically — team
+      # default wins without an explicit stateId. Uses the same conditional
+      # merge pattern as idea.{promote,defer,dismiss,merge}; omitting
+      # stateId keeps backward-compat with nodes that haven't migrated.
+      local triage_state_id
+      triage_state_id=$(linear_state_id "$provider_config" "triage")
       jq -n --arg tool "$tool" --arg project "$project" --arg team "$team" \
-        --arg label "$idea_label" \
+        --arg label "$idea_label" --arg state_id "$triage_state_id" \
         --argjson output "$output_contract" \
-        '{"provider":"linear","mechanism":"mcp","invocation":{"tool":$tool,"params":{"project":$project,"team":$team,"labels":[$label]}},"contract":{"output":$output}}'
+        '{
+          "provider":"linear","mechanism":"mcp",
+          "invocation":{
+            "tool":$tool,
+            "params":({"project":$project,"team":$team,"labels":[$label]} +
+                      (if $state_id != "" then {"stateId":$state_id} else {} end))
+          },
+          "contract":{"output":$output}
+        }'
       ;;
     idea.list)
       tool="mcp__claude_ai_Linear__list_issues"

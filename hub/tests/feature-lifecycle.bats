@@ -572,6 +572,126 @@ EOF
 }
 
 # ---------------------------------------------------------------------------
+# pr-cleanup (auto-complete-spec-on-merge: AC-1, AC-2, AC-7)
+# ---------------------------------------------------------------------------
+
+@test "end-to-end: activate → pr-cleanup → merge → land yields Complete (AC-8)" {
+  cd "$PROJECT"
+  cat > "$PROJECT/docs/specs/e2e.md" <<'EOF'
+# Feature: E2E
+
+> Feature: e2e
+> Created: 1774200000
+> Status: Ready
+
+## Summary
+End-to-end demo.
+EOF
+
+  "$PROJECT/.ccanvil/scripts/docs-check.sh" activate e2e "$PROJECT/docs" >/dev/null 2>&1
+
+  echo "work" > "$PROJECT/work.txt"
+  git -C "$PROJECT" add -A && git -C "$PROJECT" commit -q -m "feat: implement e2e"
+
+  "$PROJECT/.ccanvil/scripts/docs-check.sh" pr-cleanup "$PROJECT/docs" >/dev/null
+
+  git -C "$PROJECT" push -u origin claude/feat/e2e 2>/dev/null
+
+  git -C "$PROJECT" checkout main -q
+  git -C "$PROJECT" merge --squash claude/feat/e2e
+  git -C "$PROJECT" commit -q -m "feat(e2e): implement (#1)"
+  git -C "$PROJECT" push origin main 2>/dev/null
+  git -C "$PROJECT" checkout claude/feat/e2e -q
+
+  "$PROJECT/.ccanvil/scripts/docs-check.sh" land --force
+
+  local specs_json
+  specs_json=$("$PROJECT/.ccanvil/scripts/docs-check.sh" list-specs "$PROJECT/docs")
+  local e2e_status in_progress_count
+  e2e_status=$(echo "$specs_json" | jq -r '.[] | select(.feature_id == "e2e") | .status')
+  in_progress_count=$(echo "$specs_json" | jq '[.[] | select(.status == "In Progress")] | length')
+
+  [ "$e2e_status" = "Complete" ]
+  [ "$in_progress_count" = "0" ]
+}
+
+@test "pr-cleanup: halts non-zero when cmd_complete fails (AC-7)" {
+  cat > "$PROJECT/docs/specs/auth-system.md" <<'EOF'
+# Feature: Auth System
+
+> Feature: auth-system
+> Created: 1774200000
+> Status: Ready
+
+## Summary
+Auth feature.
+EOF
+
+  "$PROJECT/.ccanvil/scripts/docs-check.sh" activate auth-system "$PROJECT/docs" >/dev/null 2>&1
+
+  # Simulate a broken archive: spec.md present, but specs/auth-system.md removed.
+  # cmd_complete will fail with "spec with feature_id not found".
+  rm "$PROJECT/docs/specs/auth-system.md"
+  git -C "$PROJECT" add -A && git -C "$PROJECT" commit -q -m "break archive"
+
+  run "$PROJECT/.ccanvil/scripts/docs-check.sh" pr-cleanup "$PROJECT/docs"
+  [ "$status" -ne 0 ]
+
+  # No partial cleanup: docs/spec.md still present
+  [ -f "$PROJECT/docs/spec.md" ]
+}
+
+@test "pr-cleanup: fallback cleanup when no docs/spec.md (AC-2)" {
+  # A feature branch with only plan/stasis (no active spec)
+  git -C "$PROJECT" checkout -b claude/feat/no-spec-demo -q
+  echo "plan content" > "$PROJECT/docs/plan.md"
+  echo "stasis content" > "$PROJECT/docs/stasis.md"
+  git -C "$PROJECT" add -A && git -C "$PROJECT" commit -q -m "seed plan + stasis"
+
+  run "$PROJECT/.ccanvil/scripts/docs-check.sh" pr-cleanup "$PROJECT/docs"
+  [ "$status" -eq 0 ]
+
+  # Lifecycle docs removed
+  [ ! -f "$PROJECT/docs/plan.md" ]
+  [ ! -f "$PROJECT/docs/stasis.md" ]
+
+  # Commit created with fallback message
+  local last_msg
+  last_msg=$(git -C "$PROJECT" log -1 --pretty=%s)
+  [[ "$last_msg" == "docs(lifecycle): clean up lifecycle docs before merge" ]]
+}
+
+@test "pr-cleanup: flips archive to Complete when docs/spec.md exists (AC-1)" {
+  cat > "$PROJECT/docs/specs/auth-system.md" <<'EOF'
+# Feature: Auth System
+
+> Feature: auth-system
+> Created: 1774200000
+> Status: Ready
+
+## Summary
+Auth feature.
+EOF
+
+  # activate marks In Progress, creates branch, copies to docs/spec.md
+  "$PROJECT/.ccanvil/scripts/docs-check.sh" activate auth-system "$PROJECT/docs" >/dev/null 2>&1
+
+  run "$PROJECT/.ccanvil/scripts/docs-check.sh" pr-cleanup "$PROJECT/docs"
+  [ "$status" -eq 0 ]
+
+  # Archive transitioned to Complete
+  grep -q "Status: Complete" "$PROJECT/docs/specs/auth-system.md"
+
+  # Lifecycle docs removed
+  [ ! -f "$PROJECT/docs/spec.md" ]
+
+  # Commit on branch with cmd_complete's message shape
+  local last_msg
+  last_msg=$(git -C "$PROJECT" log -1 --pretty=%s)
+  [[ "$last_msg" == "docs(lifecycle): complete auth-system"* ]]
+}
+
+# ---------------------------------------------------------------------------
 # Step 5: validate/recommend multi-spec (AC-17, AC-23, AC-24)
 # ---------------------------------------------------------------------------
 
@@ -1019,6 +1139,158 @@ EOF
   # Feature branch should be deleted locally
   run git -C "$PROJECT" branch --list "claude/feat/test-land"
   [ -z "$output" ]
+}
+
+@test "land: safety net transitions matching In Progress spec (AC-3)" {
+  cd "$PROJECT"
+  cat > "$PROJECT/docs/specs/demo.md" <<'EOF'
+# Feature: Demo
+
+> Feature: demo
+> Created: 1774200000
+> Status: Ready
+
+## Summary
+Demo feature.
+EOF
+
+  "$PROJECT/.ccanvil/scripts/docs-check.sh" activate demo "$PROJECT/docs" >/dev/null 2>&1
+
+  # Implementation commit without pr-cleanup — archive stays In Progress.
+  echo "work" > "$PROJECT/work.txt"
+  git -C "$PROJECT" add -A && git -C "$PROJECT" commit -q -m "feat: implement demo"
+  git -C "$PROJECT" push -u origin claude/feat/demo 2>/dev/null
+
+  # Simulate squash-merge on main, push, then return to feature branch so land
+  # exercises the post-merge path.
+  git -C "$PROJECT" checkout main -q
+  git -C "$PROJECT" merge --squash claude/feat/demo
+  git -C "$PROJECT" commit -q -m "feat(demo): implement demo (#1)"
+  git -C "$PROJECT" push origin main 2>/dev/null
+  git -C "$PROJECT" checkout claude/feat/demo -q
+
+  run "$PROJECT/.ccanvil/scripts/docs-check.sh" land --force
+  [ "$status" -eq 0 ]
+
+  # Safety net flipped archive to Complete on main
+  grep -q "Status: Complete" "$PROJECT/docs/specs/demo.md"
+}
+
+@test "land: safety net commits post-merge cleanup and pushes (AC-4)" {
+  cd "$PROJECT"
+  cat > "$PROJECT/docs/specs/demo.md" <<'EOF'
+# Feature: Demo
+
+> Feature: demo
+> Created: 1774200000
+> Status: Ready
+
+## Summary
+Demo feature.
+EOF
+
+  "$PROJECT/.ccanvil/scripts/docs-check.sh" activate demo "$PROJECT/docs" >/dev/null 2>&1
+
+  echo "work" > "$PROJECT/work.txt"
+  git -C "$PROJECT" add -A && git -C "$PROJECT" commit -q -m "feat: implement demo"
+  git -C "$PROJECT" push -u origin claude/feat/demo 2>/dev/null
+
+  git -C "$PROJECT" checkout main -q
+  git -C "$PROJECT" merge --squash claude/feat/demo
+  git -C "$PROJECT" commit -q -m "feat(demo): implement demo (#1)"
+  git -C "$PROJECT" push origin main 2>/dev/null
+  git -C "$PROJECT" checkout claude/feat/demo -q
+
+  "$PROJECT/.ccanvil/scripts/docs-check.sh" land --force
+
+  # HEAD on main is the safety-net commit
+  local last_msg
+  last_msg=$(git -C "$PROJECT" log -1 --pretty=%s main)
+  [ "$last_msg" = "docs(lifecycle): complete demo — post-merge cleanup" ]
+
+  # Push reached origin — clone the bare remote and confirm
+  local verify
+  verify=$(mktemp -d)
+  git clone -q "$REMOTE" "$verify"
+  local origin_msg
+  origin_msg=$(git -C "$verify" log -1 --pretty=%s main)
+  [ "$origin_msg" = "docs(lifecycle): complete demo — post-merge cleanup" ]
+  rm -rf "$verify"
+}
+
+@test "land: safety net is a no-op when archive already Complete (AC-5)" {
+  cd "$PROJECT"
+  cat > "$PROJECT/docs/specs/demo.md" <<'EOF'
+# Feature: Demo
+
+> Feature: demo
+> Created: 1774200000
+> Status: Ready
+
+## Summary
+Demo feature.
+EOF
+
+  "$PROJECT/.ccanvil/scripts/docs-check.sh" activate demo "$PROJECT/docs" >/dev/null 2>&1
+
+  echo "work" > "$PROJECT/work.txt"
+  git -C "$PROJECT" add -A && git -C "$PROJECT" commit -q -m "feat: implement demo"
+
+  # Primary path: pr-cleanup flips archive to Complete on the branch.
+  "$PROJECT/.ccanvil/scripts/docs-check.sh" pr-cleanup "$PROJECT/docs" >/dev/null
+
+  git -C "$PROJECT" push -u origin claude/feat/demo 2>/dev/null
+
+  git -C "$PROJECT" checkout main -q
+  git -C "$PROJECT" merge --squash claude/feat/demo
+  git -C "$PROJECT" commit -q -m "feat(demo): implement demo (#1)"
+  git -C "$PROJECT" push origin main 2>/dev/null
+  git -C "$PROJECT" checkout claude/feat/demo -q
+
+  local pre_head
+  pre_head=$(git -C "$PROJECT" rev-parse main)
+
+  "$PROJECT/.ccanvil/scripts/docs-check.sh" land --force
+
+  local post_head
+  post_head=$(git -C "$PROJECT" rev-parse main)
+
+  # No new commit on main — safety net saw Complete, did nothing.
+  [ "$pre_head" = "$post_head" ]
+}
+
+@test "land: safety net skips non-claude branch names (AC-6)" {
+  cd "$PROJECT"
+  # A spec archive exists, but the branch doesn't match claude/<type>/<id>.
+  cat > "$PROJECT/docs/specs/lingering.md" <<'EOF'
+# Feature: Lingering
+
+> Feature: lingering
+> Created: 1774200000
+> Status: In Progress
+
+## Summary
+Unrelated spec.
+EOF
+  git -C "$PROJECT" add -A && git -C "$PROJECT" commit -q -m "seed lingering spec"
+  git -C "$PROJECT" push origin main 2>/dev/null
+
+  git -C "$PROJECT" checkout -b hotfix/foo -q
+  echo "hot" > "$PROJECT/hot.txt"
+  git -C "$PROJECT" add -A && git -C "$PROJECT" commit -q -m "fix: hot"
+  git -C "$PROJECT" push -u origin hotfix/foo 2>/dev/null
+
+  local pre_head
+  pre_head=$(git -C "$PROJECT" rev-parse main)
+
+  "$PROJECT/.ccanvil/scripts/docs-check.sh" land --force
+
+  local post_head
+  post_head=$(git -C "$PROJECT" rev-parse main)
+
+  # Safety net should not have fired — main HEAD unchanged, lingering spec untouched.
+  [ "$pre_head" = "$post_head" ]
+  grep -q "Status: In Progress" "$PROJECT/docs/specs/lingering.md"
 }
 
 @test "land: handles no remote gracefully" {

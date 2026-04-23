@@ -909,6 +909,43 @@ cmd_complete() {
 }
 
 # ---------------------------------------------------------------------------
+# cmd_pr_cleanup — Pre-merge lifecycle cleanup invoked by the /pr skill.
+#
+# Usage:
+#   docs-check.sh pr-cleanup [docs-dir]
+#
+# Behavior (primary path): when docs/spec.md exists, parse its feature_id and
+# delegate to cmd_complete, which flips the archive to Complete, removes
+# lifecycle docs, and commits on the feature branch. That commit rides the
+# squash-merge into main — no manual `complete` follow-up needed.
+#
+# Fallback and error-halt behavior added in later steps.
+# ---------------------------------------------------------------------------
+
+cmd_pr_cleanup() {
+  local docs_dir="${1:-$DEFAULT_DOCS_DIR}"
+  local spec_file="$docs_dir/spec.md"
+
+  if [[ -f "$spec_file" ]]; then
+    local feature_id
+    feature_id=$(parse_metadata "$spec_file" | jq -r '.feature_id // empty')
+    if [[ -z "$feature_id" ]]; then
+      echo "ERROR: could not parse feature_id from $spec_file" >&2
+      exit 1
+    fi
+    cmd_complete "$feature_id" "$docs_dir"
+  else
+    # Fallback: no active spec (e.g. `/pr` run on a branch without lifecycle spec).
+    # Remove any lingering lifecycle docs and commit so nothing rides the merge.
+    local repo_root
+    repo_root=$(cd "$docs_dir" 2>/dev/null && git rev-parse --show-toplevel 2>/dev/null) || repo_root="."
+    rm -f "$docs_dir/spec.md" "$docs_dir/plan.md" "$docs_dir/stasis.md"
+    (cd "$repo_root" && git add -A "$docs_dir/" 2>/dev/null || true)
+    git -C "$repo_root" commit -q -m "docs(lifecycle): clean up lifecycle docs before merge" 2>/dev/null || true
+  fi
+}
+
+# ---------------------------------------------------------------------------
 # cmd_land — Switch to main, sync with remote, delete feature branch.
 #
 # Usage:
@@ -970,6 +1007,28 @@ cmd_land() {
     sha=$(git rev-parse --short origin/main 2>/dev/null || git rev-parse --short origin/master 2>/dev/null || echo "unknown")
     git reset --hard "origin/main" 2>/dev/null || git reset --hard "origin/master" 2>/dev/null || true
     echo "Main updated to $sha."
+  fi
+
+  # Post-merge safety net: if the landed branch maps to a spec archive that's
+  # still In Progress on main, transition it to Complete. Covers the case
+  # where /pr was skipped (PR merged directly from the GitHub UI, etc.).
+  if [[ "$branch" =~ ^claude/[^/]+/(.+)$ ]]; then
+    local safety_feature_id="${BASH_REMATCH[1]}"
+    local safety_spec_file="${DEFAULT_DOCS_DIR}/specs/${safety_feature_id}.md"
+    if [[ -f "$safety_spec_file" ]]; then
+      local safety_status
+      safety_status=$(parse_metadata "$safety_spec_file" | jq -r '.status // empty')
+      if [[ "$safety_status" == "In Progress" ]]; then
+        update_metadata_status "$safety_spec_file" "Complete"
+        ALLOW_MAIN=1 git add "$safety_spec_file" 2>/dev/null
+        ALLOW_MAIN=1 git -c commit.gpgsign=false commit -q \
+          -m "docs(lifecycle): complete ${safety_feature_id} — post-merge cleanup" 2>/dev/null
+        if git remote get-url origin >/dev/null 2>&1; then
+          git push origin main 2>/dev/null || true
+        fi
+        echo "Safety net: transitioned '${safety_feature_id}' to Complete."
+      fi
+    fi
   fi
 
   # Delete local branch
@@ -1877,6 +1936,7 @@ case "$cmd" in
   list-specs)        cmd_list_specs "$@" ;;
   activate)          cmd_activate "$@" ;;
   complete)          cmd_complete "$@" ;;
+  pr-cleanup)        cmd_pr_cleanup "$@" ;;
   land)              cmd_land "$@" ;;
   radar-gather)      cmd_radar_gather "$@" ;;
   idea-add)          cmd_idea_add "$@" ;;
@@ -1890,7 +1950,7 @@ case "$cmd" in
   title-from-body)   cmd_title_from_body "$@" ;;
   legacy-refs-scan)  cmd_legacy_refs_scan "$@" ;;
   *)
-    echo "Usage: docs-check.sh {status|validate|recommend|audit-session|config-get|list-specs|activate|complete|land|idea-add|idea-list|idea-count|idea-update|idea-sync|idea-migrate|idea-setup|idea-upgrade|title-from-body|legacy-refs-scan} [args...]" >&2
+    echo "Usage: docs-check.sh {status|validate|recommend|audit-session|config-get|list-specs|activate|complete|pr-cleanup|land|idea-add|idea-list|idea-count|idea-update|idea-sync|idea-migrate|idea-setup|idea-upgrade|title-from-body|legacy-refs-scan} [args...]" >&2
     exit 1
     ;;
 esac

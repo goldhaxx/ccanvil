@@ -119,9 +119,13 @@ JSON
   echo "$output" | jq -e '.invocation.tool == "mcp__claude_ai_Linear__save_issue"'
   echo "$output" | jq -e '.invocation.params.team == "Test Team"'
   echo "$output" | jq -e '.invocation.params.project == "Test Project"'
-  # state omitted — Linear routes API-created issues to native Triage.
-  # (Superseded by idea-triage-native AC-1; prior behavior set state="Idea".)
+  # state (name) forbidden — name-based dispatch collides with state types
+  # in Linear's workflow resolver. (Superseded by idea-triage-native AC-1.)
   echo "$output" | jq -e '.invocation.params | has("state") | not'
+  # This fixture lacks state_ids, so stateId is also absent here.
+  # The BTS-121 block in idea-triage-native.bats asserts the positive path
+  # (state_ids configured → stateId present) and the empty-string guard.
+  echo "$output" | jq -e '.invocation.params | has("stateId") | not'
   echo "$output" | jq -e '.invocation.params.labels[0] == "idea"'
 }
 

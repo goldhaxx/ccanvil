@@ -5,7 +5,7 @@ description: Capture, list, triage, review-icebox, or sync project ideas via the
 
 Capture, list, triage, review-icebox, or sync project ideas. The skill resolves each operation through `.ccanvil/scripts/operations.sh`, which picks a provider based on `.claude/ccanvil.json` + `.claude/ccanvil.local.json`:
 
-- **Linear provider** — projects whose `ccanvil.local.json` sets `integrations.routing.idea = "linear"` capture directly into Linear's native Triage intake surface via MCP. All mutations (promote, defer, dismiss, merge) transition issues by **state ID** — never by name — so no Linear UI interaction is ever required.
+- **Linear provider** — projects whose `ccanvil.local.json` sets `integrations.routing.idea = "linear"` capture directly into Linear's Triage state via MCP. The resolver injects `stateId` from `state_ids.triage` when configured, routing captures into the Triage inbox deterministically. All mutations (promote, defer, dismiss, merge) transition issues by **state ID** — never by name — so no Linear UI interaction is ever required.
 - **Local provider** (default) — everything else writes to `.ccanvil/ideas.log` (JSONL, gitignored, never committed). Same five-state vocabulary: triage / backlog / icebox / canceled / duplicate.
 
 Either way, `/idea` never touches git. No commits. No branch creation. Capture works from any branch, including main.
@@ -45,7 +45,7 @@ bash .ccanvil/scripts/operations.sh resolve idea.add --project-dir .
 
 ### Step 3a — Linear path (`mechanism == "mcp"`)
 
-Extract `.invocation.tool`, `.invocation.params.project`, `.invocation.params.team`, `.invocation.params.labels` from the resolution. Note: **no `state` param** — Linear auto-routes API-created issues to the team's native Triage intake when the Triage feature is enabled.
+Extract `.invocation.tool`, `.invocation.params.project`, `.invocation.params.team`, `.invocation.params.labels`, and `.invocation.params.stateId` (present when `state_ids.triage` is configured) from the resolution. Pass `stateId` through to `save_issue` when present — this routes the capture into Linear's Triage state deterministically. When unconfigured, omit `stateId` entirely; Linear will fall through to the team's default state (usually Backlog, **not** Triage — the earlier "auto-routes API-created issues to Triage" assumption was falsified empirically).
 
 Call the MCP tool directly:
 
@@ -54,6 +54,7 @@ mcp__claude_ai_Linear__save_issue
   team:        <params.team>
   project:     <params.project>
   labels:      <params.labels>      # typically ["idea"]
+  stateId:     <params.stateId>     # only when present in resolver output
   title:       <generated title>
   description: <original raw text, verbatim>
 ```

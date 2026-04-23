@@ -123,7 +123,7 @@ The `/idea` skill routes captures through `operations.sh` based on the node's pr
 
 **State-ID config:** for the Linear provider, `integrations.providers.linear.state_ids` maps lifecycle roles to Linear workflow-state UUIDs (`triage`, `backlog`, `icebox`, `canceled`, `duplicate`). `/idea` uses these IDs to dispatch triage outcomes, sidestepping the name-vs-type resolver collision that silently no-ops name-based state transitions. Lookup via `mcp__claude_ai_Linear__list_issue_statuses` once per workspace.
 
-**Five-state lifecycle:** `Triage → Backlog / Icebox / Canceled / Duplicate`. Capture lands in Triage (Linear auto-routes API-created issues; local log writes `status:"triage"`). `/idea triage` moves items to one of the four outcomes via state-ID mutations.
+**Five-state lifecycle:** `Triage → Backlog / Icebox / Canceled / Duplicate`. Capture lands in Triage (Linear: resolver injects `stateId` from `state_ids.triage`; local log writes `status:"triage"`). `/idea triage` moves items to one of the four outcomes via state-ID mutations.
 
 **Archive-only semantic (Linear nodes):** on nodes with `routing.idea = "linear"`, `.ccanvil/ideas.log` is read-only after `idea-upgrade`. New captures route through Linear via the `/idea` skill; `cmd_idea_add` refuses direct writes. The pending log (`.ccanvil/ideas-pending.log`) remains the MCP-failure fallback, drained by `/idea sync`.
 

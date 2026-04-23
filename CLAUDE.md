@@ -37,6 +37,9 @@ hub/                        # Hub-only — NOT distributed
 docs/                       # Active feature lifecycle (branch-local)
 ```
 
+## Fork Setup
+`.mcp.json.example` is a template for forks that want the project-scoped Linear MCP server. To activate: rename to `.mcp.json` and complete OAuth via `/mcp`. Contributors who already have Linear wired up via their claude.ai account (`claude.ai Linear`) don't need this — it's a convenience for fresh clones.
+
 <!-- HUB-MANAGED-START -->
 <!-- Everything above is project-specific (name, stack, commands, architecture). -->
 <!-- Everything below is managed by the preset hub and updated via /ccanvil-pull. -->

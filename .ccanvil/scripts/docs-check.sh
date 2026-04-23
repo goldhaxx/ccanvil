@@ -1164,6 +1164,20 @@ cmd_idea_add() {
 
   [[ -n "$body" ]] || { echo "Usage: idea-add <body> [--title TITLE] [project-dir]" >&2; exit 1; }
 
+  # Defense-in-depth: on Linear-configured nodes, captures must route
+  # through the /idea skill (operations.sh -> MCP). Refuse direct script
+  # writes so legacy scripts or accidental invocations don't pollute the
+  # archive-only .ccanvil/ideas.log.
+  local local_cfg="$project_dir/.claude/ccanvil.local.json"
+  if [[ -f "$local_cfg" ]]; then
+    local routing
+    routing=$(jq -r '.integrations.routing.idea // ""' "$local_cfg" 2>/dev/null || echo '')
+    if [[ "$routing" == "linear" ]]; then
+      echo "ERROR: node is Linear-configured — captures must route via /idea skill" >&2
+      return 1
+    fi
+  fi
+
   # Default: title = body (short-text fast path; AC-22)
   [[ -z "$title" ]] && title="$body"
 
@@ -1185,13 +1199,39 @@ cmd_idea_add() {
 cmd_idea_list() {
   local filter_status=""
   local project_dir="."
+  local include_archive=0
 
   while [[ $# -gt 0 ]]; do
     case "$1" in
-      --status) filter_status="$2"; shift 2 ;;
-      *) project_dir="$1"; shift ;;
+      --status)          filter_status="$2"; shift 2 ;;
+      --include-archive) include_archive=1; shift ;;
+      *)                 project_dir="$1"; shift ;;
     esac
   done
+
+  # Linear-configured nodes: the live query goes through /idea list; this
+  # script surfaces the historical archive only when --include-archive is
+  # passed.
+  local local_cfg="$project_dir/.claude/ccanvil.local.json"
+  local routing=""
+  if [[ -f "$local_cfg" ]]; then
+    routing=$(jq -r '.integrations.routing.idea // ""' "$local_cfg" 2>/dev/null || echo '')
+  fi
+
+  if [[ "$routing" == "linear" ]]; then
+    echo "Linear-configured node — run /idea list for live queries."
+    if [[ $include_archive -eq 1 ]]; then
+      echo ""
+      echo "ARCHIVE:"
+      local ideas_log="$project_dir/.ccanvil/ideas.log"
+      if [[ -f "$ideas_log" ]]; then
+        grep -v '^# ' "$ideas_log" | jq -s "[.[] | {id: .uid, created: .created, title: .title, body: .body, status: .status}]" 2>/dev/null || echo "[]"
+      else
+        echo "[]"
+      fi
+    fi
+    return 0
+  fi
 
   local ideas_log="$project_dir/.ccanvil/ideas.log"
   if [[ ! -f "$ideas_log" ]]; then
@@ -1201,10 +1241,10 @@ cmd_idea_list() {
 
   local jq_shape='{id: .uid, created: .created, title: .title, body: .body, status: .status}'
   if [[ -n "$filter_status" ]]; then
-    jq -s --arg s "$filter_status" \
-      "[.[] | select(.status == \$s) | $jq_shape]" "$ideas_log"
+    grep -v '^# ' "$ideas_log" | jq -s --arg s "$filter_status" \
+      "[.[] | select(.status == \$s) | $jq_shape]"
   else
-    jq -s "[.[] | $jq_shape]" "$ideas_log"
+    grep -v '^# ' "$ideas_log" | jq -s "[.[] | $jq_shape]"
   fi
 }
 
@@ -1217,14 +1257,14 @@ cmd_idea_count() {
     return 0
   fi
 
-  jq -s '{
+  grep -v '^# ' "$ideas_log" | jq -s '{
     total:     length,
     new:       [.[] | select(.status == "new")]       | length,
     promoted:  [.[] | select(.status == "promoted")]  | length,
     parked:    [.[] | select(.status == "parked")]    | length,
     dismissed: [.[] | select(.status == "dismissed")] | length,
     merged:    [.[] | select(.status == "merged")]    | length
-  }' "$ideas_log"
+  }'
 }
 
 cmd_idea_update() {
@@ -1564,6 +1604,263 @@ cmd_legacy_refs_scan() {
   return 0
 }
 
+# cmd_idea_upgrade — One-command downstream node adoption of the /idea system.
+#
+# Collapses the 4-step manual sequence (pull-apply -> idea-setup -> idea-migrate
+# -> git commit) into a single invocation. Idempotent: re-running on an
+# already-upgraded node is a no-op.
+#
+# Usage:
+#   idea-upgrade --provider local                                  [project-dir]
+#   idea-upgrade --provider linear --team TEAM --project PROJECT   [project-dir]
+# ---------------------------------------------------------------------------
+cmd_idea_upgrade() {
+  local provider=""
+  local team=""
+  local project=""
+  local project_dir="."
+  local dry_run=0
+  local create_project=0
+  local from_legacy=0
+
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --provider)       provider="$2"; shift 2 ;;
+      --team)           team="$2";     shift 2 ;;
+      --project)        project="$2";  shift 2 ;;
+      --dry-run)        dry_run=1;     shift ;;
+      --create-project) create_project=1; shift ;;
+      --from-legacy)    from_legacy=1; shift ;;
+      *)                project_dir="$1"; shift ;;
+    esac
+  done
+
+  case "$provider" in
+    local) ;;
+    linear)
+      [[ -n "$team" && -n "$project" ]] || {
+        echo "ERROR: --provider linear requires --team and --project" >&2
+        return 1
+      }
+      ;;
+    "")  echo "ERROR: --provider is required (local|linear)" >&2; return 1 ;;
+    *)   echo "ERROR: unknown provider '$provider' (must be local|linear)" >&2; return 1 ;;
+  esac
+
+  if [[ $create_project -eq 1 && "$provider" != "linear" ]]; then
+    echo "ERROR: --create-project requires --provider linear" >&2
+    return 1
+  fi
+
+  # Emit the save_project intent before any file mutation so that a skill
+  # layer dispatching this command can pick it off stdout and call MCP
+  # itself. Script stays MCP-free (operations.sh-style separation).
+  if [[ $create_project -eq 1 ]]; then
+    jq -cn --arg team "$team" --arg name "$project" \
+      '{tool: "mcp__claude_ai_Linear__save_project", params: {team: $team, name: $name}}'
+  fi
+
+  if [[ $dry_run -eq 1 ]]; then
+    echo "DRY-RUN: idea-upgrade plan for $project_dir"
+    echo "  provider: $provider"
+    if [[ "$provider" == "linear" ]]; then
+      echo "  team=$team project=$project"
+    fi
+    echo "  files touched:"
+    echo "    .claude/ccanvil.local.json (deep-merge routing.idea + providers.linear)"
+    echo "    .gitignore (append .ccanvil/ideas.log, .ccanvil/ideas-pending.log, docs/ideas.md)"
+    echo "  commit message: chore(idea-upgrade): configure $provider provider"
+    return 0
+  fi
+
+  # Idempotency: if the config already routes to the target provider, exit
+  # cleanly instead of trying to commit an empty diff.
+  local cfg="$project_dir/.claude/ccanvil.local.json"
+  if [[ -f "$cfg" ]]; then
+    local current_routing
+    current_routing=$(jq -r '.integrations.routing.idea // ""' "$cfg" 2>/dev/null || echo '')
+    if [[ "$current_routing" == "$provider" && $from_legacy -eq 0 ]]; then
+      echo "Already upgraded: $project_dir is configured with provider=$provider"
+      return 0
+    fi
+  fi
+
+  # --from-legacy: when docs/ideas.md is tracked, migrate it inline so the
+  # final commit is one-shot (config + removed source + gitignore).
+  local migrated_count=0
+  local legacy_present=0
+  if [[ $from_legacy -eq 1 ]]; then
+    if [[ -f "$project_dir/docs/ideas.md" ]]; then
+      legacy_present=1
+      mkdir -p "$project_dir/.ccanvil"
+      local ideas_log="$project_dir/.ccanvil/ideas.log"
+      while IFS= read -r line; do
+        local body=''
+        local uid='' created='' status=''
+        if [[ "$line" =~ ^-\ \[(.)\]\ ([0-9a-f]{4})\ ([0-9]+):\ (.*)\ \<!--\ status:([a-z:A-Z0-9_-]+)\ --\> ]]; then
+          uid="${BASH_REMATCH[2]}"
+          created="${BASH_REMATCH[3]}"
+          body="${BASH_REMATCH[4]}"
+          status="${BASH_REMATCH[5]}"
+        elif [[ "$line" =~ ^-\ \[(.)\]\ ([0-9]{4}-[0-9]{2}-[0-9]{2}):\ (.*)\ \<!--\ status:([a-z:A-Z0-9_-]+)\ --\> ]]; then
+          created="${BASH_REMATCH[2]}"
+          body="${BASH_REMATCH[3]}"
+          status="${BASH_REMATCH[4]}"
+        fi
+        [[ -z "$body" ]] && continue
+        local title
+        title=$(cmd_title_from_body "$body")
+        if [[ -n "$uid" ]]; then
+          jq -cn --arg uid "$uid" --argjson created "$created" \
+                 --arg title "$title" --arg body "$body" --arg status "$status" \
+            '{uid:$uid, created:$created, status:$status, title:$title, body:$body}' \
+            >> "$ideas_log"
+        else
+          jq -cn --arg created "$created" \
+                 --arg title "$title" --arg body "$body" --arg status "$status" \
+            '{created:$created, status:$status, title:$title, body:$body}' \
+            >> "$ideas_log"
+        fi
+        migrated_count=$((migrated_count + 1))
+      done < "$project_dir/docs/ideas.md"
+    else
+      echo "Nothing to migrate: docs/ideas.md not found"
+    fi
+  fi
+
+  # Delegate the config + gitignore write to cmd_idea_setup. Suppress its
+  # next-step text (idea-upgrade emits its own summary).
+  if [[ "$provider" == "linear" ]]; then
+    cmd_idea_setup --provider linear --team "$team" --project "$project" "$project_dir" >/dev/null
+  else
+    cmd_idea_setup --provider local "$project_dir" >/dev/null
+  fi
+
+  # Archive-only semantic: Linear-configured nodes get a read-only header
+  # prepended to .ccanvil/ideas.log. The log stays in place for historical
+  # reference but new captures route through Linear. Idempotent — the header
+  # is never duplicated on re-runs.
+  if [[ "$provider" == "linear" ]]; then
+    local ideas_log_archive="$project_dir/.ccanvil/ideas.log"
+    mkdir -p "$(dirname "$ideas_log_archive")"
+    touch "$ideas_log_archive"
+    if ! grep -q '^# ARCHIVE:' "$ideas_log_archive" 2>/dev/null; then
+      local iso_date
+      iso_date=$(date -u +%Y-%m-%d)
+      local tmp_log="${ideas_log_archive}.tmp.$$"
+      {
+        printf '# ARCHIVE: read-only after %s\n' "$iso_date"
+        cat "$ideas_log_archive"
+      } > "$tmp_log"
+      mv "$tmp_log" "$ideas_log_archive"
+    fi
+  fi
+
+  # Build the single commit. When --from-legacy migrated a tracked file,
+  # git rm it so the deletion is in the same commit as the config write.
+  local commit_msg="chore(idea-upgrade): configure $provider provider"
+  (
+    cd "$project_dir" || return 1
+    if [[ $legacy_present -eq 1 ]]; then
+      git rm -q docs/ideas.md 2>/dev/null || rm -f docs/ideas.md
+    fi
+    git add .claude/ccanvil.local.json .gitignore
+    if [[ $legacy_present -eq 1 ]]; then
+      git commit -q -m "chore(idea-upgrade): configure $provider provider + migrate $migrated_count legacy entries"
+    else
+      git commit -q -m "$commit_msg"
+    fi
+  )
+
+  if [[ $legacy_present -eq 1 ]]; then
+    echo "UPGRADE: node configured with provider=$provider; migrated $migrated_count entries to .ccanvil/ideas.log"
+  else
+    echo "UPGRADE: node configured with provider=$provider"
+  fi
+}
+
+# cmd_title_from_body — Derive a concise title from an idea body.
+#
+# Usage:
+#   title-from-body "<body>"
+#   echo "<body>" | title-from-body
+#
+# Behavior:
+#   - Empty body                → stdout empty, exit 0
+#   - <=80 chars + single-line  → stdout is the body verbatim (fast path)
+#   - Longer / multi-line, with `claude` CLI on PATH → invoke CLI and
+#                                  truncate the reply to 80 chars.
+#   - Longer / multi-line, no CLI → first 80 chars of first line
+#                                    (deterministic fallback).
+cmd_title_from_body() {
+  local title_map=''
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --title-map)
+        title_map="$2"
+        shift 2
+        ;;
+      --)
+        shift
+        break
+        ;;
+      *)
+        break
+        ;;
+    esac
+  done
+
+  if [[ -n "$title_map" && ! -f "$title_map" ]]; then
+    echo "ERROR: --title-map file not found: $title_map" >&2
+    return 1
+  fi
+
+  local body
+  if [[ $# -gt 0 ]]; then
+    body="$1"
+  else
+    body=$(cat)
+  fi
+
+  if [[ -n "$title_map" ]]; then
+    local mapped
+    mapped=$(jq -r --arg b "$body" '.[$b] // empty' "$title_map" 2>/dev/null || echo '')
+    if [[ -n "$mapped" ]]; then
+      printf '%s' "$mapped"
+      return 0
+    fi
+  fi
+
+  if [[ -z "$body" ]]; then
+    printf ''
+    return 0
+  fi
+
+  local has_newline=0
+  case "$body" in *$'\n'*) has_newline=1 ;; esac
+
+  if [[ $has_newline -eq 0 && "${#body}" -le 80 ]]; then
+    printf '%s' "$body"
+    return 0
+  fi
+
+  if command -v claude >/dev/null 2>&1; then
+    local prompt="Summarize the following idea as a concise title, <=80 chars, intent-preserving, no quotes, no trailing punctuation. Return only the title text."
+    local reply
+    reply=$(printf '%s\n\n%s' "$prompt" "$body" | claude -p 2>/dev/null) || reply=''
+    reply="${reply%$'\n'}"
+    if [[ -n "$reply" ]]; then
+      printf '%s' "${reply:0:80}"
+      return 0
+    fi
+  fi
+
+  local first_line
+  first_line="${body%%$'\n'*}"
+  printf '%s' "${first_line:0:80}"
+  return 0
+}
+
 # ---------------------------------------------------------------------------
 # Dispatch
 # ---------------------------------------------------------------------------
@@ -1589,9 +1886,11 @@ case "$cmd" in
   idea-sync)         cmd_idea_sync "$@" ;;
   idea-migrate)      cmd_idea_migrate "$@" ;;
   idea-setup)        cmd_idea_setup "$@" ;;
+  idea-upgrade)      cmd_idea_upgrade "$@" ;;
+  title-from-body)   cmd_title_from_body "$@" ;;
   legacy-refs-scan)  cmd_legacy_refs_scan "$@" ;;
   *)
-    echo "Usage: docs-check.sh {status|validate|recommend|audit-session|config-get|list-specs|activate|complete|land|idea-add|idea-list|idea-count|idea-update|idea-sync|idea-migrate|idea-setup|legacy-refs-scan} [args...]" >&2
+    echo "Usage: docs-check.sh {status|validate|recommend|audit-session|config-get|list-specs|activate|complete|land|idea-add|idea-list|idea-count|idea-update|idea-sync|idea-migrate|idea-setup|idea-upgrade|title-from-body|legacy-refs-scan} [args...]" >&2
     exit 1
     ;;
 esac

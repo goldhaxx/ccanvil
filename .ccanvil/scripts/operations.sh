@@ -37,6 +37,7 @@ is_valid_operation() {
     idea.add|idea.list|idea.triage|idea.sync) return 0 ;;
     idea.promote|idea.defer|idea.dismiss|idea.merge) return 0 ;;
     idea.review-icebox) return 0 ;;
+    work.resolve) return 0 ;;
     *) return 1 ;;
   esac
 }
@@ -183,6 +184,23 @@ operation_group() {
 local_adapter() {
   local op="$1"
   local cmd="" output_contract=""
+
+  # work.resolve emits a direct identity shape (not the wrapped invocation
+  # shape used by other ops) — it IS the result, not a plan to fetch one.
+  if [[ "$op" == "work.resolve" ]]; then
+    local wid="$OP_ARGS"
+    # Strip explicit `local:` prefix if caller used it.
+    [[ "$wid" == local:* ]] && wid="${wid#local:}"
+    if [[ -z "$wid" ]]; then
+      echo "ERROR: work.resolve requires a work id argument" >&2
+      exit 1
+    fi
+    local slug
+    slug=$(slug_from_work_id "$wid")
+    jq -n --arg id "$wid" --arg slug "$slug" \
+      '{"provider":"local","id":$id,"slug":$slug,"url":""}'
+    return 0
+  fi
 
   case "$op" in
     # --- backlog ---
@@ -331,15 +349,46 @@ linear_state_id() {
   echo "$provider_config" | jq -r --arg r "$role" '.state_ids[$r] // ""'
 }
 
+# slug_from_work_id — derive a filesystem-safe, branch-safe slug from a work id.
+# Lowercases alpha; replaces any character outside [a-z0-9-] with a single `-`;
+# collapses runs of `-`; trims leading/trailing `-`. Deterministic, provider-
+# agnostic. Examples:
+#   BTS-130           → bts-130
+#   idea-29           → idea-29
+#   owner/repo#123    → owner-repo-123
+slug_from_work_id() {
+  local id="$1"
+  echo "$id" \
+    | tr '[:upper:]' '[:lower:]' \
+    | sed -e 's/[^a-z0-9-]\{1,\}/-/g' -e 's/--*/-/g' -e 's/^-//' -e 's/-$//'
+}
+
 linear_mcp_adapter() {
   local op="$1" provider_config="$2" op_args="$3"
   local tool="" output_contract="" field_map=""
-  local project team idea_label idea_status icebox_status
+  local project team idea_label idea_status icebox_status workspace
   project=$(echo "$provider_config" | jq -r '.project // ""')
   team=$(echo "$provider_config" | jq -r '.team // ""')
   idea_label=$(echo "$provider_config" | jq -r '.idea_label // "idea"')
   idea_status=$(echo "$provider_config" | jq -r '.idea_status // "Idea"')
   icebox_status=$(echo "$provider_config" | jq -r '.icebox_status // "Icebox"')
+  workspace=$(echo "$provider_config" | jq -r '.workspace // ""')
+
+  # work.resolve emits a direct identity shape (see local_adapter for rationale).
+  if [[ "$op" == "work.resolve" ]]; then
+    local wid="$op_args"
+    [[ "$wid" == linear:* ]] && wid="${wid#linear:}"
+    if [[ -z "$wid" ]]; then
+      echo "ERROR: work.resolve requires a work id argument" >&2
+      exit 1
+    fi
+    local slug url=""
+    slug=$(slug_from_work_id "$wid")
+    [[ -n "$workspace" ]] && url="https://linear.app/${workspace}/issue/${wid}"
+    jq -n --arg id "$wid" --arg slug "$slug" --arg url "$url" \
+      '{"provider":"linear","id":$id,"slug":$slug,"url":$url}'
+    return 0
+  fi
 
   case "$op" in
     backlog.list)
@@ -566,37 +615,60 @@ cmd_resolve() {
     exit 1
   fi
 
+  # work.resolve: explicit <provider>:<id> prefix overrides routing config.
+  # Recognized providers: linear, local. Unknown prefixes fall through to
+  # normal routing (the id is treated as opaque by the provider adapter).
+  local work_override=""
+  if [[ "$op" == "work.resolve" && "$OP_ARGS" == *:* ]]; then
+    local prefix="${OP_ARGS%%:*}"
+    case "$prefix" in
+      linear|local) work_override="$prefix" ;;
+    esac
+  fi
+
   # Read config (sets CONFIG_FILE or leaves empty)
   read_config
 
-  # No config or no integrations key → local adapter
-  if [[ -z "$CONFIG_FILE" ]]; then
-    local_adapter "$op"
-    return 0
+  # Determine routing: explicit prefix > routing.<group> > routing.idea (for
+  # work group, since work operations share the idea provider) > local.
+  local routed_provider=""
+  if [[ -n "$work_override" ]]; then
+    routed_provider="$work_override"
+  elif [[ -z "$CONFIG_FILE" ]]; then
+    routed_provider="local"
+  else
+    local group
+    group=$(operation_group "$op")
+    routed_provider=$(jq -r --arg g "$group" '.integrations.routing[$g] // ""' "$CONFIG_FILE")
+    if [[ -z "$routed_provider" && "$group" == "work" ]]; then
+      routed_provider=$(jq -r '.integrations.routing.idea // ""' "$CONFIG_FILE")
+    fi
+    [[ -z "$routed_provider" ]] && routed_provider="local"
   fi
-
-  # Check for integrations.routing.<group>
-  local group
-  group=$(operation_group "$op")
-  local routed_provider
-  routed_provider=$(jq -r --arg g "$group" '.integrations.routing[$g] // "local"' "$CONFIG_FILE")
 
   if [[ "$routed_provider" == "local" ]]; then
     local_adapter "$op"
     return 0
   fi
 
-  # Look up the provider config
-  local provider_config
-  provider_config=$(jq -c --arg p "$routed_provider" '.integrations.providers[$p] // null' "$CONFIG_FILE")
+  # Non-local provider. Look up provider config (may be absent when the
+  # explicit prefix override is used without a config file — adapters handle
+  # that by emitting empty-url results for work.resolve).
+  local provider_config="{}"
+  if [[ -n "$CONFIG_FILE" ]]; then
+    provider_config=$(jq -c --arg p "$routed_provider" '.integrations.providers[$p] // {}' "$CONFIG_FILE")
+  fi
 
-  if [[ "$provider_config" == "null" ]]; then
+  # For standard (non-work.resolve) ops, provider MUST be configured.
+  if [[ "$op" != "work.resolve" && "$provider_config" == "{}" ]]; then
+    local group
+    group=$(operation_group "$op")
     echo "ERROR: provider \"$routed_provider\" is configured for $group but has no entry in integrations.providers" >&2
     exit 1
   fi
 
   local mechanism
-  mechanism=$(echo "$provider_config" | jq -r '.mechanism // "bash"')
+  mechanism=$(echo "$provider_config" | jq -r '.mechanism // "mcp"')
 
   external_adapter "$op" "$routed_provider" "$mechanism" "$provider_config" "$OP_ARGS"
 }

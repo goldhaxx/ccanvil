@@ -1178,6 +1178,47 @@ EOF
   rm -rf "$verify"
 }
 
+@test "land: safety net is a no-op when archive already Complete (AC-5)" {
+  cd "$PROJECT"
+  cat > "$PROJECT/docs/specs/demo.md" <<'EOF'
+# Feature: Demo
+
+> Feature: demo
+> Created: 1774200000
+> Status: Ready
+
+## Summary
+Demo feature.
+EOF
+
+  "$PROJECT/.ccanvil/scripts/docs-check.sh" activate demo "$PROJECT/docs" >/dev/null 2>&1
+
+  echo "work" > "$PROJECT/work.txt"
+  git -C "$PROJECT" add -A && git -C "$PROJECT" commit -q -m "feat: implement demo"
+
+  # Primary path: pr-cleanup flips archive to Complete on the branch.
+  "$PROJECT/.ccanvil/scripts/docs-check.sh" pr-cleanup "$PROJECT/docs" >/dev/null
+
+  git -C "$PROJECT" push -u origin claude/feat/demo 2>/dev/null
+
+  git -C "$PROJECT" checkout main -q
+  git -C "$PROJECT" merge --squash claude/feat/demo
+  git -C "$PROJECT" commit -q -m "feat(demo): implement demo (#1)"
+  git -C "$PROJECT" push origin main 2>/dev/null
+  git -C "$PROJECT" checkout claude/feat/demo -q
+
+  local pre_head
+  pre_head=$(git -C "$PROJECT" rev-parse main)
+
+  "$PROJECT/.ccanvil/scripts/docs-check.sh" land --force
+
+  local post_head
+  post_head=$(git -C "$PROJECT" rev-parse main)
+
+  # No new commit on main — safety net saw Complete, did nothing.
+  [ "$pre_head" = "$post_head" ]
+}
+
 @test "land: handles no remote gracefully" {
   cd "$PROJECT"
   git remote remove origin

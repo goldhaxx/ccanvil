@@ -1219,6 +1219,40 @@ EOF
   [ "$pre_head" = "$post_head" ]
 }
 
+@test "land: safety net skips non-claude branch names (AC-6)" {
+  cd "$PROJECT"
+  # A spec archive exists, but the branch doesn't match claude/<type>/<id>.
+  cat > "$PROJECT/docs/specs/lingering.md" <<'EOF'
+# Feature: Lingering
+
+> Feature: lingering
+> Created: 1774200000
+> Status: In Progress
+
+## Summary
+Unrelated spec.
+EOF
+  git -C "$PROJECT" add -A && git -C "$PROJECT" commit -q -m "seed lingering spec"
+  git -C "$PROJECT" push origin main 2>/dev/null
+
+  git -C "$PROJECT" checkout -b hotfix/foo -q
+  echo "hot" > "$PROJECT/hot.txt"
+  git -C "$PROJECT" add -A && git -C "$PROJECT" commit -q -m "fix: hot"
+  git -C "$PROJECT" push -u origin hotfix/foo 2>/dev/null
+
+  local pre_head
+  pre_head=$(git -C "$PROJECT" rev-parse main)
+
+  "$PROJECT/.ccanvil/scripts/docs-check.sh" land --force
+
+  local post_head
+  post_head=$(git -C "$PROJECT" rev-parse main)
+
+  # Safety net should not have fired — main HEAD unchanged, lingering spec untouched.
+  [ "$pre_head" = "$post_head" ]
+  grep -q "Status: In Progress" "$PROJECT/docs/specs/lingering.md"
+}
+
 @test "land: handles no remote gracefully" {
   cd "$PROJECT"
   git remote remove origin

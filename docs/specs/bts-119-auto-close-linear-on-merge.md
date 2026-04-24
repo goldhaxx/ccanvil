@@ -3,7 +3,7 @@
 > Feature: bts-119-auto-close-linear-on-merge
 > Work: linear:BTS-119
 > Created: 1777004190
-> Status: In Progress
+> Status: Complete
 
 ## Summary
 

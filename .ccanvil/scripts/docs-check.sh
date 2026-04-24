@@ -1287,6 +1287,61 @@ cmd_pr_guard() {
 }
 
 # ---------------------------------------------------------------------------
+# cmd_land_recover_branch — BTS-138: recover the landed feature branch name
+# from the last squash-merge commit's `(#<PR>)` suffix via `gh pr view`.
+#
+# Usage:
+#   docs-check.sh land-recover-branch
+#
+# Context: `gh pr merge --delete-branch` switches local HEAD to main and
+# deletes the feature branch before ccanvil code runs. When cmd_land is
+# invoked on main in that state, it cannot emit the AUTO-CLOSE marker via
+# the on-branch path (branch is already gone). This helper recovers the
+# branch name by inspecting the last squash-merge commit on main and
+# querying GitHub — feeding the result into cmd_auto_close_emit.
+#
+# On success: echoes the recovered branch name, exit 0.
+# On recoverable failure: empty stdout + WARN on stderr, exit 0 (never blocks).
+#
+# Runs inside the CWD's git repo. Caller is responsible for cd.
+# ---------------------------------------------------------------------------
+cmd_land_recover_branch() {
+  # If HEAD commit subject looks like a session-stasis write (from /stasis
+  # committed on main right before /compact), skip it and look at HEAD~1.
+  local subject
+  subject=$(git log -1 --format=%s 2>/dev/null)
+  if [[ "$subject" =~ ^docs:[[:space:]]*stasis ]]; then
+    subject=$(git log -1 --skip=1 --format=%s 2>/dev/null)
+  fi
+
+  # Extract PR number from the trailing `(#<N>)` suffix — GitHub's canonical
+  # squash-merge commit format.
+  if [[ ! "$subject" =~ \(#([0-9]+)\)$ ]]; then
+    echo "WARN: land on main — could not recover PR number from last commit" >&2
+    return 0
+  fi
+  local pr="${BASH_REMATCH[1]}"
+
+  # Require gh binary on PATH. Missing → WARN + skip (never fail).
+  if ! command -v gh >/dev/null 2>&1; then
+    echo "WARN: land on main — gh unavailable, skipping PR recovery" >&2
+    return 0
+  fi
+
+  # Query the PR for its head ref. Exit nonzero or empty result → WARN + skip.
+  # Avoid relying on $? after assignment — `if ! var=$(...)` captures the
+  # subshell exit cleanly in both bash and strict-mode callers.
+  local branch
+  if ! branch=$(gh pr view "$pr" --json headRefName -q .headRefName 2>/dev/null) \
+      || [[ -z "$branch" ]]; then
+    echo "WARN: land on main — could not recover landed branch via gh (PR #$pr)" >&2
+    return 0
+  fi
+
+  printf '%s\n' "$branch"
+}
+
+# ---------------------------------------------------------------------------
 # cmd_land — Switch to main, sync with remote, delete feature branch.
 #
 # Usage:
@@ -1304,8 +1359,11 @@ cmd_land() {
   branch=$(git branch --show-current 2>/dev/null)
 
   # Already on main: gh pr merge --delete-branch switches to main and deletes
-  # the local branch itself. In that case, just fast-forward local main to
-  # origin so subsequent work starts from a clean, in-sync state.
+  # the local branch itself. In that case, fast-forward local main to origin
+  # so subsequent work starts from a clean, in-sync state, then recover the
+  # landed branch via the last squash-merge + gh pr view and delegate to the
+  # existing cmd_auto_close_emit (BTS-138). This closes the determinism gap
+  # where /land on main was silently skipping the AUTO-CLOSE marker.
   if [[ "$branch" == "main" || "$branch" == "master" ]]; then
     if git remote get-url origin >/dev/null 2>&1; then
       git fetch origin 2>/dev/null
@@ -1319,6 +1377,15 @@ cmd_land() {
       fi
     else
       echo "Already on $branch. No remote configured."
+    fi
+
+    # BTS-138: recover landed branch from last squash-merge's (#<PR>) suffix
+    # and delegate to the existing AUTO-CLOSE emitter. Silent no-op on any
+    # recovery failure — never blocks forward progress.
+    local recovered_branch
+    recovered_branch=$(cmd_land_recover_branch)
+    if [[ -n "$recovered_branch" ]]; then
+      cmd_auto_close_emit "$recovered_branch"
     fi
     return 0
   fi
@@ -2425,6 +2492,7 @@ case "$cmd" in
   complete)          cmd_complete "$@" ;;
   pr-cleanup)        cmd_pr_cleanup "$@" ;;
   land)              cmd_land "$@" ;;
+  land-recover-branch) cmd_land_recover_branch "$@" ;;
   extract-work)      cmd_extract_work "$@" ;;
   auto-close-emit)   cmd_auto_close_emit "$@" ;;
   sync-check)        cmd_sync_check "$@" ;;

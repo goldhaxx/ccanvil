@@ -3,7 +3,7 @@
 > Feature: bts-129-ticket-find-by-title
 > Work: linear:BTS-129
 > Created: 1777054322
-> Status: Draft
+> Status: Complete
 
 ## Summary
 

@@ -39,6 +39,7 @@ is_valid_operation() {
     idea.review-icebox) return 0 ;;
     work.resolve) return 0 ;;
     ticket.transition) return 0 ;;
+    ticket.find-by-title) return 0 ;;
     *) return 1 ;;
   esac
 }
@@ -74,6 +75,10 @@ CMD=""
 OPERATION=""
 OP_ARGS=""
 OP_ARG2=""
+# EXACT is only consumed by ticket.find-by-title. Other operations ignore it
+# harmlessly. Do not add new operations that read $EXACT without also
+# renaming/scoping this variable.
+EXACT=0
 
 [[ $# -eq 0 ]] && usage
 
@@ -97,6 +102,8 @@ while [[ $# -gt 0 ]]; do
       ;;
     --project-dir)
       PROJECT_DIR="$2"; shift 2 ;;
+    --exact)
+      EXACT=1; shift ;;
     -h|--help)
       usage ;;
     *)
@@ -366,6 +373,14 @@ local_adapter() {
       # rather than silently succeeding with an empty command.
       echo "ERROR: provider 'local' does not support ticket.transition — configure a Linear provider in .claude/ccanvil.json to enable" >&2
       exit 1
+      ;;
+    ticket.find-by-title)
+      # Local-provider fast path — no Linear backend means no tickets to
+      # find. Emit a bash command that prints an empty array so callers get
+      # a deterministic `[]` and can proceed with the capture (e.g. /idea
+      # sync treating "no duplicates found" as green light).
+      cmd="echo '[]'"
+      output_contract='[]'
       ;;
   esac
 
@@ -675,6 +690,48 @@ linear_mcp_adapter() {
             "tool":$tool,
             "params":{"id":$id,"stateId":$state_id}
           },
+          "contract":{"output":$output}
+        }'
+      ;;
+    ticket.find-by-title)
+      # BTS-129 — resolve emits a list_issues invocation + a client-side jq
+      # filter template. Callers dispatch the MCP tool, then apply the
+      # template with `jq --arg title "<raw title>" -e "$template"` on the
+      # result. Splitting invocation from filter keeps operations.sh pure
+      # bash and the title-quoting safe (jq --arg, not string interpolation).
+      if [[ -z "$op_args" ]]; then
+        echo "ERROR: ticket.find-by-title requires a title as the first argument" >&2
+        echo "" >&2
+        echo "  Usage:" >&2
+        echo "    operations.sh resolve ticket.find-by-title \"<title>\" [--exact]" >&2
+        exit 1
+      fi
+      tool="mcp__claude_ai_Linear__list_issues"
+      output_contract='["id","title","status","url"]'
+      local filter_mode filter_template
+      # The template accepts either the wrapped Linear MCP response
+      # ({issues: [...], hasNextPage}) or a bare array — `(.issues? // .)`
+      # unwraps the former, passes the latter through.
+      # For status, use `.status // .state.name` so the template works
+      # against both the MCP-level shape (top-level `.status` string) and
+      # any internal GraphQL shape (`.state.name`) that older tooling emits.
+      if (( EXACT )); then
+        filter_mode="exact"
+        filter_template='[ (.issues? // .) | .[] | select(.title == $title) | {id, title, status: (.status // .state.name), url} ]'
+      else
+        filter_mode="substring"
+        filter_template='[ (.issues? // .) | .[] | select((.title | ascii_downcase) | contains($title | ascii_downcase)) | {id, title, status: (.status // .state.name), url} ]'
+      fi
+      jq -n --arg tool "$tool" --arg project "$project" --arg team "$team" \
+        --arg query "$op_args" --arg mode "$filter_mode" \
+        --arg template "$filter_template" --argjson output "$output_contract" \
+        '{
+          "provider":"linear","mechanism":"mcp",
+          "invocation":{
+            "tool":$tool,
+            "params":{"project":$project,"team":$team,"query":$query}
+          },
+          "client_filter":{"mode":$mode,"jq_template":$template,"title_arg":$query},
           "contract":{"output":$output}
         }'
       ;;

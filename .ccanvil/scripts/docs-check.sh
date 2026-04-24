@@ -748,14 +748,17 @@ cmd_list_specs() {
 # Fails if: feature-id not found, another spec is In Progress, worktree dirty.
 # ---------------------------------------------------------------------------
 cmd_activate() {
-  # Parse args: <feature-id> [--force-local-ahead] [docs-dir]
+  # Parse args: <feature-id> [--force-local-ahead|--force-sync] [docs-dir]
   # Flag can appear in any position among the positionals.
+  # BTS-122: --force-sync is the canonical name; --force-local-ahead is the
+  # legacy alias kept for backward compatibility. Both bypass ahead AND
+  # behind checks (union semantics — "I know main has drifted, I want it").
   local feature_id=""
   local docs_dir=""
-  local force_local_ahead=false
+  local force_sync=false
   while [[ $# -gt 0 ]]; do
     case "$1" in
-      --force-local-ahead) force_local_ahead=true; shift ;;
+      --force-local-ahead|--force-sync) force_sync=true; shift ;;
       *)
         if [[ -z "$feature_id" ]]; then feature_id="$1"
         elif [[ -z "$docs_dir" ]]; then docs_dir="$1"
@@ -764,7 +767,7 @@ cmd_activate() {
         ;;
     esac
   done
-  [[ -n "$feature_id" ]] || { echo "Usage: activate <feature-id> [--force-local-ahead] [docs-dir]" >&2; exit 1; }
+  [[ -n "$feature_id" ]] || { echo "Usage: activate <feature-id> [--force-sync] [docs-dir]" >&2; exit 1; }
   [[ -n "$docs_dir" ]] || docs_dir="$DEFAULT_DOCS_DIR"
   local specs_dir="$docs_dir/specs"
   local repo_root
@@ -772,27 +775,18 @@ cmd_activate() {
     repo_root=$(cd "$docs_dir/.." 2>/dev/null && pwd)
   }
 
-  # Pre-activate push-guard (AC-17/18/19): halt if local main is ahead of
-  # origin/main. Unpushed commits on main become part of the feature branch's
-  # history on push and cause divergence at squash-merge time. If origin/main
-  # doesn't exist (no remote, or unpushed remote), this check is a no-op.
-  if ! $force_local_ahead; then
-    if git -C "$repo_root" rev-parse --verify origin/main >/dev/null 2>&1; then
-      local ahead_hashes
-      ahead_hashes=$(git -C "$repo_root" rev-list --reverse --format="%h %s" --no-commit-header origin/main..main 2>/dev/null || true)
-      if [[ -n "$ahead_hashes" ]]; then
-        echo "ERROR: local main is ahead of origin/main — unpushed commits would leak into the feature branch." >&2
-        echo "" >&2
-        echo "Unpushed commits:" >&2
-        echo "$ahead_hashes" | sed 's/^/  /' >&2
-        echo "" >&2
-        echo "Resolve by pushing main first:" >&2
-        echo "  git push origin main" >&2
-        echo "" >&2
-        echo "Or, if these commits are session-boundary artifacts that you know you want on the branch:" >&2
-        echo "  bash .ccanvil/scripts/docs-check.sh activate $feature_id --force-local-ahead" >&2
-        exit 1
-      fi
+  # BTS-122: delegate main↔origin/main sync verification to cmd_sync_check.
+  # Exit code 0 = synced, 1 = ahead, 2 = behind. sync-check emits its own
+  # error messages on stderr; we just add the escape-hatch hint.
+  # `|| sc_rc=$?` captures the exit code without tripping `set -e`.
+  if ! $force_sync; then
+    local sc_rc=0
+    cmd_sync_check "$repo_root" || sc_rc=$?
+    if [[ "$sc_rc" -ne 0 ]]; then
+      echo "" >&2
+      echo "Or, if you know the drift is intentional:" >&2
+      echo "  bash .ccanvil/scripts/docs-check.sh activate $feature_id --force-sync" >&2
+      exit 1
     fi
   fi
 
@@ -861,6 +855,17 @@ cmd_activate() {
   fi
 
   local branch_name="claude/${spec_type}/${feature_id}"
+
+  # BTS-122 AC-4: halt if the target branch already exists locally. `checkout -b`
+  # fails generically; give the user a clear diagnostic and remediation options.
+  if git -C "$repo_root" rev-parse --verify "$branch_name" >/dev/null 2>&1; then
+    echo "ERROR: branch '$branch_name' already exists." >&2
+    echo "" >&2
+    echo "Resolve by one of:" >&2
+    echo "  git checkout $branch_name      # resume existing work" >&2
+    echo "  git branch -D $branch_name     # delete and re-activate (loses branch state)" >&2
+    exit 1
+  fi
 
   # Create branch
   git -C "$repo_root" checkout -b "$branch_name" 2>/dev/null || {

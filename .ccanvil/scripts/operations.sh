@@ -38,6 +38,7 @@ is_valid_operation() {
     idea.promote|idea.defer|idea.dismiss|idea.merge) return 0 ;;
     idea.review-icebox) return 0 ;;
     work.resolve) return 0 ;;
+    ticket.transition) return 0 ;;
     *) return 1 ;;
   esac
 }
@@ -69,6 +70,7 @@ EOF
 CMD=""
 OPERATION=""
 OP_ARGS=""
+OP_ARG2=""
 
 [[ $# -eq 0 ]] && usage
 
@@ -83,6 +85,11 @@ while [[ $# -gt 0 ]]; do
       # Next positional arg (if any) is the operation argument (e.g., issue ID)
       if [[ $# -gt 0 && "$1" != --* ]]; then
         OP_ARGS="$1"; shift
+      fi
+      # Optional third positional — used by two-arg operations like
+      # ticket.transition (<id> <role>). Single-arg ops leave OP_ARG2="".
+      if [[ $# -gt 0 && "$1" != --* ]]; then
+        OP_ARG2="$1"; shift
       fi
       ;;
     --project-dir)

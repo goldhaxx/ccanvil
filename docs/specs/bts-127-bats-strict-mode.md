@@ -3,7 +3,7 @@
 > Feature: bts-127-bats-strict-mode
 > Work: linear:BTS-127
 > Created: 1777054322
-> Status: In Progress
+> Status: Complete
 
 ## Summary
 

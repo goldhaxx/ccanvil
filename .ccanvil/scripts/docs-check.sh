@@ -748,14 +748,17 @@ cmd_list_specs() {
 # Fails if: feature-id not found, another spec is In Progress, worktree dirty.
 # ---------------------------------------------------------------------------
 cmd_activate() {
-  # Parse args: <feature-id> [--force-local-ahead] [docs-dir]
+  # Parse args: <feature-id> [--force-local-ahead|--force-sync] [docs-dir]
   # Flag can appear in any position among the positionals.
+  # BTS-122: --force-sync is the canonical name; --force-local-ahead is the
+  # legacy alias kept for backward compatibility. Both bypass ahead AND
+  # behind checks (union semantics — "I know main has drifted, I want it").
   local feature_id=""
   local docs_dir=""
-  local force_local_ahead=false
+  local force_sync=false
   while [[ $# -gt 0 ]]; do
     case "$1" in
-      --force-local-ahead) force_local_ahead=true; shift ;;
+      --force-local-ahead|--force-sync) force_sync=true; shift ;;
       *)
         if [[ -z "$feature_id" ]]; then feature_id="$1"
         elif [[ -z "$docs_dir" ]]; then docs_dir="$1"
@@ -764,7 +767,7 @@ cmd_activate() {
         ;;
     esac
   done
-  [[ -n "$feature_id" ]] || { echo "Usage: activate <feature-id> [--force-local-ahead] [docs-dir]" >&2; exit 1; }
+  [[ -n "$feature_id" ]] || { echo "Usage: activate <feature-id> [--force-sync] [docs-dir]" >&2; exit 1; }
   [[ -n "$docs_dir" ]] || docs_dir="$DEFAULT_DOCS_DIR"
   local specs_dir="$docs_dir/specs"
   local repo_root
@@ -772,27 +775,18 @@ cmd_activate() {
     repo_root=$(cd "$docs_dir/.." 2>/dev/null && pwd)
   }
 
-  # Pre-activate push-guard (AC-17/18/19): halt if local main is ahead of
-  # origin/main. Unpushed commits on main become part of the feature branch's
-  # history on push and cause divergence at squash-merge time. If origin/main
-  # doesn't exist (no remote, or unpushed remote), this check is a no-op.
-  if ! $force_local_ahead; then
-    if git -C "$repo_root" rev-parse --verify origin/main >/dev/null 2>&1; then
-      local ahead_hashes
-      ahead_hashes=$(git -C "$repo_root" rev-list --reverse --format="%h %s" --no-commit-header origin/main..main 2>/dev/null || true)
-      if [[ -n "$ahead_hashes" ]]; then
-        echo "ERROR: local main is ahead of origin/main — unpushed commits would leak into the feature branch." >&2
-        echo "" >&2
-        echo "Unpushed commits:" >&2
-        echo "$ahead_hashes" | sed 's/^/  /' >&2
-        echo "" >&2
-        echo "Resolve by pushing main first:" >&2
-        echo "  git push origin main" >&2
-        echo "" >&2
-        echo "Or, if these commits are session-boundary artifacts that you know you want on the branch:" >&2
-        echo "  bash .ccanvil/scripts/docs-check.sh activate $feature_id --force-local-ahead" >&2
-        exit 1
-      fi
+  # BTS-122: delegate main↔origin/main sync verification to cmd_sync_check.
+  # Exit code 0 = synced, 1 = ahead, 2 = behind. sync-check emits its own
+  # error messages on stderr; we just add the escape-hatch hint.
+  # `|| sc_rc=$?` captures the exit code without tripping `set -e`.
+  if ! $force_sync; then
+    local sc_rc=0
+    cmd_sync_check "$repo_root" || sc_rc=$?
+    if [[ "$sc_rc" -ne 0 ]]; then
+      echo "" >&2
+      echo "Or, if you know the drift is intentional:" >&2
+      echo "  bash .ccanvil/scripts/docs-check.sh activate $feature_id --force-sync" >&2
+      exit 1
     fi
   fi
 
@@ -861,6 +855,17 @@ cmd_activate() {
   fi
 
   local branch_name="claude/${spec_type}/${feature_id}"
+
+  # BTS-122 AC-4: halt if the target branch already exists locally. `checkout -b`
+  # fails generically; give the user a clear diagnostic and remediation options.
+  if git -C "$repo_root" rev-parse --verify "$branch_name" >/dev/null 2>&1; then
+    echo "ERROR: branch '$branch_name' already exists." >&2
+    echo "" >&2
+    echo "Resolve by one of:" >&2
+    echo "  git checkout $branch_name      # resume existing work" >&2
+    echo "  git branch -D $branch_name     # delete and re-activate (loses branch state)" >&2
+    exit 1
+  fi
 
   # Create branch
   git -C "$repo_root" checkout -b "$branch_name" 2>/dev/null || {
@@ -1101,6 +1106,133 @@ cmd_auto_close_emit() {
 }
 
 # ---------------------------------------------------------------------------
+# cmd_sync_check — Verify local main is in sync with origin/main (BTS-122).
+#
+# Usage:
+#   docs-check.sh sync-check <repo-root>
+#
+# Fetches origin/main (with http.lowSpeedTime=5 timeout) then compares local
+# main against the refreshed ref. Exit codes:
+#   0   in sync, or no-op (no origin remote, or no origin/main ref, or fetch
+#       failed and we warned but let the caller proceed on cached state)
+#   1   local AHEAD — unpushed commits would leak into a new feature branch
+#   2   local BEHIND — activate would cut from a stale baseline
+#
+# Graceful degradation: fetch failures emit `WARN: offline — skipping sync
+# check` on stderr and return 0. Matches BTS-119's "never block forward
+# progress on network flakes" posture.
+# ---------------------------------------------------------------------------
+cmd_sync_check() {
+  local repo_root="${1:?Usage: sync-check <repo-root>}"
+
+  # AC-9: no origin remote at all → no-op success.
+  if ! git -C "$repo_root" remote get-url origin >/dev/null 2>&1; then
+    return 0
+  fi
+
+  # AC-1/AC-3: fetch with short timeout; degrade to WARN on failure.
+  if ! git -C "$repo_root" \
+      -c http.lowSpeedLimit=1 -c http.lowSpeedTime=5 \
+      fetch origin main 2>/dev/null; then
+    echo "WARN: offline — skipping sync check" >&2
+    return 0
+  fi
+
+  # AC-9: fetch succeeded but origin/main ref still absent (empty remote).
+  if ! git -C "$repo_root" rev-parse --verify origin/main >/dev/null 2>&1; then
+    return 0
+  fi
+
+  local ahead behind
+  ahead=$(git -C "$repo_root" rev-list --reverse --format="%h %s" \
+            --no-commit-header origin/main..main 2>/dev/null || true)
+  behind=$(git -C "$repo_root" rev-list --count main..origin/main 2>/dev/null || echo "0")
+
+  # Ahead takes precedence over behind when diverged — unpushed leak is the
+  # more dangerous failure mode.
+  if [[ -n "$ahead" ]]; then
+    echo "ERROR: local main is AHEAD of origin/main — unpushed commits would leak into the feature branch." >&2
+    echo "" >&2
+    echo "Unpushed commits:" >&2
+    echo "$ahead" | sed 's/^/  /' >&2
+    echo "" >&2
+    echo "Resolve by pushing main first:" >&2
+    echo "  git push origin main" >&2
+    return 1
+  fi
+
+  if [[ "$behind" -gt 0 ]]; then
+    echo "ERROR: local main is BEHIND origin/main by $behind commit(s) — activate would cut from a stale baseline." >&2
+    echo "" >&2
+    echo "Resolve by pulling first:" >&2
+    echo "  git pull --ff-only origin main" >&2
+    return 2
+  fi
+
+  return 0
+}
+
+# ---------------------------------------------------------------------------
+# cmd_pr_guard — Verify the current feature branch is not behind its base
+# (origin/main) before finalizing a PR (BTS-122 AC-5).
+#
+# Usage:
+#   docs-check.sh pr-guard
+#
+# Invoked from the /pr skill's pre-flight block. Fetches origin/main and
+# checks that no commits exist in origin/main that aren't already in HEAD.
+# If the base has moved past the feature branch, a squash-merge will still
+# work but the PR body won't reflect the latest base — more importantly,
+# any CI that rebases against main will surface conflicts downstream.
+#
+# Exit codes:
+#   0   feature branch is up-to-date with base, OR no origin/no origin/main
+#       ref (no-op, matches cmd_sync_check AC-9), OR fetch failed (WARN:
+#       emitted, graceful degradation)
+#   1   feature branch is behind origin/main — rebase or merge to update
+# ---------------------------------------------------------------------------
+cmd_pr_guard() {
+  local repo_root
+  repo_root=$(git rev-parse --show-toplevel 2>/dev/null) || {
+    echo "ERROR: not inside a git worktree." >&2
+    exit 1
+  }
+
+  # No-op if no origin remote (fresh local-only repo).
+  if ! git -C "$repo_root" remote get-url origin >/dev/null 2>&1; then
+    return 0
+  fi
+
+  # Fetch with short timeout; degrade gracefully on failure.
+  if ! git -C "$repo_root" \
+      -c http.lowSpeedLimit=1 -c http.lowSpeedTime=5 \
+      fetch origin main 2>/dev/null; then
+    echo "WARN: offline — skipping pr-guard sync check" >&2
+    return 0
+  fi
+
+  # No-op if origin/main ref absent after fetch.
+  if ! git -C "$repo_root" rev-parse --verify origin/main >/dev/null 2>&1; then
+    return 0
+  fi
+
+  # Commits in origin/main not in HEAD → base has moved past feature branch.
+  local behind_count
+  behind_count=$(git -C "$repo_root" rev-list --count HEAD..origin/main 2>/dev/null || echo "0")
+
+  if [[ "$behind_count" -gt 0 ]]; then
+    echo "ERROR: feature branch is BEHIND origin/main by $behind_count commit(s) — the PR base has moved." >&2
+    echo "" >&2
+    echo "Resolve by one of:" >&2
+    echo "  git rebase origin/main         # linear history, preferred for draft PRs" >&2
+    echo "  git merge origin/main          # merge-commit alternative" >&2
+    return 1
+  fi
+
+  return 0
+}
+
+# ---------------------------------------------------------------------------
 # cmd_land — Switch to main, sync with remote, delete feature branch.
 #
 # Usage:
@@ -1154,14 +1286,19 @@ cmd_land() {
   }
   echo "Switched to main."
 
-  # Fetch and reset (if remote exists)
+  # Fetch and reset (if remote exists). BTS-122 AC-7: fetch failure degrades
+  # gracefully — emit WARN: and SKIP the hard reset so we don't blow away
+  # local main in favor of a stale cached ref (or no ref at all).
   if git remote get-url origin >/dev/null 2>&1; then
-    git fetch origin 2>/dev/null
-    echo "Fetched origin."
-    local sha
-    sha=$(git rev-parse --short origin/main 2>/dev/null || git rev-parse --short origin/master 2>/dev/null || echo "unknown")
-    git reset --hard "origin/main" 2>/dev/null || git reset --hard "origin/master" 2>/dev/null || true
-    echo "Main updated to $sha."
+    if git fetch origin 2>/dev/null; then
+      echo "Fetched origin."
+      local sha
+      sha=$(git rev-parse --short origin/main 2>/dev/null || git rev-parse --short origin/master 2>/dev/null || echo "unknown")
+      git reset --hard "origin/main" 2>/dev/null || git reset --hard "origin/master" 2>/dev/null || true
+      echo "Main updated to $sha."
+    else
+      echo "WARN: offline — skipping origin fetch and reset. Local main left at current HEAD." >&2
+    fi
   fi
 
   # Post-merge safety net: if the landed branch maps to a spec archive that's
@@ -2236,6 +2373,8 @@ case "$cmd" in
   land)              cmd_land "$@" ;;
   extract-work)      cmd_extract_work "$@" ;;
   auto-close-emit)   cmd_auto_close_emit "$@" ;;
+  sync-check)        cmd_sync_check "$@" ;;
+  pr-guard)          cmd_pr_guard "$@" ;;
   radar-gather)      cmd_radar_gather "$@" ;;
   idea-add)          cmd_idea_add "$@" ;;
   idea-list)         cmd_idea_list "$@" ;;

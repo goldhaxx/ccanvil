@@ -176,3 +176,24 @@ _seed_ideas_triage() {
   [ "$status" -eq 0 ]
   echo "$output" | jq -e '.last_compact_ts == null'
 }
+
+# ----------------------------------------------------------------------------
+# AC-9 + WARN-fix: marker file with trailing whitespace is still valid
+# ----------------------------------------------------------------------------
+
+@test "BTS-113 AC-9: .gitignore excludes .ccanvil/state/" {
+  local gitignore="$BATS_TEST_DIRNAME/../../.gitignore"
+  grep -q '\.ccanvil/state/' "$gitignore"
+}
+
+@test "BTS-113 WARN-fix: marker file with trailing whitespace still parses as integer" {
+  set -e
+  _seed_stasis 1700000000
+  mkdir -p "$PROJECT/.ccanvil/state"
+  # Write marker with trailing newline + trailing whitespace (simulates a
+  # double-write race or a hand-edited file).
+  printf '1700000100\n   \n' > "$PROJECT/.ccanvil/state/last-compact-ts"
+  run bash "$DOCS" recommend "$PROJECT/docs"
+  [ "$status" -eq 0 ]
+  echo "$output" | jq -e '.next_action | contains("/compact") | not'
+}

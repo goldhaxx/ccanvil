@@ -259,7 +259,9 @@ cmd_status() {
   project_root=$(dirname "$docs_dir")
   marker_path="$project_root/.ccanvil/state/last-compact-ts"
   if [[ -f "$marker_path" ]]; then
-    last_compact_ts=$(cat "$marker_path" 2>/dev/null || echo "")
+    # Strip whitespace (trailing newline from `date +%s >`, plus any stray
+    # spaces) so the regex check downstream is tight.
+    last_compact_ts=$(tr -d '[:space:]' < "$marker_path" 2>/dev/null || echo "")
   else
     last_compact_ts=""
   fi
@@ -566,7 +568,10 @@ cmd_recommend() {
     local marker_path="$project_root/.ccanvil/state/last-compact-ts"
     marker_ts=""
     if [[ -f "$marker_path" ]]; then
-      marker_ts=$(cat "$marker_path" 2>/dev/null || echo "")
+      # Same whitespace-stripping as cmd_status — defends against a marker
+      # file that accidentally picked up extra whitespace or a double-write
+      # race that appended a second line.
+      marker_ts=$(tr -d '[:space:]' < "$marker_path" 2>/dev/null || echo "")
     fi
 
     if [[ -n "$marker_ts" && "$marker_ts" =~ ^[0-9]+$ \

@@ -3,7 +3,7 @@
 > Feature: bts-128-ticket-transition
 > Work: linear:BTS-128
 > Created: 1776992519
-> Spec hash: 74756270
+> Spec hash: 65b0d666
 > Based on: docs/spec.md
 
 ## Objective

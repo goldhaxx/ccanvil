@@ -59,6 +59,9 @@ Operations:
   status.{get,update}
   pr.{create,list}
   review.run
+  idea.{add,list,triage,sync,promote,defer,dismiss,merge,review-icebox}
+  work.resolve <ref>
+  ticket.transition <id> <role>
 EOF
   exit 2
 }

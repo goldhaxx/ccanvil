@@ -79,10 +79,13 @@ _local_config() {
 
 @test "BTS-128 AC-1: ticket.transition is a registered operation" {
   _linear_config_with_state_ids
-  # Single-arg invocation isolates the is_valid_operation check from the
-  # multi-arg parser (Step 2 extends the parser). Without registration,
-  # cmd_resolve emits `ERROR: unknown operation "ticket.transition"`.
-  run bash "$OPS" resolve ticket.transition BTS-1 --project-dir "$PROJECT"
+  # Isolate the is_valid_operation check: invoke with both args so we
+  # exercise the full happy path rather than fall into the (correct but
+  # unrelated) "role required" error path. Without registration,
+  # cmd_resolve emits `ERROR: unknown operation "ticket.transition"`
+  # and exits non-zero BEFORE the adapter runs.
+  run bash "$OPS" resolve ticket.transition BTS-1 backlog --project-dir "$PROJECT"
+  [ "$status" -eq 0 ]
   [[ ! "$output" =~ "unknown operation" ]]
 }
 

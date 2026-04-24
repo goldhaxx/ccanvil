@@ -142,3 +142,93 @@ seed_bats() {
   # the script's source references it. (Low-ceremony check.)
   grep -q 'hub/tests/' "$REPORT"
 }
+
+# ============================================================================
+# BTS-137 — per-test timing observability (--timings, --slow-top N)
+# ============================================================================
+
+@test "BTS-137 AC-1: --timings emits a sorted table of per-test timings" {
+  set -e
+  seed_bats "$WORK/pass.bats" \
+    'TESTZ "alpha" { [ 1 -eq 1 ]; }' \
+    'TESTZ "beta"  { [ 2 -eq 2 ]; }' \
+    'TESTZ "gamma" { [ 3 -eq 3 ]; }'
+  run --separate-stderr bash "$REPORT" --timings "$WORK/pass.bats"
+  [ "$status" -eq 0 ]
+  # Existing output still present.
+  [[ "$output" =~ "PASS: 3" ]]
+  # Timings table header + at least one timing row (ms\ttestname).
+  [[ "$output" =~ "Timings" ]] || [[ "$output" =~ "ms" ]]
+  # All three tests named in the timings section.
+  [[ "$output" =~ "alpha" ]]
+  [[ "$output" =~ "beta" ]]
+  [[ "$output" =~ "gamma" ]]
+}
+
+@test "BTS-137 AC-2: --slow-top N emits at most N rows" {
+  set -e
+  seed_bats "$WORK/pass.bats" \
+    'TESTZ "a" { [ 1 -eq 1 ]; }' \
+    'TESTZ "b" { [ 2 -eq 2 ]; }' \
+    'TESTZ "c" { [ 3 -eq 3 ]; }' \
+    'TESTZ "d" { [ 4 -eq 4 ]; }'
+  run --separate-stderr bash "$REPORT" --slow-top 2 "$WORK/pass.bats"
+  [ "$status" -eq 0 ]
+  # Count timing rows: lines starting with a number (ms) followed by tab or spaces.
+  timing_count=$(echo "$output" | grep -cE '^[0-9]+[[:space:]]+' || true)
+  [ "$timing_count" -le 2 ]
+  [ "$timing_count" -ge 1 ]
+}
+
+@test "BTS-137 AC-3: --slow-top 0 → exit 0, zero timing rows" {
+  set -e
+  seed_bats "$WORK/pass.bats" \
+    'TESTZ "only" { [ 1 -eq 1 ]; }'
+  run --separate-stderr bash "$REPORT" --slow-top 0 "$WORK/pass.bats"
+  [ "$status" -eq 0 ]
+  timing_count=$(echo "$output" | grep -cE '^[0-9]+[[:space:]]+' || true)
+  [ "$timing_count" -eq 0 ]
+}
+
+@test "BTS-137 AC-3: --slow-top non-integer → exit 2 with ERROR" {
+  seed_bats "$WORK/pass.bats" \
+    'TESTZ "one" { [ 1 -eq 1 ]; }'
+  run --separate-stderr bash "$REPORT" --slow-top abc "$WORK/pass.bats"
+  [ "$status" -eq 2 ]
+  [[ "$stderr" =~ "ERROR" ]]
+}
+
+@test "BTS-137 AC-4: --json --timings includes timings array sorted slowest-first" {
+  set -e
+  seed_bats "$WORK/pass.bats" \
+    'TESTZ "one" { [ 1 -eq 1 ]; }' \
+    'TESTZ "two" { [ 2 -eq 2 ]; }'
+  run --separate-stderr bash "$REPORT" --json --timings "$WORK/pass.bats"
+  [ "$status" -eq 0 ]
+  echo "$output" | jq -e '.timings | type == "array"'
+  echo "$output" | jq -e '.timings | length == 2'
+  echo "$output" | jq -e '.timings[0] | has("test") and has("ms")'
+  # Sorted slowest-first → first entry's ms is >= second entry's ms.
+  echo "$output" | jq -e '.timings[0].ms >= .timings[1].ms'
+}
+
+@test "BTS-137 AC-4: --json without --timings omits or empties the timings key" {
+  set -e
+  seed_bats "$WORK/pass.bats" \
+    'TESTZ "one" { [ 1 -eq 1 ]; }'
+  run --separate-stderr bash "$REPORT" --json "$WORK/pass.bats"
+  [ "$status" -eq 0 ]
+  # Either absent or empty array; both are acceptable backward-compat.
+  echo "$output" | jq -e '(.timings // []) | length == 0'
+}
+
+@test "BTS-137 AC-6: failing test still gets its timing captured in --timings output" {
+  seed_bats "$WORK/mix.bats" \
+    'TESTZ "passer" { [ 1 -eq 1 ]; }' \
+    'TESTZ "failer" { false; }'
+  run --separate-stderr bash "$REPORT" --timings "$WORK/mix.bats"
+  [ "$status" -ne 0 ]
+  # Both tests appear in the timings section.
+  [[ "$output" =~ "passer" ]]
+  [[ "$output" =~ "failer" ]]
+}

@@ -3,7 +3,7 @@
 > Feature: bts-138-land-post-merge-branch-recovery
 > Work: linear:BTS-138
 > Created: 1777063437
-> Status: Draft
+> Status: Complete
 
 ## Summary
 

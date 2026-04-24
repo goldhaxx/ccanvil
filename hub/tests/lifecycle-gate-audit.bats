@@ -3,8 +3,12 @@
 # - cmd_sync_check helper (AC-1, 3, 9)
 # - cmd_pr_guard subcommand (AC-5)
 # - cmd_land offline-degradation WARN: (AC-7)
+# - error-format shape (AC-8) — uses `run --separate-stderr` so assertions
+#   inspect stderr directly instead of relying on merged $output.
 # Existing cmd_activate guard tests live in activate-push-guard.bats; this file
 # covers the NEW helpers added by BTS-122.
+
+bats_require_minimum_version 1.5.0
 
 DOCS="$BATS_TEST_DIRNAME/../../.ccanvil/scripts/docs-check.sh"
 
@@ -181,9 +185,9 @@ _assert_error_format() {
   cd "$REPO"
   git -c user.email=t@t -c user.name=t commit -q --allow-empty -m "local-only"
 
-  run bash "$DOCS" sync-check "$REPO"
+  run --separate-stderr bash "$DOCS" sync-check "$REPO"
   [ "$status" -eq 1 ]
-  _assert_error_format "$output"
+  _assert_error_format "$stderr"
 }
 
 @test "BTS-122 AC-8: sync-check BEHIND error follows ERROR: + bullets shape" {
@@ -195,9 +199,9 @@ _assert_error_format() {
   git -C "$SIDE" push -q origin main
   rm -rf "$SIDE"
 
-  run bash "$DOCS" sync-check "$REPO"
+  run --separate-stderr bash "$DOCS" sync-check "$REPO"
   [ "$status" -eq 2 ]
-  _assert_error_format "$output"
+  _assert_error_format "$stderr"
 }
 
 @test "BTS-122 AC-8: pr-guard BEHIND error follows ERROR: + bullets shape" {
@@ -212,9 +216,9 @@ _assert_error_format() {
   git -C "$SIDE" push -q origin main
   rm -rf "$SIDE"
 
-  run bash "$DOCS" pr-guard
+  run --separate-stderr bash "$DOCS" pr-guard
   [ "$status" -eq 1 ]
-  _assert_error_format "$output"
+  _assert_error_format "$stderr"
 }
 
 # ===========================================================================

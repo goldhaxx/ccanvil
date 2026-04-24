@@ -3,7 +3,7 @@
 > Feature: bts-134-permissions-audit-json-contract
 > Work: linear:BTS-134
 > Created: 1777071790
-> Status: Draft
+> Status: Complete
 
 ## Summary
 

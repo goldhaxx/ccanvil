@@ -38,3 +38,4 @@ generated/
 docs/ideas.md
 .ccanvil/ideas-pending.log
 .ccanvil/ideas.log
+.ccanvil/state/

@@ -3,7 +3,7 @@
 > Feature: bts-113-stale-recommend
 > Work: linear:BTS-113
 > Created: 1777054322
-> Status: Draft
+> Status: Complete
 
 ## Summary
 

@@ -67,6 +67,20 @@ When you run `/recall` after `/compact` (or `/clear`), Claude reads these source
 
 It reports the state but does NOT start implementing. You say "Continue" when ready.
 
+## Recommend freshness (BTS-113)
+
+`docs-check.sh recommend` distinguishes *"session about to end"* from *"session just resumed after `/compact` + `/recall`"* via a filesystem marker at `.ccanvil/state/last-compact-ts` (epoch). The marker is written by a **PreCompact hook** (`.claude/hooks/post-compact-marker.sh`, registered in `.claude/settings.json` under `hooks.PreCompact`) that fires before every `/compact`.
+
+Decision logic when an aligned stasis exists and no spec is active:
+
+| State | Recommendation |
+|-------|----------------|
+| `marker >= stasis.last_updated` (compact already ran, stasis is stale) | **Forward action** — `/idea triage` if `.triage > 0`, else `/radar` |
+| `marker < stasis.last_updated` (stasis written AFTER last compact) | `/compact to wrap session` |
+| Marker absent (first session, fresh clone, hook didn't fire) | `/compact to wrap session` (safe fallback) |
+
+The marker lives in `.ccanvil/state/` which is gitignored — it's session-local machine state, never committed. `docs-check.sh status` surfaces the timestamp as `.last_compact_ts` (epoch or `null`) alongside `.stasis.last_updated` for observability.
+
 ## When to reset context
 
 | Situation | Action |

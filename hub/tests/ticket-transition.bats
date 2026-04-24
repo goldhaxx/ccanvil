@@ -166,3 +166,68 @@ _local_config() {
   [ "$status" -eq 0 ]
   echo "$output" | jq -e '.invocation.params.id == "BTS-1" and .invocation.params.stateId == "fixture-done-uuid"'
 }
+
+# ===========================================================================
+# Step 6 — Unknown role rejected (AC-7)
+# ===========================================================================
+
+@test "BTS-128 AC-7: unknown role rejected with vocabulary listing" {
+  _linear_config_with_state_ids
+  run bash "$OPS" resolve ticket.transition BTS-1 nonsense --project-dir "$PROJECT"
+  [ "$status" -ne 0 ]
+  # Error message must name the offending role AND enumerate the valid set
+  # so the user can self-correct without grepping the source.
+  [[ "$output" =~ "nonsense" ]]
+  [[ "$output" =~ "triage" ]]
+  [[ "$output" =~ "backlog" ]]
+  [[ "$output" =~ "done" ]]
+}
+
+# ===========================================================================
+# Step 7 — Missing args (AC-6)
+# ===========================================================================
+
+@test "BTS-128 AC-6: missing id exits with 'id required'" {
+  _linear_config_with_state_ids
+  run bash "$OPS" resolve ticket.transition --project-dir "$PROJECT"
+  [ "$status" -ne 0 ]
+  [[ "$output" =~ "ticket id" ]]
+}
+
+@test "BTS-128 AC-6: missing role exits with 'role required' (distinct from id error)" {
+  _linear_config_with_state_ids
+  run bash "$OPS" resolve ticket.transition BTS-1 --project-dir "$PROJECT"
+  [ "$status" -ne 0 ]
+  [[ "$output" =~ "role" ]]
+  # Must NOT match the id-required wording — errors are distinct.
+  [[ ! "$output" =~ "ticket id" ]]
+}
+
+# ===========================================================================
+# Step 8 — Unconfigured role fails loud (AC-5)
+# ===========================================================================
+
+@test "BTS-128 AC-5: role not in state_ids fails loud with role + config path" {
+  _linear_config_missing_done
+  run bash "$OPS" resolve ticket.transition BTS-1 done --project-dir "$PROJECT"
+  [ "$status" -ne 0 ]
+  [[ "$output" =~ "done" ]]
+  [[ "$output" =~ "state_ids" ]]
+  # No silent-success payload when the lookup fails — config gap must
+  # surface as an error the user can action.
+  [[ ! "$output" =~ "mcp__claude_ai_Linear__save_issue" ]]
+}
+
+# ===========================================================================
+# Step 9 — Local provider returns unsupported (AC-9)
+# ===========================================================================
+
+@test "BTS-128 AC-9: ticket.transition on local provider exits with 'unsupported'" {
+  _local_config
+  run bash "$OPS" resolve ticket.transition BTS-1 backlog --project-dir "$PROJECT"
+  [ "$status" -ne 0 ]
+  [[ "$output" =~ "local" ]]
+  [[ "$output" =~ "ticket.transition" ]]
+  # No MCP payload leaks through — capability gap is explicit.
+  [[ ! "$output" =~ "mcp__claude_ai_Linear__save_issue" ]]
+}

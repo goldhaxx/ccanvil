@@ -357,6 +357,13 @@ local_adapter() {
       cmd=".ccanvil/scripts/docs-check.sh idea-update ${OP_ARGS} duplicate"
       output_contract='["uid","status"]'
       ;;
+    ticket.transition)
+      # ticket.transition is a Linear-specific primitive (state-ID based).
+      # On local-provider nodes there is no equivalent surface — fail loud
+      # rather than silently succeeding with an empty command.
+      echo "ERROR: provider 'local' does not support ticket.transition — configure a Linear provider in .claude/ccanvil.json to enable" >&2
+      exit 1
+      ;;
   esac
 
   jq -n --arg cmd "$cmd" --argjson output "$output_contract" \
@@ -629,8 +636,34 @@ linear_mcp_adapter() {
       # caller dispatches a single MCP call with no manual UUID paste.
       tool="mcp__claude_ai_Linear__save_issue"
       output_contract='["id","status"]'
+      # Distinct error messages for missing id vs missing role so the
+      # user knows which argument to supply. Id check first (positionally).
+      if [[ -z "$op_args" ]]; then
+        echo "ERROR: ticket.transition requires a ticket id as the first argument (e.g. ticket.transition BTS-128 done)" >&2
+        exit 1
+      fi
+      if [[ -z "$OP_ARG2" ]]; then
+        echo "ERROR: ticket.transition requires a role as the second argument. Valid roles: triage, backlog, icebox, canceled, duplicate, done" >&2
+        exit 1
+      fi
+      # Validate role against the fixed vocabulary BEFORE config lookup —
+      # fail loud here so an unknown role never silently degrades to an
+      # empty stateId that MCP would reject with an opaque 400.
+      case "$OP_ARG2" in
+        triage|backlog|icebox|canceled|duplicate|done) ;;
+        *)
+          echo "ERROR: unknown role '$OP_ARG2' for ticket.transition. Valid roles: triage, backlog, icebox, canceled, duplicate, done" >&2
+          exit 1
+          ;;
+      esac
       local t_state_id
       t_state_id=$(linear_state_id "$provider_config" "$OP_ARG2")
+      if [[ -z "$t_state_id" ]]; then
+        # Fail loud on missing config rather than silently emitting an
+        # empty stateId — the wrapper's contract is UUID-or-error.
+        echo "ERROR: role '$OP_ARG2' is not configured in integrations.providers.linear.state_ids — add it to .claude/ccanvil.json or .claude/ccanvil.local.json" >&2
+        exit 1
+      fi
       jq -n --arg tool "$tool" --arg id "$op_args" --arg state_id "$t_state_id" \
         --argjson output "$output_contract" \
         '{

@@ -198,3 +198,39 @@ MD
   [ "$status" -eq 0 ]
   [ -z "$output" ]
 }
+
+# ===========================================================================
+# Phase 4 — /idea sync tolerates the ticket.transition op shape (AC-4)
+# ===========================================================================
+# cmd_idea_sync is shape-agnostic (enumerates + acks by ts), so the new
+# op:"ticket.transition" entry type doesn't need script changes — but we
+# assert the round-trip explicitly so a future refactor that adds op-filtering
+# must account for it.
+
+@test "BTS-119 AC-4: idea-sync lists ticket.transition entries without error" {
+  cat > "$PROJECT/.ccanvil/ideas-pending.log" <<'JSONL'
+{"op":"ticket.transition","args":{"id":"BTS-119","role":"done"},"ts":1777004190}
+JSONL
+  run bash "$DOCS" idea-sync "$PROJECT"
+  [ "$status" -eq 0 ]
+  echo "$output" | jq -e '
+    .pending == 1
+    and (.entries | length == 1)
+    and .entries[0].op == "ticket.transition"
+    and .entries[0].args.id == "BTS-119"
+    and .entries[0].args.role == "done"
+  '
+}
+
+@test "BTS-119 AC-4: idea-sync --ack removes a ticket.transition entry" {
+  cat > "$PROJECT/.ccanvil/ideas-pending.log" <<'JSONL'
+{"op":"ticket.transition","args":{"id":"BTS-119","role":"done"},"ts":1777004190}
+{"op":"add","args":{"title":"keep me"},"ts":1777004200}
+JSONL
+  run bash "$DOCS" idea-sync --ack 1777004190 "$PROJECT"
+  [ "$status" -eq 0 ]
+  [[ "$output" =~ "ACKED: 1777004190" ]]
+  # The other entry survives.
+  run bash "$DOCS" idea-sync "$PROJECT"
+  echo "$output" | jq -e '.pending == 1 and .entries[0].op == "add"'
+}

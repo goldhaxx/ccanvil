@@ -145,6 +145,7 @@ Only meaningful when the Linear provider is configured and `.ccanvil/ideas-pendi
    - `promote` → `save_issue` with id + stateId(backlog) + priority.
    - `defer` / `dismiss` → `save_issue` with id + target stateId.
    - `merge` → `save_issue` with id + stateId(duplicate) + duplicateOf.
+   - `ticket.transition` → re-resolve `ticket.transition <args.id> <args.role>` via `operations.sh`; dispatch the returned `save_issue` with `id + stateId` from `.invocation.params`. Queued by `/land` (BTS-119) when auto-close MCP fails. Idempotent — Linear's API accepts transitions to the current state without error.
 4. On success per entry: `docs-check.sh idea-sync --ack <ts>`.
 5. Report: `SYNCED: N / PENDING: M`.
 

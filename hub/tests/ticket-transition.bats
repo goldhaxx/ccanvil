@@ -102,6 +102,7 @@ _local_config() {
 }
 
 @test "BTS-128 AC-8: single-arg operations still parse unchanged (regression)" {
+  set -e
   _local_config
   # backlog.get is a long-standing single-arg op. The parser extension
   # MUST NOT change its behavior — emits the same JSON shape with
@@ -117,6 +118,7 @@ _local_config() {
 # ===========================================================================
 
 @test "BTS-128 AC-2: resolver emits Linear save_issue payload with id + stateId" {
+  set -e
   _linear_config_with_state_ids
   run bash "$OPS" resolve ticket.transition BTS-1 backlog --project-dir "$PROJECT"
   [ "$status" -eq 0 ]

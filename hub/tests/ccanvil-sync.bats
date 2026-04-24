@@ -570,6 +570,7 @@ EOF
 # =========================================================================
 
 @test "init: creates lockfile with correct structure" {
+  set -e
   cd "$NODE"
   [ -f "$NODE/.ccanvil/ccanvil.lock" ]
 
@@ -609,6 +610,7 @@ EOF
 }
 
 @test "init: files matching tracked patterns are in lockfile" {
+  set -e
   cd "$NODE"
 
   # Our setup created tdd.md, catchup.md, spec-writer.md — all should be tracked
@@ -634,6 +636,7 @@ EOF
 # =========================================================================
 
 @test "status --json: outputs valid JSON with required fields" {
+  set -e
   cd "$NODE"
   run bash "$NODE/.ccanvil/scripts/ccanvil-sync.sh" status --json
   [ "$status" -eq 0 ]
@@ -644,6 +647,7 @@ EOF
 }
 
 @test "status --json: files array has correct structure" {
+  set -e
   cd "$NODE"
   run bash "$NODE/.ccanvil/scripts/ccanvil-sync.sh" status --json
   [ "$status" -eq 0 ]
@@ -1335,6 +1339,7 @@ EOF
 # =========================================================================
 
 @test "migrate: copies hub files and re-inits lockfile" {
+  set -e
   # Create a fresh empty project (simulating a stale downstream)
   local FRESH
   FRESH=$(mktemp -d)
@@ -2024,6 +2029,7 @@ EOF
 }
 
 @test "broadcast: updates registry with last_synced fields" {
+  set -e
   cd "$NODE"
 
   # Update a hub file to trigger sync

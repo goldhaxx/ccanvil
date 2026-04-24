@@ -68,6 +68,7 @@ teardown() {
 # =========================================================================
 
 @test "check outputs files array with per-file entries" {
+  set -e
   run bash "$SCRIPT" check --project-dir "$FIXTURE" $NO_GLOBAL
   [ "$status" -eq 0 ]
   echo "$output" | jq -e '.files | type == "array"'
@@ -321,6 +322,7 @@ teardown() {
 }
 
 @test "missing project CLAUDE.md produces warning entry" {
+  set -e
   rm "$FIXTURE/CLAUDE.md"
   run bash "$SCRIPT" check --project-dir "$FIXTURE" $NO_GLOBAL
   [ "$status" -eq 0 ]
@@ -354,6 +356,7 @@ teardown() {
 }
 
 @test "CLAUDE.md over 80 lines produces line count warning" {
+  set -e
   # Create a CLAUDE.md with 85 lines
   for i in $(seq 1 85); do echo "line $i"; done > "$FIXTURE/CLAUDE.md"
   run bash "$SCRIPT" check --project-dir "$FIXTURE" $NO_GLOBAL

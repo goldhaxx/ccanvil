@@ -3,7 +3,7 @@
 > Feature: bts-137-per-test-timing-observability
 > Work: linear:BTS-137
 > Created: 1777068865
-> Status: Draft
+> Status: Complete
 
 ## Summary
 

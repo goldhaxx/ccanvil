@@ -76,9 +76,14 @@ Use `.ccanvil/scripts/bats-report.sh` when you need tail + pass/fail counts. It 
 bash .ccanvil/scripts/bats-report.sh --parallel           # fastest (GNU parallel required)
 bash .ccanvil/scripts/bats-report.sh --json <path>        # structured output for skills
 bash .ccanvil/scripts/bats-report.sh -f 'some filter'     # bats args pass through
+bash .ccanvil/scripts/bats-report.sh --timings            # BTS-137: per-test timing table (slowest first)
+bash .ccanvil/scripts/bats-report.sh --slow-top 10        # BTS-137: top 10 slowest tests only
+bash .ccanvil/scripts/bats-report.sh --json --timings     # BTS-137: timings[] array in JSON output
 ```
 
 Parallelism (`--parallel`) uses `bats --jobs N` where N = max(2, cpu/2). Requires GNU parallel: `brew install parallel` on macOS, `apt install parallel` on Debian/Ubuntu, `dnf install parallel` on Fedora. Falls back to serial with a WARN: if missing — CI runners without parallel installed silently run serially, so check CI logs if runs feel slow. See `.ccanvil/guide/command-reference.md` for full flag list.
+
+Per-test timings (`--timings`, BTS-137) add `bats -T` to the invocation and parse the `in Nms` suffix. Use `--slow-top N` when you want only the worst offenders — helpful for prioritizing fixture consolidation. `--json --timings` emits `{timings: [{test, ms}]}` sorted slowest-first.
 
 <!-- NODE-SPECIFIC-START -->
 <!-- Add project-specific content below this line. -->

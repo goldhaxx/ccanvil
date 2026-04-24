@@ -3,7 +3,7 @@
 > Feature: bts-139-linear-state-param-fix
 > Work: linear:BTS-139
 > Created: 1777064736
-> Status: Draft
+> Status: Complete
 
 ## Summary
 

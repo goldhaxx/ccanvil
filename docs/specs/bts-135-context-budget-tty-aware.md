@@ -3,7 +3,7 @@
 > Feature: bts-135-context-budget-tty-aware
 > Work: linear:BTS-135
 > Created: 1777072368
-> Status: In Progress
+> Status: Complete
 
 ## Summary
 

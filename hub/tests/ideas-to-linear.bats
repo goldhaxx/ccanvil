@@ -70,6 +70,7 @@ JSON
 # =========================================================================
 
 @test "AC-16: idea.add with no config resolves to local bash adapter" {
+  set -e
   run bash "$SCRIPT" resolve idea.add --project-dir "$PROJECT"
   [ "$status" -eq 0 ]
   echo "$output" | jq -e '.provider == "local"'
@@ -78,6 +79,7 @@ JSON
 }
 
 @test "AC-16: idea.list with no config resolves to local bash adapter" {
+  set -e
   run bash "$SCRIPT" resolve idea.list --project-dir "$PROJECT"
   [ "$status" -eq 0 ]
   echo "$output" | jq -e '.provider == "local"'
@@ -86,6 +88,7 @@ JSON
 }
 
 @test "AC-16: idea.triage with no config resolves to local bash adapter" {
+  set -e
   run bash "$SCRIPT" resolve idea.triage --project-dir "$PROJECT"
   [ "$status" -eq 0 ]
   echo "$output" | jq -e '.provider == "local"'
@@ -94,6 +97,7 @@ JSON
 }
 
 @test "AC-16: idea.sync with no config resolves to local bash no-op" {
+  set -e
   run bash "$SCRIPT" resolve idea.sync --project-dir "$PROJECT"
   [ "$status" -eq 0 ]
   echo "$output" | jq -e '.provider == "local"'
@@ -111,6 +115,7 @@ JSON
 # =========================================================================
 
 @test "AC-15: idea.add with Linear routing → save_issue MCP tool" {
+  set -e
   _linear_config
   run bash "$SCRIPT" resolve idea.add --project-dir "$PROJECT"
   [ "$status" -eq 0 ]
@@ -130,6 +135,7 @@ JSON
 }
 
 @test "AC-15: idea.list with Linear routing → list_issues MCP tool" {
+  set -e
   _linear_config
   run bash "$SCRIPT" resolve idea.list --project-dir "$PROJECT"
   [ "$status" -eq 0 ]
@@ -139,6 +145,7 @@ JSON
 }
 
 @test "AC-15: idea.triage with Linear routing → list_issues filtered to Idea state" {
+  set -e
   _linear_config
   run bash "$SCRIPT" resolve idea.triage --project-dir "$PROJECT"
   [ "$status" -eq 0 ]
@@ -148,6 +155,7 @@ JSON
 }
 
 @test "AC-15: idea.sync with Linear routing → local bash orchestration" {
+  set -e
   # sync drains the pending log — orchestration, not a single MCP call.
   # Resolves to local bash even when Linear is configured.
   _linear_config
@@ -215,6 +223,7 @@ JSON
 # =========================================================================
 
 @test "AC-16: idea-add writes JSONL to .ccanvil/ideas.log" {
+  set -e
   run bash "$DOCS_CHECK" idea-add "a new idea" "$PROJECT"
   [ "$status" -eq 0 ]
   [ -f "$PROJECT/.ccanvil/ideas.log" ]
@@ -231,6 +240,7 @@ JSON
 }
 
 @test "AC-16: idea-add with --title uses provided title, body unchanged" {
+  set -e
   run bash "$DOCS_CHECK" idea-add "a very long body with lots of context that exceeds eighty characters by a wide margin and keeps going" --title "concise summary" "$PROJECT"
   [ "$status" -eq 0 ]
   local line
@@ -253,6 +263,7 @@ JSON
 }
 
 @test "AC-16: idea-list reads JSONL and outputs JSON array" {
+  set -e
   cat > "$PROJECT/.ccanvil/ideas.log" <<'EOF'
 {"uid":"a1b2","created":1776000001,"status":"new","title":"first","body":"first"}
 {"uid":"c3d4","created":1776000002,"status":"promoted","title":"second","body":"second"}
@@ -284,6 +295,7 @@ EOF
 }
 
 @test "AC-16: idea-count returns totals by status" {
+  set -e
   cat > "$PROJECT/.ccanvil/ideas.log" <<'EOF'
 {"uid":"a1b2","created":1776000001,"status":"new","title":"a","body":"a"}
 {"uid":"c3d4","created":1776000002,"status":"new","title":"b","body":"b"}
@@ -301,6 +313,7 @@ EOF
 }
 
 @test "AC-16: idea-count on empty log returns all zeros" {
+  set -e
   run bash "$DOCS_CHECK" idea-count "$PROJECT"
   [ "$status" -eq 0 ]
   echo "$output" | jq -e '.total == 0'
@@ -336,6 +349,7 @@ EOF
 # =========================================================================
 
 @test "AC-3: hub ccanvil.json ships providers.linear defaults (no routing, no project/team)" {
+  set -e
   local hub_json="$BATS_TEST_DIRNAME/../../.claude/ccanvil.json"
   [ -f "$hub_json" ]
   # Provider defaults are present
@@ -348,6 +362,7 @@ EOF
 }
 
 @test "AC-30: hub ccanvil.json contains no node-specific fields (project/team)" {
+  set -e
   local hub_json="$BATS_TEST_DIRNAME/../../.claude/ccanvil.json"
   # No top-level mention of ccanvil project identity or team name
   ! jq -e '.integrations.providers.linear.project // null' "$hub_json" | grep -qv "null"
@@ -355,6 +370,7 @@ EOF
 }
 
 @test "AC-3: hub ccanvil.local.json pins hub's own project + team" {
+  set -e
   local hub_local="$BATS_TEST_DIRNAME/../../.claude/ccanvil.local.json"
   [ -f "$hub_local" ]
   jq -e '.integrations.routing.idea == "linear"' "$hub_local"
@@ -363,6 +379,7 @@ EOF
 }
 
 @test "AC-3: merged config combines shared defaults + node overrides" {
+  set -e
   # Fixture: copy hub configs into a temp PROJECT and merge.
   mkdir -p "$PROJECT/.claude"
   cp "$BATS_TEST_DIRNAME/../../.claude/ccanvil.json" "$PROJECT/.claude/ccanvil.json"
@@ -380,6 +397,7 @@ EOF
 }
 
 @test "AC-3: resolve idea.add on hub config → Linear MCP with full params" {
+  set -e
   mkdir -p "$PROJECT/.claude"
   cp "$BATS_TEST_DIRNAME/../../.claude/ccanvil.json" "$PROJECT/.claude/ccanvil.json"
   cp "$BATS_TEST_DIRNAME/../../.claude/ccanvil.local.json" "$PROJECT/.claude/ccanvil.local.json"
@@ -484,6 +502,7 @@ SKILL_FILE="$BATS_TEST_DIRNAME/../../.claude/skills/idea/SKILL.md"
 # =========================================================================
 
 @test "AC-10: idea-sync with empty/absent pending log reports zero" {
+  set -e
   run bash "$DOCS_CHECK" idea-sync "$PROJECT"
   [ "$status" -eq 0 ]
   echo "$output" | jq -e '.pending == 0'
@@ -491,6 +510,7 @@ SKILL_FILE="$BATS_TEST_DIRNAME/../../.claude/skills/idea/SKILL.md"
 }
 
 @test "AC-10: idea-sync lists pending entries as JSON" {
+  set -e
   cat > "$PROJECT/.ccanvil/ideas-pending.log" <<'EOF'
 {"op":"add","args":{"title":"first","body":"first idea"},"ts":1776000001}
 {"op":"add","args":{"title":"second","body":"second idea"},"ts":1776000002}
@@ -574,6 +594,7 @@ EOF
 }
 
 @test "AC-12: idea-migrate --extract emits JSONL intents without removing anything" {
+  set -e
   mkdir -p "$PROJECT/docs"
   cat > "$PROJECT/docs/ideas.md" <<'EOF'
 - [ ] a1b2 1776000001: extract me <!-- status:new -->
@@ -638,6 +659,7 @@ EOF
 }
 
 @test "idea-setup --provider linear writes routing.idea=linear + provider config" {
+  set -e
   run bash "$DOCS_CHECK" idea-setup --provider linear --team "BTS Team" --project "my-project" "$PROJECT"
   [ "$status" -eq 0 ]
   jq -e '.integrations.routing.idea == "linear"' "$PROJECT/.claude/ccanvil.local.json"
@@ -646,6 +668,7 @@ EOF
 }
 
 @test "idea-setup preserves pre-existing ccanvil.local.json fields (deep merge)" {
+  set -e
   mkdir -p "$PROJECT/.claude"
   cat > "$PROJECT/.claude/ccanvil.local.json" <<'JSON'
 {
@@ -699,6 +722,7 @@ JSON
 }
 
 @test "idea-setup --provider linear resolves cleanly via operations.sh" {
+  set -e
   bash "$DOCS_CHECK" idea-setup --provider linear --team "BTS Team" --project "my-project" "$PROJECT" >/dev/null
   # Also copy shared ccanvil.json so merge has the provider defaults
   cp "$BATS_TEST_DIRNAME/../../.claude/ccanvil.json" "$PROJECT/.claude/ccanvil.json"

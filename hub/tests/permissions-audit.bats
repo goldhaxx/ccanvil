@@ -41,6 +41,7 @@ EOF
 }
 
 @test "each entry has permission, source, and status fields" {
+  set -e
   cat > "$FIXTURE/settings.json" <<'EOF'
 {
   "permissions": {
@@ -56,6 +57,7 @@ EOF
 }
 
 @test "output includes danger, unreviewed, reviewed counts" {
+  set -e
   cat > "$FIXTURE/settings.json" <<'EOF'
 {
   "permissions": {
@@ -115,6 +117,7 @@ EOF
 }
 
 @test "duplicate entry in both files reports single entry with array source" {
+  set -e
   cat > "$FIXTURE/settings.json" <<'EOF'
 {
   "permissions": {
@@ -168,6 +171,7 @@ EOF
 # =========================================================================
 
 @test "broad wildcard flagged as DANGER" {
+  set -e
   cat > "$FIXTURE/settings.json" <<'EOF'
 {
   "permissions": {
@@ -315,6 +319,7 @@ EOF
 # =========================================================================
 
 @test "fully reviewed entry in log → REVIEWED status" {
+  set -e
   cat > "$FIXTURE/settings.json" <<'EOF'
 {
   "permissions": {
@@ -390,6 +395,7 @@ EOF
 }
 
 @test "DANGER overrides REVIEWED log status" {
+  set -e
   cat > "$FIXTURE/settings.json" <<'EOF'
 {
   "permissions": {
@@ -418,6 +424,7 @@ EOF
 }
 
 @test "mixed statuses counted correctly" {
+  set -e
   cat > "$FIXTURE/settings.json" <<'EOF'
 {
   "permissions": {

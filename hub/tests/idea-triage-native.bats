@@ -82,6 +82,7 @@ JSON
 }
 
 @test "Step 1: cmd_idea_list --status triage includes legacy status=new entries" {
+  set -e
   local ideas_log="$PROJECT/.ccanvil/ideas.log"
   cat > "$ideas_log" <<'EOF'
 {"uid":"l1","created":1,"status":"new","title":"legacy","body":"legacy"}
@@ -133,6 +134,7 @@ EOF
 }
 
 @test "Step 5: local idea.promote maps to idea-update <uid> backlog" {
+  set -e
   run bash "$OPS" resolve idea.promote --project-dir "$PROJECT"
   [ "$status" -eq 0 ]
   echo "$output" | jq -e '.provider == "local"'
@@ -158,6 +160,7 @@ EOF
 }
 
 @test "Step 5: Linear idea.promote returns save_issue with stateId=backlog" {
+  set -e
   _linear_config_with_state_ids
   run bash "$OPS" resolve idea.promote --project-dir "$PROJECT"
   [ "$status" -eq 0 ]
@@ -167,6 +170,7 @@ EOF
 }
 
 @test "Step 5: Linear idea.defer returns save_issue with stateId=icebox" {
+  set -e
   _linear_config_with_state_ids
   run bash "$OPS" resolve idea.defer --project-dir "$PROJECT"
   [ "$status" -eq 0 ]
@@ -227,6 +231,7 @@ EOF
 # =========================================================================
 
 @test "Step 11: idea-sync surfaces mixed-op entries (add + promote + defer)" {
+  set -e
   local pending="$PROJECT/.ccanvil/ideas-pending.log"
   cat > "$pending" <<'EOF'
 {"op":"add","args":{"title":"t1","body":"b1"},"ts":1776000001}
@@ -240,6 +245,7 @@ EOF
 }
 
 @test "Step 11: idea-sync --ack removes a specific entry by ts (regardless of op)" {
+  set -e
   local pending="$PROJECT/.ccanvil/ideas-pending.log"
   cat > "$pending" <<'EOF'
 {"op":"promote","args":{"id":"BTS-1","priority":3},"ts":1776000002}
@@ -320,6 +326,7 @@ EOF
 # =========================================================================
 
 @test "Step 8: cmd_idea_review_icebox returns only icebox items older than 60d" {
+  set -e
   local ideas_log="$PROJECT/.ccanvil/ideas.log"
   local now stale fresh
   now=$(date +%s)
@@ -344,6 +351,7 @@ EOF
 }
 
 @test "Step 8: idea.review-icebox Linear resolver includes icebox stateId + type filter" {
+  set -e
   _linear_config_with_state_ids
   run bash "$OPS" resolve idea.review-icebox --project-dir "$PROJECT"
   [ "$status" -eq 0 ]
@@ -356,6 +364,7 @@ EOF
 # =========================================================================
 
 @test "Step 7: idea-list default excludes icebox, canceled, duplicate" {
+  set -e
   local ideas_log="$PROJECT/.ccanvil/ideas.log"
   cat > "$ideas_log" <<'EOF'
 {"uid":"a","created":1,"status":"triage","title":"t","body":"t"}
@@ -375,6 +384,7 @@ EOF
 }
 
 @test "Step 7: idea-list --status icebox surfaces iceboxed items" {
+  set -e
   local ideas_log="$PROJECT/.ccanvil/ideas.log"
   cat > "$ideas_log" <<'EOF'
 {"uid":"a","created":1,"status":"triage","title":"t","body":"t"}
@@ -419,6 +429,7 @@ EOF
 }
 
 @test "Step 5: Linear idea.merge returns save_issue with stateId=duplicate (no duplicateOf in resolver)" {
+  set -e
   # OP_ARGS is the source uid (uniform with promote/defer/dismiss); the
   # skill pairs duplicateOf in at dispatch time from user input. The
   # resolver returns only the invariant dispatch shape.
@@ -458,6 +469,7 @@ EOF
 }
 
 @test "Step 5: local idea.merge resolves to idea-update <source-uid> duplicate" {
+  set -e
   # Verifies the resolver emits the right command shape (source = OP_ARGS).
   # The end-to-end rewrite is already covered by Step 6's update vocab tests.
   run bash "$OPS" resolve idea.merge src1 --project-dir "$PROJECT"
@@ -472,6 +484,7 @@ EOF
 # =========================================================================
 
 @test "Step 4: local idea.triage adapter invokes idea-list --status triage" {
+  set -e
   run bash "$OPS" resolve idea.triage --project-dir "$PROJECT"
   [ "$status" -eq 0 ]
   echo "$output" | jq -e '.invocation.command | test("idea-list --status triage")'
@@ -494,6 +507,7 @@ EOF
 }
 
 @test "BTS-121 AC-2: idea.add stateId is additive — project/team/labels still present" {
+  set -e
   _linear_config_with_state_ids
   run bash "$OPS" resolve idea.add --project-dir "$PROJECT"
   [ "$status" -eq 0 ]
@@ -504,6 +518,7 @@ EOF
 }
 
 @test "BTS-121 AC-3: idea.add omits stateId when state_ids absent" {
+  set -e
   _linear_config_no_state_ids
   run bash "$OPS" resolve idea.add --project-dir "$PROJECT"
   [ "$status" -eq 0 ]
@@ -550,6 +565,7 @@ JSON
 # =========================================================================
 
 @test "Step 3: idea.add Linear resolver does NOT pass .invocation.params.state" {
+  set -e
   _linear_config_with_state_ids
   run bash "$OPS" resolve idea.add --project-dir "$PROJECT"
   [ "$status" -eq 0 ]
@@ -570,6 +586,7 @@ JSON
 }
 
 @test "Step 1: cmd_idea_count sums legacy + new vocab into new-named counters" {
+  set -e
   local ideas_log="$PROJECT/.ccanvil/ideas.log"
   # 10 entries: one per legacy status, one per new-vocab status.
   # Expected collapse: new→triage, promoted→backlog, parked→icebox,

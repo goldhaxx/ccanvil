@@ -38,6 +38,7 @@ is_valid_operation() {
     idea.promote|idea.defer|idea.dismiss|idea.merge) return 0 ;;
     idea.review-icebox) return 0 ;;
     work.resolve) return 0 ;;
+    ticket.transition) return 0 ;;
     *) return 1 ;;
   esac
 }
@@ -58,6 +59,9 @@ Operations:
   status.{get,update}
   pr.{create,list}
   review.run
+  idea.{add,list,triage,sync,promote,defer,dismiss,merge,review-icebox}
+  work.resolve <ref>
+  ticket.transition <id> <role>
 EOF
   exit 2
 }
@@ -69,6 +73,7 @@ EOF
 CMD=""
 OPERATION=""
 OP_ARGS=""
+OP_ARG2=""
 
 [[ $# -eq 0 ]] && usage
 
@@ -83,6 +88,11 @@ while [[ $# -gt 0 ]]; do
       # Next positional arg (if any) is the operation argument (e.g., issue ID)
       if [[ $# -gt 0 && "$1" != --* ]]; then
         OP_ARGS="$1"; shift
+      fi
+      # Optional third positional — used by two-arg operations like
+      # ticket.transition (<id> <role>). Single-arg ops leave OP_ARG2="".
+      if [[ $# -gt 0 && "$1" != --* ]]; then
+        OP_ARG2="$1"; shift
       fi
       ;;
     --project-dir)
@@ -350,6 +360,13 @@ local_adapter() {
       cmd=".ccanvil/scripts/docs-check.sh idea-update ${OP_ARGS} duplicate"
       output_contract='["uid","status"]'
       ;;
+    ticket.transition)
+      # ticket.transition is a Linear-specific primitive (state-ID based).
+      # On local-provider nodes there is no equivalent surface — fail loud
+      # rather than silently succeeding with an empty command.
+      echo "ERROR: provider 'local' does not support ticket.transition — configure a Linear provider in .claude/ccanvil.json to enable" >&2
+      exit 1
+      ;;
   esac
 
   jq -n --arg cmd "$cmd" --argjson output "$output_contract" \
@@ -615,6 +632,52 @@ linear_mcp_adapter() {
           "contract":{"output":$output}
         }'
       ;;
+    ticket.transition)
+      # Provider-neutral ticket state transition. OP_ARGS = ticket id,
+      # OP_ARG2 = role (triage|backlog|icebox|canceled|duplicate|done).
+      # Emits a save_issue payload with id + stateId pre-populated so the
+      # caller dispatches a single MCP call with no manual UUID paste.
+      tool="mcp__claude_ai_Linear__save_issue"
+      output_contract='["id","status"]'
+      # Distinct error messages for missing id vs missing role so the
+      # user knows which argument to supply. Id check first (positionally).
+      if [[ -z "$op_args" ]]; then
+        echo "ERROR: ticket.transition requires a ticket id as the first argument (e.g. ticket.transition BTS-128 done)" >&2
+        exit 1
+      fi
+      if [[ -z "$OP_ARG2" ]]; then
+        echo "ERROR: ticket.transition requires a role as the second argument. Valid roles: triage, backlog, icebox, canceled, duplicate, done" >&2
+        exit 1
+      fi
+      # Validate role against the fixed vocabulary BEFORE config lookup —
+      # fail loud here so an unknown role never silently degrades to an
+      # empty stateId that MCP would reject with an opaque 400.
+      case "$OP_ARG2" in
+        triage|backlog|icebox|canceled|duplicate|done) ;;
+        *)
+          echo "ERROR: unknown role '$OP_ARG2' for ticket.transition. Valid roles: triage, backlog, icebox, canceled, duplicate, done" >&2
+          exit 1
+          ;;
+      esac
+      local t_state_id
+      t_state_id=$(linear_state_id "$provider_config" "$OP_ARG2")
+      if [[ -z "$t_state_id" ]]; then
+        # Fail loud on missing config rather than silently emitting an
+        # empty stateId — the wrapper's contract is UUID-or-error.
+        echo "ERROR: role '$OP_ARG2' is not configured in integrations.providers.linear.state_ids — add it to .claude/ccanvil.json or .claude/ccanvil.local.json" >&2
+        exit 1
+      fi
+      jq -n --arg tool "$tool" --arg id "$op_args" --arg state_id "$t_state_id" \
+        --argjson output "$output_contract" \
+        '{
+          "provider":"linear","mechanism":"mcp",
+          "invocation":{
+            "tool":$tool,
+            "params":{"id":$id,"stateId":$state_id}
+          },
+          "contract":{"output":$output}
+        }'
+      ;;
     *)
       # Unsupported operation for this provider — fall back to local
       local_adapter "$op"
@@ -680,7 +743,10 @@ cmd_resolve() {
     local group
     group=$(operation_group "$op")
     routed_provider=$(jq -r --arg g "$group" '.integrations.routing[$g] // ""' "$CONFIG_FILE")
-    if [[ -z "$routed_provider" && "$group" == "work" ]]; then
+    if [[ -z "$routed_provider" && ("$group" == "work" || "$group" == "ticket") ]]; then
+      # work and ticket groups share the idea provider's routing — on a
+      # Linear-configured node, `routing.idea=linear` alone is enough to
+      # route work.resolve and ticket.transition through the Linear adapter.
       routed_provider=$(jq -r '.integrations.routing.idea // ""' "$CONFIG_FILE")
     fi
     [[ -z "$routed_provider" ]] && routed_provider="local"

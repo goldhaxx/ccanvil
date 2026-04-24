@@ -252,11 +252,29 @@ cmd_status() {
   plan_entry=$(doc_entry "$docs_dir/plan.md" "plan")
   stasis_entry=$(doc_entry "$docs_dir/stasis.md" "stasis")
 
+  # BTS-113 — surface the last-compact marker timestamp so /recall and other
+  # consumers can reason about freshness. Null when the marker is missing
+  # (first session, fresh clone, or PreCompact hook didn't fire).
+  local project_root marker_path last_compact_ts
+  project_root=$(dirname "$docs_dir")
+  marker_path="$project_root/.ccanvil/state/last-compact-ts"
+  if [[ -f "$marker_path" ]]; then
+    last_compact_ts=$(cat "$marker_path" 2>/dev/null || echo "")
+  else
+    last_compact_ts=""
+  fi
+
+  local last_compact_json="null"
+  if [[ -n "$last_compact_ts" && "$last_compact_ts" =~ ^[0-9]+$ ]]; then
+    last_compact_json="$last_compact_ts"
+  fi
+
   jq -n \
     --argjson spec "$spec_entry" \
     --argjson plan "$plan_entry" \
     --argjson stasis "$stasis_entry" \
-    '{spec: $spec, plan: $plan, stasis: $stasis}'
+    --argjson last_compact_ts "$last_compact_json" \
+    '{spec: $spec, plan: $plan, stasis: $stasis, last_compact_ts: $last_compact_ts}'
 }
 
 # ---------------------------------------------------------------------------
@@ -536,8 +554,39 @@ cmd_recommend() {
     reason="Spec exists but no plan. Create an implementation plan from the spec."
 
   elif [[ "$result" == "aligned" && "$stasis_exists" == "true" ]]; then
-    next_action="/compact to wrap session"
-    reason="All docs aligned with stasis. Run /compact to preserve context, then start the next feature."
+    # BTS-113 — distinguish "session about to end (recommend /compact)" from
+    # "session just resumed after /compact + /recall (recommend forward action)"
+    # via the .ccanvil/state/last-compact-ts marker written by the PreCompact
+    # hook. Marker >= stasis.last_updated means compact already fired; suggest
+    # forward momentum. Otherwise (no marker, or marker older than stasis) the
+    # stasis is fresh → still time to /compact.
+    local stasis_ts marker_ts
+    stasis_ts=$(echo "$validate_json" | jq -r '.status.stasis.last_updated // empty')
+    local project_root="$(dirname "$docs_dir")"
+    local marker_path="$project_root/.ccanvil/state/last-compact-ts"
+    marker_ts=""
+    if [[ -f "$marker_path" ]]; then
+      marker_ts=$(cat "$marker_path" 2>/dev/null || echo "")
+    fi
+
+    if [[ -n "$marker_ts" && "$marker_ts" =~ ^[0-9]+$ \
+          && -n "$stasis_ts" && "$stasis_ts" =~ ^[0-9]+$ \
+          && "$marker_ts" -ge "$stasis_ts" ]]; then
+      # Compact already happened — surface forward action.
+      # Prefer /idea triage when there's untriaged work; else /radar.
+      local triage_count
+      triage_count=$(cmd_idea_count "$project_root" 2>/dev/null | jq -r '.triage // 0' 2>/dev/null || echo 0)
+      if [[ -n "$triage_count" && "$triage_count" -gt 0 ]]; then
+        next_action="$triage_count untriaged ideas — run /idea triage"
+        reason="Compact already ran. Triage outstanding ideas before starting next feature."
+      else
+        next_action="/radar to brief the next feature"
+        reason="Compact already ran. Review project state and start next feature."
+      fi
+    else
+      next_action="/compact to wrap session"
+      reason="All docs aligned with stasis. Run /compact to preserve context, then start the next feature."
+    fi
 
   elif [[ "$result" == "aligned" && "$stasis_exists" != "true" ]]; then
     next_action="Ready to build"

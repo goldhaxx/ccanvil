@@ -51,8 +51,10 @@
 # pattern: the only line that should contain legacy strings is the row
 # documenting the scanner command itself.
 ^\.ccanvil/guide/command-reference\.md:[0-9]+:.*legacy-refs-scan
-# session-management describes the one-time migration.
-^\.ccanvil/guide/session-management\.md:(83|84|85|86):
+# session-management describes the one-time migration. Line numbers shift
+# when sections are added/removed; this pattern matches the specific legacy
+# strings in the Migration section, not fixed line numbers.
+^\.ccanvil/guide/session-management\.md:[0-9]+:.*(Migration from legacy checkpoint/catchup|Before this rework the commands were named)
 
 # --- This branch's live feature docs (removed at `complete`) ---
 ^docs/spec\.md:

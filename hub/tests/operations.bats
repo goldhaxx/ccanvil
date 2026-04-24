@@ -47,6 +47,7 @@ teardown() {
 # =========================================================================
 
 @test "resolve backlog.list with no ccanvil.json returns local bash adapter" {
+  set -e
   run bash "$SCRIPT" resolve backlog.list --project-dir "$PROJECT"
   [ "$status" -eq 0 ]
   echo "$output" | jq -e '.provider == "local"'
@@ -64,6 +65,7 @@ teardown() {
 }
 
 @test "resolve backlog.list with empty ccanvil.json (no integrations) returns local" {
+  set -e
   mkdir -p "$PROJECT/.claude"
   echo '{}' > "$PROJECT/.claude/ccanvil.json"
   run bash "$SCRIPT" resolve backlog.list --project-dir "$PROJECT"
@@ -77,6 +79,7 @@ teardown() {
 # =========================================================================
 
 @test "all 17 operations resolve to local bash adapter with no config" {
+  set -e
   local ops=(
     backlog.list backlog.create backlog.prioritize backlog.get
     spec.read spec.write spec.list spec.activate spec.complete
@@ -131,6 +134,7 @@ teardown() {
 # =========================================================================
 
 @test "backlog.list with linear routing returns MCP adapter" {
+  set -e
   mkdir -p "$PROJECT/.claude"
   cat > "$PROJECT/.claude/ccanvil.json" <<'JSON'
 {
@@ -180,6 +184,7 @@ JSON
 }
 
 @test "partial routing: unrouted groups fall back to local (AC-4)" {
+  set -e
   mkdir -p "$PROJECT/.claude"
   cat > "$PROJECT/.claude/ccanvil.json" <<'JSON'
 {
@@ -215,6 +220,7 @@ JSON
 # =========================================================================
 
 @test "backlog.list local command produces same schema as docs-check.sh list-specs" {
+  set -e
   # Create fixture specs directory in the real project structure
   local FIXTURE_DIR
   FIXTURE_DIR=$(mktemp -d)
@@ -265,6 +271,7 @@ SPEC
 # =========================================================================
 
 @test "backlog.get with linear routing returns MCP adapter with id param" {
+  set -e
   mkdir -p "$PROJECT/.claude"
   cat > "$PROJECT/.claude/ccanvil.json" <<'JSON'
 {
@@ -295,6 +302,7 @@ JSON
 # =========================================================================
 
 @test "unknown mechanism passes through as-is" {
+  set -e
   mkdir -p "$PROJECT/.claude"
   cat > "$PROJECT/.claude/ccanvil.json" <<'JSON'
 {
@@ -334,6 +342,7 @@ JSON
 }
 
 @test "unknown mechanism with api type passes through" {
+  set -e
   mkdir -p "$PROJECT/.claude"
   cat > "$PROJECT/.claude/ccanvil.json" <<'JSON'
 {
@@ -387,6 +396,7 @@ JSON
 }
 
 @test "provider config with special characters in values produces valid JSON" {
+  set -e
   mkdir -p "$PROJECT/.claude"
   cat > "$PROJECT/.claude/ccanvil.json" <<'JSON'
 {
@@ -453,6 +463,7 @@ JSON
 }
 
 @test "exec: mcp mechanism outputs resolution JSON instead of executing" {
+  set -e
   mkdir -p "$PROJECT/.claude"
   cat > "$PROJECT/.claude/ccanvil.json" <<'JSON'
 {

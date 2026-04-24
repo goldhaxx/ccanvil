@@ -58,6 +58,7 @@ teardown() {
 }
 
 @test "pull-globals: outputs JSON summary with copied count" {
+  set -e
   cd "$NODE"
   HOME="$FAKE_HOME" run bash "$NODE/.ccanvil/scripts/ccanvil-sync.sh" pull-globals
   [ "$status" -eq 0 ]
@@ -84,6 +85,7 @@ teardown() {
 }
 
 @test "pull-globals: empty hub global-commands outputs zero counts" {
+  set -e
   rm -f "$HUB"/global-commands/*.md
 
   cd "$NODE"
@@ -99,6 +101,7 @@ teardown() {
 # =========================================================================
 
 @test "pull-globals: skips file when hub and local hashes match" {
+  set -e
   cd "$NODE"
   HOME="$FAKE_HOME" bash "$NODE/.ccanvil/scripts/ccanvil-sync.sh" pull-globals >/dev/null
 
@@ -110,6 +113,7 @@ teardown() {
 }
 
 @test "pull-globals: reports conflict when local differs; does not overwrite" {
+  set -e
   cd "$NODE"
   # Seed a differing local file
   mkdir -p "$FAKE_HOME/.claude/commands"
@@ -134,6 +138,7 @@ teardown() {
 # =========================================================================
 
 @test "pull-globals --force: overwrites conflicted local file" {
+  set -e
   cd "$NODE"
   mkdir -p "$FAKE_HOME/.claude/commands"
   echo "local custom content" > "$FAKE_HOME/.claude/commands/ccanvil-init.md"

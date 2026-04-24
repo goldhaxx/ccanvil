@@ -83,6 +83,7 @@ EOF
 }
 
 @test "legacy-refs-scan: JSON entries have file, line, match, scope keys" {
+  set -e
   mkdir -p "$FIXTURE/.claude/rules"
   cat > "$FIXTURE/.claude/rules/workflow.md" <<'EOF'
 Run /catchup now.

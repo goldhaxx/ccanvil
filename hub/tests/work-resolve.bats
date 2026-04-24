@@ -46,6 +46,7 @@ _local_config() {
 # ===========================================================================
 
 @test "BTS-130 AC-1: work.resolve BTS-130 on Linear node returns Linear-shape JSON" {
+  set -e
   _linear_config
   run bash "$OPS" resolve work.resolve BTS-130 --project-dir "$PROJECT"
   [ "$status" -eq 0 ]
@@ -64,6 +65,7 @@ _local_config() {
 # ===========================================================================
 
 @test "BTS-130 AC-2: work.resolve idea-29 on local node returns local-shape JSON" {
+  set -e
   _local_config
   run bash "$OPS" resolve work.resolve idea-29 --project-dir "$PROJECT"
   [ "$status" -eq 0 ]
@@ -77,6 +79,7 @@ _local_config() {
 # ===========================================================================
 
 @test "BTS-130 AC-3: work.resolve linear:BTS-130 on local node returns Linear shape" {
+  set -e
   _local_config
   run bash "$OPS" resolve work.resolve linear:BTS-130 --project-dir "$PROJECT"
   [ "$status" -eq 0 ]
@@ -86,6 +89,7 @@ _local_config() {
 }
 
 @test "BTS-130 AC-3: work.resolve local:custom-id on Linear node returns local shape" {
+  set -e
   _linear_config
   run bash "$OPS" resolve work.resolve local:custom-id --project-dir "$PROJECT"
   [ "$status" -eq 0 ]
@@ -161,6 +165,7 @@ _local_config() {
 }
 
 @test "BTS-130 validation: local:<id> explicit prefix also bypasses strict" {
+  set -e
   _linear_config
   run bash "$OPS" resolve work.resolve "local:custom-format-999" --project-dir "$PROJECT"
   [ "$status" -eq 0 ]

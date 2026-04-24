@@ -22,6 +22,7 @@ teardown() {
 # =========================================================================
 
 @test "parse extracts path and description from a 4-column table" {
+  set -e
   cat > "$REPO/README.md" <<'EOF'
 # Project
 
@@ -44,6 +45,7 @@ EOF
 }
 
 @test "parse extracts path and description from a 3-column table" {
+  set -e
   cat > "$REPO/README.md" <<'EOF'
 ## Reference
 
@@ -72,6 +74,7 @@ EOF
 }
 
 @test "parse handles multiple tables in one file" {
+  set -e
   cat > "$REPO/README.md" <<'EOF'
 ## Section A
 
@@ -125,6 +128,7 @@ EOF
 # =========================================================================
 
 @test "check-existence reports existing files as found" {
+  set -e
   mkdir -p "$REPO/.claude/rules" "$REPO/.ccanvil/scripts"
   echo "# TDD" > "$REPO/.claude/rules/tdd.md"
   echo "#!/bin/bash" > "$REPO/.ccanvil/scripts/sync.sh"
@@ -144,6 +148,7 @@ EOF
 }
 
 @test "check-existence reports missing files" {
+  set -e
   # Create a manifest with paths that don't exist on disk
   cat > "$REPO/README.md" <<'EOF'
 | File | Copy to | What it does | Customize? |
@@ -163,6 +168,7 @@ EOF
 }
 
 @test "check-existence discovers untracked files in tracked directories" {
+  set -e
   mkdir -p "$REPO/.claude/rules" "$REPO/.ccanvil/scripts"
   echo "# TDD" > "$REPO/.claude/rules/tdd.md"
   echo "# Extra" > "$REPO/.claude/rules/extra.md"
@@ -215,6 +221,7 @@ EOF
 # =========================================================================
 
 @test "init creates manifest.lock with correct structure" {
+  set -e
   mkdir -p "$REPO/.claude/rules" "$REPO/.ccanvil/scripts"
   echo "# TDD" > "$REPO/.claude/rules/tdd.md"
   echo "#!/bin/bash" > "$REPO/.ccanvil/scripts/sync.sh"
@@ -257,6 +264,7 @@ EOF
 }
 
 @test "init skips entries for files that don't exist on disk" {
+  set -e
   mkdir -p "$REPO/.claude/rules"
   echo "# TDD" > "$REPO/.claude/rules/tdd.md"
   git add -A && git commit -q -m "init"
@@ -277,6 +285,7 @@ EOF
 }
 
 @test "hash-check reports unchanged files as verified" {
+  set -e
   mkdir -p "$REPO/.claude/rules"
   echo "# TDD" > "$REPO/.claude/rules/tdd.md"
   git add -A && git commit -q -m "init"
@@ -296,6 +305,7 @@ EOF
 }
 
 @test "hash-check reports modified files as stale" {
+  set -e
   mkdir -p "$REPO/.claude/rules"
   echo "# TDD" > "$REPO/.claude/rules/tdd.md"
   git add -A && git commit -q -m "init"
@@ -349,6 +359,7 @@ EOF
 }
 
 @test "hash-check includes fallback diff for uncommitted changes" {
+  set -e
   mkdir -p "$REPO/.claude/rules"
   echo "# TDD" > "$REPO/.claude/rules/tdd.md"
   git add -A && git commit -q -m "init"
@@ -476,6 +487,7 @@ EOF
 # =========================================================================
 
 @test "check produces full JSON report with all categories" {
+  set -e
   mkdir -p "$REPO/.claude/rules" "$REPO/.ccanvil/scripts"
   echo "# TDD" > "$REPO/.claude/rules/tdd.md"
   echo "# Workflow" > "$REPO/.claude/rules/workflow.md"
@@ -538,6 +550,7 @@ EOF
 }
 
 @test "verify updates lockfile hashes for specified paths" {
+  set -e
   mkdir -p "$REPO/.claude/rules"
   echo "# TDD" > "$REPO/.claude/rules/tdd.md"
   git add -A && git commit -q -m "init"
@@ -569,6 +582,7 @@ EOF
 }
 
 @test "verify full cycle: init → modify → check → verify → check" {
+  set -e
   mkdir -p "$REPO/.claude/rules" "$REPO/.ccanvil/scripts"
   echo "# TDD" > "$REPO/.claude/rules/tdd.md"
   echo "#!/bin/bash" > "$REPO/.ccanvil/scripts/sync.sh"

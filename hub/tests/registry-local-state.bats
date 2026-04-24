@@ -118,6 +118,7 @@ EOF
 # -------------------------------------------------------------------------
 
 @test "AC-5/6: register appends event to .ccanvil/events.log" {
+  set -e
   cd "$NODE"
   bash "$NODE/.ccanvil/scripts/ccanvil-sync.sh" init "$HUB"
 
@@ -139,6 +140,7 @@ EOF
 # -------------------------------------------------------------------------
 
 @test "AC-7: broadcast appends one broadcast_sync event per synced node" {
+  set -e
   cd "$NODE"
   bash "$NODE/.ccanvil/scripts/ccanvil-sync.sh" init "$HUB"
   git -C "$NODE" add -A && git -C "$NODE" commit -q -m "ccanvil init" 2>/dev/null || true

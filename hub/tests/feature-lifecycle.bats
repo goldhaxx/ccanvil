@@ -86,6 +86,7 @@ EOF
 # ---------------------------------------------------------------------------
 
 @test "list-specs: returns JSON array with spec metadata" {
+  set -e
   cat > "$PROJECT/docs/specs/auth-system.md" <<'EOF'
 # Feature: Auth System
 
@@ -126,6 +127,7 @@ EOF
 }
 
 @test "list-specs: finds specs with YAML frontmatter metadata" {
+  set -e
   cat > "$PROJECT/docs/specs/blockquote-spec.md" <<'EOF'
 # Feature: Blockquote Spec
 

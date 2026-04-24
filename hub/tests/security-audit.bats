@@ -182,6 +182,7 @@ teardown() {
 }
 
 @test "JSON output is valid JSON" {
+  set -e
   echo "SECRET=bad" > .env
   git add .env && git commit -q -m "add env"
 

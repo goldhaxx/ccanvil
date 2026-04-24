@@ -796,6 +796,7 @@ SCRIPT
 }
 
 @test "audit-session: outputs valid JSON with patterns_found and summary" {
+  set -e
   local repo
   repo=$(create_audit_repo)
 
@@ -835,6 +836,7 @@ SCRIPT
 }
 
 @test "audit-session: each finding has pattern, file, line, context" {
+  set -e
   local repo
   repo=$(create_audit_repo)
 
@@ -1133,6 +1135,7 @@ GUIDE="$BATS_TEST_DIRNAME/../../.ccanvil/guide/command-reference.md"
 # =========================================================================
 
 @test "radar-gather: outputs valid JSON with required fields" {
+  set -e
   run bash "$SCRIPT" radar-gather "$DOCS"
   [ "$status" -eq 0 ]
   echo "$output" | jq -e 'has("active_spec")' >/dev/null

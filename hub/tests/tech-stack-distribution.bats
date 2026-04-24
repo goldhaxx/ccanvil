@@ -101,6 +101,7 @@ teardown() {
 # =========================================================================
 
 @test "fastapi-sqlite: manifest.json exists and has required fields" {
+  set -e
   [ -f "$HUB/hub/stacks/fastapi-sqlite/manifest.json" ]
 
   # Required top-level fields
@@ -194,6 +195,7 @@ teardown() {
 # =========================================================================
 
 @test "stack-list: returns JSON array with fastapi-sqlite" {
+  set -e
   cd "$NODE"
   local result
   result=$(bash "$NODE/.ccanvil/scripts/ccanvil-sync.sh" stack-list)

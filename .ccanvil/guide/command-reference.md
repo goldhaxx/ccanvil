@@ -52,6 +52,12 @@
 | `permissions-audit.sh check --text [--verbose]` | Human-readable grouped report (DANGER, UNREVIEWED, optionally REVIEWED) |
 | `permissions-audit.sh init [--settings-dir DIR] [--log FILE]` | Create/update decision log with stubs for unreviewed entries |
 
+## Test Hygiene Scripts
+
+| Command | What it does |
+|---------|-------------|
+| `bats-lint.sh <dir-or-file>` | Flag bats `@test` blocks with ≥2 sequential `jq -e` assertions and no `set -e` at the top — the leak pattern where only the last `jq -e` governs the test's exit code (BTS-127). Exit 0 clean, 1 if any leaks found (file:line to stderr), 2 on usage error. Convention doc: `.claude/rules/tdd.md`. |
+
 ## Context Budget Scripts
 
 | Command | What it does |

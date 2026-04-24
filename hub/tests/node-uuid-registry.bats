@@ -185,6 +185,7 @@ teardown() {
 }
 
 @test "register: entry has name, registered_at fields" {
+  set -e
   cd "$NODE"
   bash "$NODE/.ccanvil/scripts/ccanvil-sync.sh" init "$HUB"
 

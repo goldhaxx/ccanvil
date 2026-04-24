@@ -20,6 +20,7 @@ teardown() {
 # =========================================================================
 
 @test "AC-1: both files present — deep merge produces combined result" {
+  set -e
   cat > "$PROJECT/.claude/ccanvil.json" <<'EOF'
 {"features":{"pr_review":false}}
 EOF
@@ -34,6 +35,7 @@ EOF
 }
 
 @test "AC-3: no local file — effective config equals hub file" {
+  set -e
   cat > "$PROJECT/.claude/ccanvil.json" <<'EOF'
 {"features":{"pr_review":false},"integrations":{}}
 EOF

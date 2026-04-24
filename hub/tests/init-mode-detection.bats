@@ -160,6 +160,7 @@ EOF
 # =========================================================================
 
 @test "mode-detection: project_mode is a top-level field in init-preflight output" {
+  set -e
   run bash "$NODE/.ccanvil/scripts/ccanvil-sync.sh" init-preflight "$HUB_ROOT"
   [ "$status" -eq 0 ]
 

@@ -165,6 +165,59 @@ teardown() {
 }
 
 # ===========================================================================
+# Phase 5 — error-message format (AC-8): "ERROR: ..." + blank + bullets
+# ===========================================================================
+# Shared helper: first line must start with "ERROR: ", then a blank line,
+# then one or more remediation bullets prefixed with exactly two spaces.
+_assert_error_format() {
+  local stderr="$1"
+  # Line 1: ERROR: ...
+  echo "$stderr" | head -1 | grep -qE '^ERROR: '
+  # Somewhere in the body: at least one line starting with two spaces
+  echo "$stderr" | grep -qE '^  [a-zA-Z]'
+}
+
+@test "BTS-122 AC-8: sync-check AHEAD error follows ERROR: + bullets shape" {
+  cd "$REPO"
+  git -c user.email=t@t -c user.name=t commit -q --allow-empty -m "local-only"
+
+  run bash "$DOCS" sync-check "$REPO"
+  [ "$status" -eq 1 ]
+  _assert_error_format "$output"
+}
+
+@test "BTS-122 AC-8: sync-check BEHIND error follows ERROR: + bullets shape" {
+  cd "$REPO"
+  local SIDE
+  SIDE=$(mktemp -d)
+  git clone -q "$BARE" "$SIDE"
+  git -C "$SIDE" -c user.email=t@t -c user.name=t commit -q --allow-empty -m "remote-ahead"
+  git -C "$SIDE" push -q origin main
+  rm -rf "$SIDE"
+
+  run bash "$DOCS" sync-check "$REPO"
+  [ "$status" -eq 2 ]
+  _assert_error_format "$output"
+}
+
+@test "BTS-122 AC-8: pr-guard BEHIND error follows ERROR: + bullets shape" {
+  cd "$REPO"
+  git -C "$REPO" checkout -q -b claude/feat/example
+  git -C "$REPO" -c user.email=t@t -c user.name=t commit -q --allow-empty -m "feature work"
+
+  local SIDE
+  SIDE=$(mktemp -d)
+  git clone -q "$BARE" "$SIDE"
+  git -C "$SIDE" -c user.email=t@t -c user.name=t commit -q --allow-empty -m "base-moved"
+  git -C "$SIDE" push -q origin main
+  rm -rf "$SIDE"
+
+  run bash "$DOCS" pr-guard
+  [ "$status" -eq 1 ]
+  _assert_error_format "$output"
+}
+
+# ===========================================================================
 # Phase 3 — cmd_land offline-degradation (AC-7)
 # ===========================================================================
 

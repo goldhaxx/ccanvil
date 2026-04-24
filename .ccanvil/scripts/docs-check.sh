@@ -1006,6 +1006,101 @@ cmd_pr_cleanup() {
 }
 
 # ---------------------------------------------------------------------------
+# cmd_extract_work — Read a spec file's `> Work:` metadata and emit JSON.
+#
+# Usage:
+#   docs-check.sh extract-work <spec-file>
+#
+# Outputs {"provider":"<p>","id":"<i>"} on stdout when the spec carries a
+# parseable `> Work: <provider>:<id>` line. Outputs nothing (and exits 0) for
+# legacy specs without `Work:` or malformed values — callers treat empty
+# stdout as "no linkable work ref" and skip auto-transition silently
+# (BTS-119 grandfather rule, AC-5).
+#
+# Splits on the FIRST colon only so provider-ids containing colons survive
+# (e.g. a hypothetical `linear:BTS-1:subtask` would emit id="BTS-1:subtask").
+# ---------------------------------------------------------------------------
+cmd_extract_work() {
+  local spec_file="${1:?Usage: extract-work <spec-file>}"
+  if [[ ! -f "$spec_file" ]]; then
+    echo "ERROR: spec file not found: $spec_file" >&2
+    exit 1
+  fi
+
+  local work
+  work=$(parse_metadata "$spec_file" | jq -r '.work // empty')
+  # No Work: — legacy spec, grandfathered. Empty stdout, success.
+  [[ -z "$work" ]] && return 0
+  # Malformed: missing ':' separator. Empty stdout, success — callers skip.
+  [[ "$work" != *:* ]] && return 0
+
+  local provider="${work%%:*}"
+  local id="${work#*:}"
+  # Either half empty → malformed; empty stdout, success.
+  [[ -z "$provider" || -z "$id" ]] && return 0
+
+  jq -n --arg p "$provider" --arg i "$id" '{provider:$p,id:$i}'
+}
+
+# ---------------------------------------------------------------------------
+# cmd_auto_close_emit — Map a landed branch to its linked Linear issue and
+# emit an AUTO-CLOSE marker that a skill wrapper (/land) can dispatch.
+#
+# Usage:
+#   docs-check.sh auto-close-emit <branch-name> [docs-dir]
+#
+# Invoked by cmd_land after the post-merge safety net, and directly by
+# tests. Pure logic — no git side effects — so bats can exercise every
+# branch of the decision tree (AC-5/6/7/9) without standing up a repo.
+#
+# Decision tree (BTS-119):
+#   Branch ≠ claude/<type>/<slug>   → log skip, exit 0 (AC-9)
+#   Spec file missing               → silent, exit 0 (non-spec branch)
+#   Spec has no Work:               → silent, exit 0 (legacy, AC-5)
+#   Work: linear:<ID>               → emit AUTO-CLOSE marker, exit 0
+#   Work: local:<uid>               → log skip (scope is Linear-only, AC-6)
+#   Work: <other>:<id>              → log skip (no adapter, AC-7)
+# ---------------------------------------------------------------------------
+cmd_auto_close_emit() {
+  local branch="${1:?Usage: auto-close-emit <branch-name> [docs-dir]}"
+  local docs_dir="${2:-$DEFAULT_DOCS_DIR}"
+
+  if [[ ! "$branch" =~ ^claude/[^/]+/(.+)$ ]]; then
+    echo "auto-close: no feature-id detected in last merge commit — skipping"
+    return 0
+  fi
+  local feature_id="${BASH_REMATCH[1]}"
+  local spec_file="${docs_dir}/specs/${feature_id}.md"
+  if [[ ! -f "$spec_file" ]]; then
+    return 0
+  fi
+
+  local work_json
+  work_json=$(cmd_extract_work "$spec_file")
+  # Legacy spec without Work: → cmd_extract_work prints nothing.
+  if [[ -z "$work_json" ]]; then
+    return 0
+  fi
+
+  local provider id
+  provider=$(echo "$work_json" | jq -r '.provider')
+  id=$(echo "$work_json" | jq -r '.id')
+
+  case "$provider" in
+    linear)
+      jq -cn --arg id "$id" '{provider:"linear",id:$id,role:"done"}' | \
+        sed 's/^/AUTO-CLOSE: /'
+      ;;
+    local)
+      echo "auto-close: local provider — skipping (BTS-119 Linear-only)"
+      ;;
+    *)
+      echo "auto-close: provider '${provider}' — no adapter, skipping"
+      ;;
+  esac
+}
+
+# ---------------------------------------------------------------------------
 # cmd_land — Switch to main, sync with remote, delete feature branch.
 #
 # Usage:
@@ -1090,6 +1185,13 @@ cmd_land() {
       fi
     fi
   fi
+
+  # BTS-119: emit AUTO-CLOSE marker for the skill wrapper (/land) to dispatch
+  # the Linear issue transition to Done. Pure emission — the skill parses
+  # stdout, resolves `ticket.transition <id> done`, and handles MCP +
+  # pending-log fallback. Users who invoke this script directly (bypassing
+  # the /land skill) see the marker and a hint; auto-close does not fire.
+  cmd_auto_close_emit "$branch"
 
   # Delete local branch
   git branch -d "$branch" 2>/dev/null || git branch -D "$branch" 2>/dev/null || true
@@ -2130,6 +2232,8 @@ case "$cmd" in
   complete)          cmd_complete "$@" ;;
   pr-cleanup)        cmd_pr_cleanup "$@" ;;
   land)              cmd_land "$@" ;;
+  extract-work)      cmd_extract_work "$@" ;;
+  auto-close-emit)   cmd_auto_close_emit "$@" ;;
   radar-gather)      cmd_radar_gather "$@" ;;
   idea-add)          cmd_idea_add "$@" ;;
   idea-list)         cmd_idea_list "$@" ;;

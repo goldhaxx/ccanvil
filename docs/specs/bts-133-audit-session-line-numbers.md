@@ -3,7 +3,7 @@
 > Feature: bts-133-audit-session-line-numbers
 > Work: linear:BTS-133
 > Created: 1777071360
-> Status: In Progress
+> Status: Complete
 
 ## Summary
 

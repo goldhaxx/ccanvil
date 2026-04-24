@@ -70,7 +70,7 @@ This command ensures the branch is ready for merge: tests pass, docs are validat
 - PRs are always created as drafts initially (via activate). /pr marks them ready.
 - Never run /pr from main/master.
 - Always run tests and validation before finalizing.
-- After the PR is merged, run `docs-check.sh land` to switch to main, sync, and delete the branch.
+- After the PR is merged, run `/land` — the canonical post-merge flow. It wraps `docs-check.sh land` (git mechanics) and auto-closes the linked Linear issue via the `ticket.transition` primitive (BTS-119). Running `docs-check.sh land` directly also works but skips the Linear auto-close; the transition will not fire and the issue stays open in Linear.
 
 <!-- NODE-SPECIFIC-START -->
 <!-- Add project-specific content below this line. -->

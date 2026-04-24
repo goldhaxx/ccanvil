@@ -10,6 +10,7 @@
 | `/commit` | Build | Stages, generates conventional commit, runs tests | Git history |
 | `/review` | Review | Spawns code-reviewer sub-agent | None (read-only) |
 | `/pr` | Ship | Creates draft PR with evaluation gates | GitHub PR |
+| `/land` | Post-merge | Wraps `docs-check.sh land` + auto-closes the linked Linear issue via `ticket.transition` (BTS-119). On MCP failure, queues to `.ccanvil/ideas-pending.log` for `/idea sync`. | Local + remote branch deletion, Linear issue status |
 
 ## Session Management Commands
 
@@ -101,7 +102,9 @@ Only files matching `ccanvil-*.md` are hub-owned; all other files in `~/.claude/
 | `docs-check.sh activate <feature-id> [docs-dir]` | Create branch `claude/<type>/<id>`, copy spec to `docs/spec.md`, set status to In Progress, push branch, create draft PR. Tolerates dirty `docs/specs/*`, `docs/spec.md`, `docs/ideas.md`, `docs/roadmap.md` |
 | `docs-check.sh complete <feature-id> [docs-dir]` | Set spec status to Complete, remove lifecycle docs (spec/plan/stasis), commit cleanup, mark PR ready |
 | `docs-check.sh pr-cleanup [docs-dir]` | Pre-merge lifecycle cleanup invoked by the `/pr` skill. When `docs/spec.md` exists, delegates to `cmd_complete` (flips archive to Complete + removes lifecycle docs + commits). Otherwise, removes any lingering lifecycle docs and commits a "clean up lifecycle docs before merge" commit. Halts non-zero on metadata parse failure or missing archive — `/pr` surfaces the error instead of proceeding. |
-| `docs-check.sh land [--force]` | On feature branch: switch to main, fetch, reset to origin, delete local and remote branch. Safety net: if the landed branch matches `claude/<type>/<id>` and `docs/specs/<id>.md` is still `In Progress`, transitions it to `Complete` + commits on main (`ALLOW_MAIN=1`) + pushes — covers the case where `/pr` was skipped. On main (post-`gh pr merge --delete-branch`): fetch and fast-forward to `origin/main`. `--force` skips PR-merged check. |
+| `docs-check.sh land [--force]` | On feature branch: switch to main, fetch, reset to origin, delete local and remote branch. Safety net: if the landed branch matches `claude/<type>/<id>` and `docs/specs/<id>.md` is still `In Progress`, transitions it to `Complete` + commits on main (`ALLOW_MAIN=1`) + pushes — covers the case where `/pr` was skipped. On main (post-`gh pr merge --delete-branch`): fetch and fast-forward to `origin/main`. `--force` skips PR-merged check. Emits an `AUTO-CLOSE: {...}` marker on stdout when the landed spec carries `Work: linear:<ID>` — the `/land` skill wrapper reads it and dispatches the Linear transition (BTS-119). |
+| `docs-check.sh extract-work <spec-file>` | Reads `> Work:` metadata from a spec file; emits `{"provider":"<p>","id":"<i>"}` on stdout. Empty stdout + exit 0 for legacy specs without `Work:` or malformed values (BTS-119 grandfather rule). |
+| `docs-check.sh auto-close-emit <branch> [docs-dir]` | Pure logic: maps a landed branch name to its archived spec's `Work:` and emits `AUTO-CLOSE: {...}` for linear provider, or a named skip log for local/unknown/non-claude-branch (BTS-119). Invoked internally by `cmd_land` after the post-merge safety net. |
 | `docs-check.sh config-get <key> [project-dir]` | Read feature toggle from `.claude/ccanvil.json` (returns `true`/`false`) |
 
 ## Idea Management Scripts

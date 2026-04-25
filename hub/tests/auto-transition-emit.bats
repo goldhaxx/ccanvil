@@ -135,3 +135,54 @@ JSON
   echo "$output" | grep "^AUTO-TRANSITION: " | sed 's/^AUTO-TRANSITION: //' | \
     jq -e '.role == "todo"'
 }
+
+# ===========================================================================
+# BTS-148: auto-transition-emit also enqueues ticket.transition into
+# .ccanvil/ideas-pending.log so /idea sync (or the /activate skill) can
+# dispatch deterministically. Mirrors BTS-119's pending-log fallback for
+# auto-close.
+# ===========================================================================
+
+@test "BTS-148 AC-1: auto-transition-emit enqueues ticket.transition entry for linear Work" {
+  set -e
+  _spec_linear "BTS-148" "bts-148-foo"
+  run bash -c "cd \"$PROJECT\" && bash \"$DOCS\" auto-transition-emit claude/feat/bts-148-foo in_progress"
+  [ "$status" -eq 0 ]
+  pending="$PROJECT/.ccanvil/ideas-pending.log"
+  [ -f "$pending" ]
+  [ "$(wc -l < "$pending" | tr -d ' ')" -eq 1 ]
+  jq -e '.op == "ticket.transition" and .args.id == "BTS-148" and .args.role == "in_progress" and (.ts | type == "number")' "$pending"
+}
+
+@test "BTS-148 AC-6: auto-transition-emit does NOT enqueue for local-provider Work" {
+  _spec_local "idea-29" "bts-local-foo"
+  run bash -c "cd \"$PROJECT\" && bash \"$DOCS\" auto-transition-emit claude/feat/bts-local-foo in_progress"
+  [ "$status" -eq 0 ]
+  [ ! -f "$PROJECT/.ccanvil/ideas-pending.log" ] || [ "$(wc -c < "$PROJECT/.ccanvil/ideas-pending.log" | tr -d ' ')" -eq 0 ]
+}
+
+@test "BTS-148 AC-7: auto-transition-emit does NOT enqueue for legacy spec without Work:" {
+  _spec_no_work "legacy-foo"
+  run bash -c "cd \"$PROJECT\" && bash \"$DOCS\" auto-transition-emit claude/feat/legacy-foo in_progress"
+  [ "$status" -eq 0 ]
+  [ ! -f "$PROJECT/.ccanvil/ideas-pending.log" ] || [ "$(wc -c < "$PROJECT/.ccanvil/ideas-pending.log" | tr -d ' ')" -eq 0 ]
+}
+
+@test "BTS-148 AC-8: two consecutive emits produce two entries (sync handles dedup at dispatch)" {
+  set -e
+  _spec_linear "BTS-148" "bts-148-foo"
+  run bash -c "cd \"$PROJECT\" && bash \"$DOCS\" auto-transition-emit claude/feat/bts-148-foo in_progress"
+  [ "$status" -eq 0 ]
+  run bash -c "cd \"$PROJECT\" && bash \"$DOCS\" auto-transition-emit claude/feat/bts-148-foo in_progress"
+  [ "$status" -eq 0 ]
+  pending="$PROJECT/.ccanvil/ideas-pending.log"
+  [ "$(wc -l < "$pending" | tr -d ' ')" -eq 2 ]
+}
+
+@test "BTS-148: enqueue carries role=todo when activate is later generalized" {
+  set -e
+  _spec_linear "BTS-148" "bts-148-foo"
+  run bash -c "cd \"$PROJECT\" && bash \"$DOCS\" auto-transition-emit claude/feat/bts-148-foo todo"
+  [ "$status" -eq 0 ]
+  jq -e '.args.role == "todo"' "$PROJECT/.ccanvil/ideas-pending.log"
+}

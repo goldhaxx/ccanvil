@@ -5,6 +5,7 @@
 | Command | Phase | What it does | Files affected |
 |---------|-------|-------------|----------------|
 | `/spec <description>` | Spec | Writes feature spec with acceptance criteria | Writes `docs/specs/<id>.md` |
+| `/activate <id>` | Activate | Wraps `docs-check.sh activate` + dispatches the `AUTO-TRANSITION` intent — flips the linked Linear issue to In Progress via `ticket.transition` (BTS-148). On MCP failure, queues to `.ccanvil/ideas-pending.log` for `/idea sync`. | Branch, draft PR, Linear issue status |
 | `/plan` | Plan | Creates ordered TDD steps from spec | Writes `docs/plan.md` |
 | *"Start building"* | Build | Enters TDD cycle | Source + test files |
 | `/commit` | Build | Stages, generates conventional commit, runs tests | Git history |
@@ -114,6 +115,7 @@ Only files matching `ccanvil-*.md` are hub-owned; all other files in `~/.claude/
 | `docs-check.sh land-recover-branch` | BTS-138 helper: reads the current repo HEAD's last-commit subject (or `HEAD~1` if HEAD is a `docs: stasis` commit), parses the `(#<N>)` PR-number suffix, queries `gh pr view <N> --json headRefName`, and echoes the recovered branch. Empty stdout + `WARN:` on stderr + exit 0 on any recovery failure. Testable in isolation without standing up a full merge workflow. |
 | `docs-check.sh extract-work <spec-file>` | Reads `> Work:` metadata from a spec file; emits `{"provider":"<p>","id":"<i>"}` on stdout. Empty stdout + exit 0 for legacy specs without `Work:` or malformed values (BTS-119 grandfather rule). |
 | `docs-check.sh auto-close-emit <branch> [docs-dir]` | Pure logic: maps a landed branch name to its archived spec's `Work:` and emits `AUTO-CLOSE: {...}` for linear provider, or a named skip log for local/unknown/non-claude-branch (BTS-119). Invoked internally by `cmd_land` after the post-merge safety net, and from `cmd_land`'s main-path recovery flow (BTS-138). |
+| `docs-check.sh auto-transition-emit <branch> <role> [docs-dir]` | Pure logic: maps an active branch name to its spec's `Work:` and emits `AUTO-TRANSITION: {...}` for linear provider (BTS-136), AND enqueues a `ticket.transition` entry to `.ccanvil/ideas-pending.log` so `/activate` (immediate) or `/idea sync` (retry) can dispatch it deterministically (BTS-148). Silent for local/unknown/non-claude-branch. Invoked internally by `cmd_activate`. |
 | `docs-check.sh sync-check <repo-root>` | Fetches `origin/main` (5s timeout), then compares local `main` against the refreshed ref. Exit codes: 0 synced or no-op (no origin, no origin/main, or fetch failed with graceful `WARN:`), 1 ahead (unpushed leak risk), 2 behind (stale baseline). Called by `cmd_activate` (BTS-122). |
 | `docs-check.sh pr-guard` | Pre-`/pr` safety net (BTS-122). Fetches `origin/main` from the current feature branch and halts with remediation if the base has moved past HEAD (exit 1). No-op (exit 0) when no origin remote, no origin/main ref, or fetch failure (`WARN:` emitted). Invoked from the `/pr` skill's pre-flight block. |
 | `docs-check.sh config-get <key> [project-dir]` | Read feature toggle from `.claude/ccanvil.json` (returns `true`/`false`) |

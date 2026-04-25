@@ -59,11 +59,51 @@ _die() {
   exit "$code"
 }
 
+# Walk up from $PWD looking for .git; when found AND LINEAR_API_KEY is unset
+# AND a sibling .env exists, source it. Eliminates the per-shell
+# `set -a; source .env; set +a` ritual that has to run before every Bash
+# tool invocation that touches Linear (BTS-167).
+#
+# Walks $PWD only — not the script's own dirname — so test isolation works
+# (tests cd into a controlled tmpdir) and the user-intent "my project's
+# .env, found from where I am" stays the contract. If the script is invoked
+# while $PWD is outside any git tree, no auto-source fires.
+#
+# Already-exported LINEAR_API_KEY always wins; .env is only consulted when
+# the env var is unset (no override of operator intent).
+_load_env_if_needed() {
+  if [[ -n "${LINEAR_API_KEY:-}" ]]; then
+    return 0
+  fi
+  local dir
+  dir="$(pwd -P 2>/dev/null)" || return 0
+  while [[ "$dir" != "/" && -n "$dir" ]]; do
+    if [[ -d "$dir/.git" ]]; then
+      if [[ -f "$dir/.env" ]]; then
+        # `set -a` exports every var assigned during the source step; the
+        # script ships with `set -euo pipefail`, so a parse error in .env
+        # surfaces as a non-zero exit rather than a silent skip (AC-6).
+        # Note: `set +a` is unreachable when the source aborts under
+        # `set -e` — that's harmless because the script exits entirely.
+        # Don't refactor this into a sourced helper without revisiting
+        # this scope leak.
+        set -a
+        # shellcheck disable=SC1091
+        . "$dir/.env"
+        set +a
+      fi
+      return 0
+    fi
+    dir="$(dirname "$dir")"
+  done
+}
+
 # Every subcommand calls this before doing any work. Exits 2 with a clear
 # remediation hint when the env var is missing.
 _require_api_key() {
+  _load_env_if_needed
   if [[ -z "${LINEAR_API_KEY:-}" ]]; then
-    _die 2 "LINEAR_API_KEY not set. Generate a key at https://linear.app/settings/api and export it: export LINEAR_API_KEY=<key>"
+    _die 2 "LINEAR_API_KEY not set. Export it (export LINEAR_API_KEY=<key>) or add LINEAR_API_KEY=<key> to .env at the project root. Generate a key at https://linear.app/settings/api."
   fi
 }
 

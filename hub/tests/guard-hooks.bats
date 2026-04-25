@@ -567,6 +567,79 @@ JSON
 # with no failures elsewhere.
 
 # =========================================================================
+# guard-workspace.sh — cat read fence (BTS-153)
+# =========================================================================
+
+@test "BTS-153 AC-1: blocks cat ~/.ssh/id_rsa" {
+  set -e   # BTS-127
+  input='{"tool_name":"Bash","tool_input":{"command":"cat ~/.ssh/id_rsa"}}'
+  run bash -c "echo '$input' | '$WORKSPACE_HOOK'"
+  [ "$status" -eq 2 ]
+  echo "$output" | grep -q "BLOCKED"
+}
+
+@test "BTS-153 AC-2: blocks cat /etc/passwd" {
+  input='{"tool_name":"Bash","tool_input":{"command":"cat /etc/passwd"}}'
+  run bash -c "echo '$input' | '$WORKSPACE_HOOK'"
+  [ "$status" -eq 2 ]
+}
+
+@test "BTS-153 AC-3: blocks cat ~/.zshrc" {
+  input='{"tool_name":"Bash","tool_input":{"command":"cat ~/.zshrc"}}'
+  run bash -c "echo '$input' | '$WORKSPACE_HOOK'"
+  [ "$status" -eq 2 ]
+}
+
+@test "BTS-153 AC-4: allows cat ~/projects/ccanvil/CLAUDE.md (inside workspace)" {
+  input='{"tool_name":"Bash","tool_input":{"command":"cat ~/projects/ccanvil/CLAUDE.md"}}'
+  run bash -c "echo '$input' | '$WORKSPACE_HOOK'"
+  [ "$status" -eq 0 ]
+}
+
+@test "BTS-153 AC-5: allows cat ./relative/path" {
+  input='{"tool_name":"Bash","tool_input":{"command":"cat ./relative/path"}}'
+  run bash -c "echo '$input' | '$WORKSPACE_HOOK'"
+  [ "$status" -eq 0 ]
+}
+
+@test "BTS-153 AC-6: allows cat /tmp/foo" {
+  input='{"tool_name":"Bash","tool_input":{"command":"cat /tmp/foo"}}'
+  run bash -c "echo '$input' | '$WORKSPACE_HOOK'"
+  [ "$status" -eq 0 ]
+}
+
+@test "BTS-153 AC-7: allows cat /dev/null" {
+  input='{"tool_name":"Bash","tool_input":{"command":"cat /dev/null"}}'
+  run bash -c "echo '$input' | '$WORKSPACE_HOOK'"
+  [ "$status" -eq 0 ]
+}
+
+@test "BTS-153 AC-8: bypass via ALLOW_OUTSIDE_WORKSPACE=1" {
+  input='{"tool_name":"Bash","tool_input":{"command":"ALLOW_OUTSIDE_WORKSPACE=1 cat ~/.ssh/id_rsa"}}'
+  run bash -c "echo '$input' | '$WORKSPACE_HOOK'"
+  [ "$status" -eq 0 ]
+}
+
+@test "BTS-153 AC-9: allows xcat /etc/foo (cat substring in another verb)" {
+  input='{"tool_name":"Bash","tool_input":{"command":"xcat /etc/foo"}}'
+  run bash -c "echo '$input' | '$WORKSPACE_HOOK'"
+  [ "$status" -eq 0 ]
+}
+
+@test "BTS-153 AC-10: blocks cat /etc/foo in pipeline" {
+  input='{"tool_name":"Bash","tool_input":{"command":"cat /etc/foo | grep x"}}'
+  run bash -c "echo '$input' | '$WORKSPACE_HOOK'"
+  [ "$status" -eq 2 ]
+}
+
+@test "BTS-153 AC-11: allows cat with no path arg (heredoc-style)" {
+  # `cat << EOF` has no path tokens; the fence has nothing to gate.
+  input='{"tool_name":"Bash","tool_input":{"command":"cat << EOF"}}'
+  run bash -c "echo '$input' | '$WORKSPACE_HOOK'"
+  [ "$status" -eq 0 ]
+}
+
+# =========================================================================
 # guard-workspace.sh — workspace fence (BTS-146)
 # =========================================================================
 
@@ -644,11 +717,10 @@ JSON
   [ "$status" -eq 0 ]
 }
 
-@test "BTS-146 AC-12: allows cat on system path (verb not in gated list)" {
-  input='{"tool_name":"Bash","tool_input":{"command":"cat /etc/passwd"}}'
-  run bash -c "echo '$input' | '$WORKSPACE_HOOK'"
-  [ "$status" -eq 0 ]
-}
+# BTS-146 AC-12 ("allows cat on system path") was the snapshot of pre-BTS-153
+# behavior — cat outside the workspace was unblocked. BTS-153 supersedes this:
+# `cat /etc/passwd` now blocks (covered by BTS-153 AC-2). The original test
+# intentionally removed; the inverse assertion is now the contract.
 
 @test "BTS-146 AC-13: ALLOW_OUTSIDE_WORKSPACE=1 bypass works" {
   input='{"tool_name":"Bash","tool_input":{"command":"ALLOW_OUTSIDE_WORKSPACE=1 rm /etc/foo"}}'

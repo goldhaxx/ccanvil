@@ -48,7 +48,11 @@ fi
 # path-shaped narrative string (`/stasis`, `/tmp/...`). Constant false
 # positives; the workaround was always `commit -F` to a tmpfile. Same
 # trade-off as guard-destructive: chained commands bypass.
-if [[ "$COMMAND" =~ ^([A-Z_][A-Z0-9_]*=[^[:space:]]*[[:space:]]+)*git[[:space:]]+commit($|[[:space:]]) ]]; then
+#
+# Env-prefix value can be unquoted (no spaces), double-quoted, or single-
+# quoted — covers GIT_AUTHOR_NAME="Foo Bar" / GIT_COMMITTER_DATE="..."
+# in addition to plain LANG=en_US.
+if [[ "$COMMAND" =~ ^([A-Z_][A-Z0-9_]*=([^[:space:]\"\']*|\"[^\"]*\"|\'[^\']*\')[[:space:]]+)*git[[:space:]]+commit($|[[:space:]]) ]]; then
   exit 0
 fi
 

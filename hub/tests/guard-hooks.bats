@@ -717,6 +717,21 @@ JSON
   [ "$status" -eq 0 ]
 }
 
+@test "BTS-151 AC-10b: quoted env-prefix value with spaces still skipped" {
+  # GIT_AUTHOR_NAME and GIT_COMMITTER_DATE are common automation prefixes
+  # whose values contain spaces. The early-exit regex must accept the
+  # quoted form.
+  input='{"tool_name":"Bash","tool_input":{"command":"GIT_AUTHOR_NAME=\"Foo Bar\" git commit -m \"msg with /stasis\""}}'
+  run bash -c "echo '$input' | '$WORKSPACE_HOOK'"
+  [ "$status" -eq 0 ]
+}
+
+@test "BTS-151 AC-10c: single-quoted env-prefix value also skipped" {
+  input='{"tool_name":"Bash","tool_input":{"command":"GIT_COMMITTER_DATE='\''2024-01-01 12:00:00'\'' git commit -m \"msg with /stasis\""}}'
+  run bash -c "echo '$input' | '$WORKSPACE_HOOK'"
+  [ "$status" -eq 0 ]
+}
+
 @test "BTS-151: git commit-tree (different verb, same prefix) is NOT auto-skipped" {
   # `commit-tree` is a plumbing command; the early-exit must word-anchor
   # on `commit` to avoid masking it. This test confirms the boundary.

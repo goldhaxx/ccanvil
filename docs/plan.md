@@ -3,7 +3,7 @@
 > Feature: bts-164-linear-api-substrate
 > Work: linear:BTS-164
 > Created: 1777141900
-> Spec hash: e99a61c8
+> Spec hash: d31cf49c
 > Based on: docs/spec.md
 
 ## Objective

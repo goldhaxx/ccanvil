@@ -97,6 +97,82 @@ JSON
   echo "$output" | jq -e '.invocation.command | contains("idea-count-local")'
 }
 
+# ===========================================================================
+# BTS-166 AC-4..AC-7: idea.{add,list,triage,review-icebox} migrated to http
+# ===========================================================================
+
+@test "BTS-166 AC-5: idea.list on linear-routed project emits mechanism=http" {
+  set -e
+  _with_linear_routing
+  run bash "$OPS" resolve idea.list --project-dir "$PROJECT"
+  [ "$status" -eq 0 ]
+  echo "$output" | jq -e '.provider == "linear" and .mechanism == "http"'
+}
+
+@test "BTS-166 AC-5: idea.list http command carries linear-query.sh list-issues with project/team/label" {
+  set -e
+  _with_linear_routing
+  run bash "$OPS" resolve idea.list --project-dir "$PROJECT"
+  [ "$status" -eq 0 ]
+  echo "$output" | jq -e '.invocation.command | contains("linear-query.sh")'
+  echo "$output" | jq -e '.invocation.command | contains("list-issues")'
+  echo "$output" | jq -e '.invocation.command | contains("ccanvil")'
+  echo "$output" | jq -e '.invocation.command | contains("Blocktech Solutions")'
+  echo "$output" | jq -e '.invocation.command | contains("idea")'
+}
+
+@test "BTS-166 AC-6: idea.triage on linear-routed project emits mechanism=http with --state filter" {
+  set -e
+  _with_linear_routing
+  run bash "$OPS" resolve idea.triage --project-dir "$PROJECT"
+  [ "$status" -eq 0 ]
+  echo "$output" | jq -e '.provider == "linear" and .mechanism == "http"'
+  echo "$output" | jq -e '.invocation.command | contains("list-issues")'
+  echo "$output" | jq -e '.invocation.command | contains("--state")'
+}
+
+@test "BTS-166 AC-7: idea.review-icebox on linear-routed project emits mechanism=http with --state icebox" {
+  set -e
+  _with_linear_routing
+  run bash "$OPS" resolve idea.review-icebox --project-dir "$PROJECT"
+  [ "$status" -eq 0 ]
+  echo "$output" | jq -e '.provider == "linear" and .mechanism == "http"'
+  echo "$output" | jq -e '.invocation.command | contains("list-issues")'
+  echo "$output" | jq -e '.invocation.command | contains("--state")'
+}
+
+@test "BTS-166 AC-4: idea.add on linear-routed project emits mechanism=http with save-issue" {
+  set -e
+  _with_linear_routing
+  run bash "$OPS" resolve idea.add --project-dir "$PROJECT"
+  [ "$status" -eq 0 ]
+  echo "$output" | jq -e '.provider == "linear" and .mechanism == "http"'
+  echo "$output" | jq -e '.invocation.command | contains("save-issue")'
+  echo "$output" | jq -e '.invocation.command | contains("--team")'
+  echo "$output" | jq -e '.invocation.command | contains("--project")'
+  echo "$output" | jq -e '.invocation.command | contains("--labels")'
+  echo "$output" | jq -e '.invocation.command | contains("Blocktech Solutions")'
+}
+
+@test "BTS-166 AC-4: idea.add http command does NOT carry --title or --description (consumer fills via stdin-JSON)" {
+  set -e
+  _with_linear_routing
+  run bash "$OPS" resolve idea.add --project-dir "$PROJECT"
+  [ "$status" -eq 0 ]
+  echo "$output" | jq -e '.invocation.command | contains("--title") | not'
+  echo "$output" | jq -e '.invocation.command | contains("--description") | not'
+}
+
+@test "BTS-166 AC-8: idea.{list,triage,add,review-icebox} on local-routed project still emit mechanism=bash" {
+  set -e
+  _with_local_routing
+  for op in idea.list idea.triage idea.add idea.review-icebox; do
+    run bash "$OPS" resolve "$op" --project-dir "$PROJECT"
+    [ "$status" -eq 0 ]
+    echo "$output" | jq -e '.mechanism == "bash"'
+  done
+}
+
 @test "BTS-164 AC-10: resolver output shape uniform across mechanisms" {
   # Both mechanisms must return the same top-level keys: provider, mechanism,
   # invocation, contract. Consumers can switch on mechanism without

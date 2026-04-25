@@ -19,7 +19,7 @@ The accumulated `.claude/settings*.json` allowlists have grown into a graveyard 
 
 - [ ] **AC-1:** `.claude/settings.json` `permissions.allow` contains broad command-namespace wildcards including `Bash(git:*)`, `Bash(gh:*)`, `Bash(bash:*)`, `Bash(.ccanvil/scripts/:*)`, `Bash(rm:*)`, `Bash(cp:*)`, `Bash(mv:*)`, `Bash(chmod:*)`, `Bash(chown:*)`, `Bash(security:*)`, and `mcp__claude_ai_Linear__*`.
 - [ ] **AC-2:** `.claude/settings.json` `permissions.deny` retains only catastrophic, hook-uncatchable ops: `rm -rf /` (and variants for `/*`, `~`, `$HOME`, `.`), `sudo`/`su`/`doas`, `dd`, `mkfs`, `diskutil`, `kill -9`. Does NOT contain any `chmod` patterns (delegated to the destructive-guard hook).
-- [ ] **AC-3:** `.claude/settings.local.json` contains exactly `{"permissions": {"allow": []}}` — empty by design; future session "always-allow" approvals land here for periodic promotion review.
+- [ ] **AC-3:** `.claude/settings.local.json` is reset to `{"permissions": {"allow": []}}` on the local working tree — empty by design; future session "always-allow" approvals land here for periodic promotion review. The file is gitignored (per-node by convention; line 23 of `.gitignore`), so this AC is verified by inspecting the working tree, not the PR diff.
 - [ ] **AC-4:** `guard-destructive.sh` blocks `chmod 777`, `chmod -R 777`, `chmod 666`, `chmod -R 666`, `chmod 000`, `chmod -R 000`. Each block emits stderr naming the pattern and showing `ALLOW_DESTRUCTIVE=1` bypass.
 - [ ] **AC-5:** `guard-destructive.sh` allows non-destructive chmod: `chmod +x`, `chmod 644`, `chmod 755`, `chmod -R 755` — exit 0.
 - [ ] **AC-6:** `ALLOW_DESTRUCTIVE=1 chmod 777 path` bypasses the guard (exit 0). Consistent with existing bypass pattern.

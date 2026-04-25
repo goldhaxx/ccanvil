@@ -16,8 +16,10 @@ setup() {
   # `bash .ccanvil/scripts/linear-query.sh ...` — for tests where cwd
   # becomes $PROJECT (radar-gather case), the scripts need to be reachable
   # there. Real ccanvil-managed projects get these via /init's hub copy;
-  # tests symlink to mirror that environment.
-  ln -s "$BATS_TEST_DIRNAME/../../.ccanvil/scripts/linear-query.sh" "$PROJECT/.ccanvil/scripts/linear-query.sh"
+  # tests cp to mirror that environment. (Symlinks intentionally avoided
+  # per project memory feedback_no_symlinks — they cause git-operation
+  # bugs in this repo's lifecycle.)
+  cp "$BATS_TEST_DIRNAME/../../.ccanvil/scripts/linear-query.sh" "$PROJECT/.ccanvil/scripts/linear-query.sh"
   unset LINEAR_API_KEY LINEAR_QUERY_ENDPOINT
 }
 

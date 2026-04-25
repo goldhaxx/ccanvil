@@ -84,13 +84,17 @@ _post_graphql() {
   local body
   body=$(jq -nc --arg q "$query" --argjson v "$variables" '{query:$q,variables:$v}')
 
-  local response
+  local response rc
   response=$(
     curl -sS -X POST "$endpoint" \
       -H "Authorization: $LINEAR_API_KEY" \
       -H "Content-Type: application/json" \
       -d "$body"
-  ) || _die 3 "linear-query: HTTP request failed (curl exit $?)"
+  )
+  rc=$?
+  if [[ "$rc" -ne 0 ]]; then
+    _die 3 "linear-query: HTTP request failed (curl exit $rc)"
+  fi
 
   # GraphQL errors: surface the first one and exit 3. Linear's WAF and auth
   # layer both return 200 OK with an errors array, so HTTP status alone is

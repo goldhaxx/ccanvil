@@ -121,14 +121,24 @@ Batched review of items in Triage state. **Fully agentic** — every outcome is 
 BTS-164 migrated `ticket.transition` to `mechanism: http` — the resolver now returns `.invocation.command` carrying a complete `linear-query.sh save-issue --id <id> --state <state-id>` invocation. The skill stores that command in `$cmd` and appends outcome-specific flags (`--priority` for promote, `--duplicate-of` for merge) before eval'ing. The wrapper handles auth via `LINEAR_API_KEY` and surfaces GraphQL errors as exit 3.
 
 ```bash
-# Per-row dispatcher pattern:
+# Per-row dispatcher pattern. Quote variable values via jq @sh before
+# appending to the eval string — protects against any future case where
+# input bleeds in (priority is numeric and target IDs are ticket keys
+# today, but the pattern shouldn't teach unsafe append).
 RESOLUTION=$(bash .ccanvil/scripts/operations.sh resolve ticket.transition "$ID" "$ROLE" --project-dir .)
 cmd=$(echo "$RESOLUTION" | jq -r '.invocation.command')
-# Append flags by outcome before eval:
 case "$OUTCOME" in
-  promote) eval "$cmd --priority $PRIORITY" ;;
-  merge)   eval "$cmd --duplicate-of $TARGET_ID" ;;
-  *)       eval "$cmd" ;;
+  promote)
+    p=$(printf '%s' "$PRIORITY" | jq -R @sh)
+    eval "$cmd --priority $p"
+    ;;
+  merge)
+    t=$(printf '%s' "$TARGET_ID" | jq -R @sh)
+    eval "$cmd --duplicate-of $t"
+    ;;
+  *)
+    eval "$cmd"
+    ;;
 esac
 ```
 

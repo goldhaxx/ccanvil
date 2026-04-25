@@ -1,10 +1,11 @@
 #!/usr/bin/env bats
-# Tests for guard hooks: guard-force-push.sh and guard-destructive.sh
+# Tests for guard hooks: guard-force-push.sh, guard-destructive.sh, guard-workspace.sh
 #
 # Each test pipes JSON to the hook and checks exit code + output.
 
 FORCE_PUSH_HOOK="$BATS_TEST_DIRNAME/../../.claude/hooks/guard-force-push.sh"
 DESTRUCTIVE_HOOK="$BATS_TEST_DIRNAME/../../.claude/hooks/guard-destructive.sh"
+WORKSPACE_HOOK="$BATS_TEST_DIRNAME/../../.claude/hooks/guard-workspace.sh"
 
 # =========================================================================
 # guard-force-push.sh
@@ -234,5 +235,113 @@ DESTRUCTIVE_HOOK="$BATS_TEST_DIRNAME/../../.claude/hooks/guard-destructive.sh"
 @test "guard-destructive: chmod 777 bypasses with ALLOW_DESTRUCTIVE=1" {
   input='{"tool_name":"Bash","tool_input":{"command":"ALLOW_DESTRUCTIVE=1 chmod 777 /tmp/foo"}}'
   run bash -c "echo '$input' | '$DESTRUCTIVE_HOOK'"
+  [ "$status" -eq 0 ]
+}
+
+# =========================================================================
+# guard-workspace.sh — workspace fence (BTS-146)
+# =========================================================================
+
+@test "BTS-146 AC-1: blocks rm with absolute path outside workspace" {
+  input='{"tool_name":"Bash","tool_input":{"command":"rm /etc/foo"}}'
+  run bash -c "echo '$input' | '$WORKSPACE_HOOK'"
+  [ "$status" -eq 2 ]
+  echo "$output" | grep -q "BLOCKED"
+  echo "$output" | grep -q "/etc/foo"
+  echo "$output" | grep -q "ALLOW_OUTSIDE_WORKSPACE=1"
+}
+
+@test "BTS-146 AC-2: blocks cp when source is outside workspace" {
+  input='{"tool_name":"Bash","tool_input":{"command":"cp ~/Downloads/x ~/projects/ccanvil/y"}}'
+  run bash -c "echo '$input' | '$WORKSPACE_HOOK'"
+  [ "$status" -eq 2 ]
+  echo "$output" | grep -q "Downloads"
+}
+
+@test "BTS-146 AC-3: allows cp when both paths are inside workspace" {
+  input='{"tool_name":"Bash","tool_input":{"command":"cp ~/projects/ccanvil/a ~/projects/ccanvil/b"}}'
+  run bash -c "echo '$input' | '$WORKSPACE_HOOK'"
+  [ "$status" -eq 0 ]
+}
+
+@test "BTS-146 AC-4: blocks chmod on system bin path" {
+  input='{"tool_name":"Bash","tool_input":{"command":"chmod 755 /usr/local/bin/foo"}}'
+  run bash -c "echo '$input' | '$WORKSPACE_HOOK'"
+  [ "$status" -eq 2 ]
+  echo "$output" | grep -q "/usr/local/bin/foo"
+}
+
+@test "BTS-146 AC-5: blocks chown on macOS Library path" {
+  input='{"tool_name":"Bash","tool_input":{"command":"chown user ~/Library/foo"}}'
+  run bash -c "echo '$input' | '$WORKSPACE_HOOK'"
+  [ "$status" -eq 2 ]
+  echo "$output" | grep -q "Library"
+}
+
+@test "BTS-146 AC-6: blocks bash executing script outside workspace" {
+  input='{"tool_name":"Bash","tool_input":{"command":"bash ~/Documents/script.sh"}}'
+  run bash -c "echo '$input' | '$WORKSPACE_HOOK'"
+  [ "$status" -eq 2 ]
+  echo "$output" | grep -q "Documents"
+}
+
+@test "BTS-146 AC-7: blocks bash -c with quoted inline rm targeting system path" {
+  input='{"tool_name":"Bash","tool_input":{"command":"bash -c \"rm /etc/foo\""}}'
+  run bash -c "echo '$input' | '$WORKSPACE_HOOK'"
+  [ "$status" -eq 2 ]
+  echo "$output" | grep -q "/etc/foo"
+}
+
+@test "BTS-146 AC-8: allows rm in /tmp" {
+  input='{"tool_name":"Bash","tool_input":{"command":"rm /tmp/foo"}}'
+  run bash -c "echo '$input' | '$WORKSPACE_HOOK'"
+  [ "$status" -eq 0 ]
+}
+
+@test "BTS-146 AC-9: allows rm in /private/var/folders (macOS mktemp -d)" {
+  input='{"tool_name":"Bash","tool_input":{"command":"rm /private/var/folders/xx/yy/T/test"}}'
+  run bash -c "echo '$input' | '$WORKSPACE_HOOK'"
+  [ "$status" -eq 0 ]
+}
+
+@test "BTS-146 AC-10: allows rm with relative path" {
+  input='{"tool_name":"Bash","tool_input":{"command":"rm relative/path.txt"}}'
+  run bash -c "echo '$input' | '$WORKSPACE_HOOK'"
+  [ "$status" -eq 0 ]
+}
+
+@test "BTS-146 AC-11: allows bash on relative script path" {
+  input='{"tool_name":"Bash","tool_input":{"command":"bash .ccanvil/scripts/foo.sh"}}'
+  run bash -c "echo '$input' | '$WORKSPACE_HOOK'"
+  [ "$status" -eq 0 ]
+}
+
+@test "BTS-146 AC-12: allows cat on system path (verb not in gated list)" {
+  input='{"tool_name":"Bash","tool_input":{"command":"cat /etc/passwd"}}'
+  run bash -c "echo '$input' | '$WORKSPACE_HOOK'"
+  [ "$status" -eq 0 ]
+}
+
+@test "BTS-146 AC-13: ALLOW_OUTSIDE_WORKSPACE=1 bypass works" {
+  input='{"tool_name":"Bash","tool_input":{"command":"ALLOW_OUTSIDE_WORKSPACE=1 rm /etc/foo"}}'
+  run bash -c "echo '$input' | '$WORKSPACE_HOOK'"
+  [ "$status" -eq 0 ]
+}
+
+@test "BTS-146: handles empty command" {
+  input='{"tool_name":"Bash","tool_input":{}}'
+  run bash -c "echo '$input' | '$WORKSPACE_HOOK'"
+  [ "$status" -eq 0 ]
+}
+
+@test "BTS-146: allows rm in workspace via absolute path" {
+  input='{"tool_name":"Bash","tool_input":{"command":"rm /Users/zacharywright/projects/ccanvil/file"}}'
+  run bash -c "echo '$input' | '$WORKSPACE_HOOK'"
+  [ "$status" -eq 0 ]
+}
+
+@test "BTS-146: allows redirect to /dev/null" {
+  input='{"tool_name":"Bash","tool_input":{"command":"cp file /dev/null"}}'
+  run bash -c "echo '$input' | '$WORKSPACE_HOOK'"
   [ "$status" -eq 0 ]
 }

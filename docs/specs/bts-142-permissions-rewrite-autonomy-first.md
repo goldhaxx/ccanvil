@@ -3,7 +3,7 @@
 > Feature: bts-142-permissions-rewrite-autonomy-first
 > Work: linear:BTS-142
 > Created: 1777078321
-> Status: Draft
+> Status: Complete
 
 ## Summary
 

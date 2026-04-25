@@ -160,3 +160,79 @@ DESTRUCTIVE_HOOK="$BATS_TEST_DIRNAME/../../.claude/hooks/guard-destructive.sh"
   run bash -c "echo '$input' | '$DESTRUCTIVE_HOOK'"
   [ "$status" -eq 0 ]
 }
+
+# =========================================================================
+# guard-destructive.sh — chmod-destructive patterns (BTS-142)
+# =========================================================================
+
+@test "guard-destructive: blocks chmod 777" {
+  input='{"tool_name":"Bash","tool_input":{"command":"chmod 777 /tmp/foo"}}'
+  run bash -c "echo '$input' | '$DESTRUCTIVE_HOOK'"
+  [ "$status" -eq 2 ]
+  echo "$output" | grep -q "BLOCKED"
+  echo "$output" | grep -q "chmod"
+  echo "$output" | grep -q "ALLOW_DESTRUCTIVE=1"
+}
+
+@test "guard-destructive: blocks chmod -R 777" {
+  input='{"tool_name":"Bash","tool_input":{"command":"chmod -R 777 /tmp/foo"}}'
+  run bash -c "echo '$input' | '$DESTRUCTIVE_HOOK'"
+  [ "$status" -eq 2 ]
+  echo "$output" | grep -q "BLOCKED"
+}
+
+@test "guard-destructive: blocks chmod 666" {
+  input='{"tool_name":"Bash","tool_input":{"command":"chmod 666 /tmp/foo"}}'
+  run bash -c "echo '$input' | '$DESTRUCTIVE_HOOK'"
+  [ "$status" -eq 2 ]
+  echo "$output" | grep -q "BLOCKED"
+}
+
+@test "guard-destructive: blocks chmod -R 666" {
+  input='{"tool_name":"Bash","tool_input":{"command":"chmod -R 666 /tmp/foo"}}'
+  run bash -c "echo '$input' | '$DESTRUCTIVE_HOOK'"
+  [ "$status" -eq 2 ]
+}
+
+@test "guard-destructive: blocks chmod 000" {
+  input='{"tool_name":"Bash","tool_input":{"command":"chmod 000 /tmp/foo"}}'
+  run bash -c "echo '$input' | '$DESTRUCTIVE_HOOK'"
+  [ "$status" -eq 2 ]
+  echo "$output" | grep -q "BLOCKED"
+}
+
+@test "guard-destructive: blocks chmod -R 000" {
+  input='{"tool_name":"Bash","tool_input":{"command":"chmod -R 000 /tmp/foo"}}'
+  run bash -c "echo '$input' | '$DESTRUCTIVE_HOOK'"
+  [ "$status" -eq 2 ]
+}
+
+@test "guard-destructive: allows chmod +x" {
+  input='{"tool_name":"Bash","tool_input":{"command":"chmod +x scripts/foo.sh"}}'
+  run bash -c "echo '$input' | '$DESTRUCTIVE_HOOK'"
+  [ "$status" -eq 0 ]
+}
+
+@test "guard-destructive: allows chmod 644" {
+  input='{"tool_name":"Bash","tool_input":{"command":"chmod 644 file.txt"}}'
+  run bash -c "echo '$input' | '$DESTRUCTIVE_HOOK'"
+  [ "$status" -eq 0 ]
+}
+
+@test "guard-destructive: allows chmod 755" {
+  input='{"tool_name":"Bash","tool_input":{"command":"chmod 755 scripts/foo.sh"}}'
+  run bash -c "echo '$input' | '$DESTRUCTIVE_HOOK'"
+  [ "$status" -eq 0 ]
+}
+
+@test "guard-destructive: allows chmod -R 755" {
+  input='{"tool_name":"Bash","tool_input":{"command":"chmod -R 755 scripts/"}}'
+  run bash -c "echo '$input' | '$DESTRUCTIVE_HOOK'"
+  [ "$status" -eq 0 ]
+}
+
+@test "guard-destructive: chmod 777 bypasses with ALLOW_DESTRUCTIVE=1" {
+  input='{"tool_name":"Bash","tool_input":{"command":"ALLOW_DESTRUCTIVE=1 chmod 777 /tmp/foo"}}'
+  run bash -c "echo '$input' | '$DESTRUCTIVE_HOOK'"
+  [ "$status" -eq 0 ]
+}

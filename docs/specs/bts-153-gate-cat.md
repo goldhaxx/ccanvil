@@ -3,7 +3,7 @@
 > Feature: bts-153-gate-cat
 > Work: linear:BTS-153
 > Created: 1777153767
-> Status: In Progress
+> Status: Complete
 
 ## Summary
 

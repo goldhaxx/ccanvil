@@ -660,9 +660,31 @@ cmd_apply() {
         mv "$tmp" "$local_file"
         applied=$((applied+1))
         ;;
-      promote|accept-danger)
-        # Steps 5-6 implement these. Counted as skipped for now so the
-        # scaffolding stays internally consistent.
+      promote)
+        local tmp_main tmp_local already_main
+        # Append to main if not already present (idempotent).
+        if [[ -f "$main_file" ]]; then
+          already_main=$(jq --arg p "$perm" '.permissions.allow | index($p) != null' "$main_file")
+          if [[ "$already_main" != "true" ]]; then
+            tmp_main=$(mktemp)
+            jq --arg p "$perm" '.permissions.allow += [$p]' "$main_file" > "$tmp_main"
+            mv "$tmp_main" "$main_file"
+          fi
+        else
+          tmp_main=$(mktemp)
+          jq -n --arg p "$perm" '{permissions:{allow:[$p]}}' > "$tmp_main"
+          mv "$tmp_main" "$main_file"
+        fi
+        # Remove from local if present.
+        if [[ -f "$local_file" ]]; then
+          tmp_local=$(mktemp)
+          jq --arg p "$perm" '.permissions.allow |= map(select(. != $p))' "$local_file" > "$tmp_local"
+          mv "$tmp_local" "$local_file"
+        fi
+        applied=$((applied+1))
+        ;;
+      accept-danger)
+        # Step 6 implements this; for now counted as skipped.
         skipped=$((skipped+1))
         ;;
     esac

@@ -1142,3 +1142,82 @@ JSONL
   echo "$output" | jq -e '.applied == 0'
   echo "$output" | jq -e '.skipped == 1'
 }
+
+# Step 5: AC-3 (promote)
+
+@test "BTS-149 AC-3: promote moves entry from local to main allow list" {
+  set -e
+  cat > "$FIXTURE/settings.json" <<'JSON'
+{"permissions":{"allow":["Bash(ls:*)"]}}
+JSON
+  cat > "$FIXTURE/settings.local.json" <<'JSON'
+{"permissions":{"allow":["Bash(rm:*)","Bash(promoteme:*)"]}}
+JSON
+  cat > "$FIXTURE/decisions.jsonl" <<'JSONL'
+{"permission":"Bash(promoteme:*)","decision":"promote"}
+JSONL
+  run bash "$SCRIPT" apply --decisions "$FIXTURE/decisions.jsonl" \
+    --settings-dir "$FIXTURE" --log "$FIXTURE/permissions-log.json"
+  [ "$status" -eq 0 ]
+  echo "$output" | jq -e '.applied == 1'
+  echo "$output" | jq -e '.skipped == 0'
+  jq -e '.permissions.allow == ["Bash(ls:*)","Bash(promoteme:*)"]' "$FIXTURE/settings.json"
+  jq -e '.permissions.allow == ["Bash(rm:*)"]' "$FIXTURE/settings.local.json"
+}
+
+@test "BTS-149 AC-3: promote is idempotent when already in main allow list" {
+  set -e
+  cat > "$FIXTURE/settings.json" <<'JSON'
+{"permissions":{"allow":["Bash(ls:*)","Bash(promoteme:*)"]}}
+JSON
+  cat > "$FIXTURE/settings.local.json" <<'JSON'
+{"permissions":{"allow":["Bash(promoteme:*)"]}}
+JSON
+  cat > "$FIXTURE/decisions.jsonl" <<'JSONL'
+{"permission":"Bash(promoteme:*)","decision":"promote"}
+JSONL
+  run bash "$SCRIPT" apply --decisions "$FIXTURE/decisions.jsonl" \
+    --settings-dir "$FIXTURE" --log "$FIXTURE/permissions-log.json"
+  [ "$status" -eq 0 ]
+  # main list should not contain duplicate
+  count=$(jq -r '[.permissions.allow[] | select(. == "Bash(promoteme:*)")] | length' "$FIXTURE/settings.json")
+  [ "$count" -eq 1 ]
+  # local file should still have the promote remove the entry
+  jq -e '.permissions.allow == []' "$FIXTURE/settings.local.json"
+}
+
+@test "BTS-149 AC-3: promote with permission absent from local still appends to main" {
+  set -e
+  cat > "$FIXTURE/settings.json" <<'JSON'
+{"permissions":{"allow":["Bash(ls:*)"]}}
+JSON
+  cat > "$FIXTURE/settings.local.json" <<'JSON'
+{"permissions":{"allow":[]}}
+JSON
+  cat > "$FIXTURE/decisions.jsonl" <<'JSONL'
+{"permission":"Bash(newperm:*)","decision":"promote"}
+JSONL
+  run bash "$SCRIPT" apply --decisions "$FIXTURE/decisions.jsonl" \
+    --settings-dir "$FIXTURE" --log "$FIXTURE/permissions-log.json"
+  [ "$status" -eq 0 ]
+  echo "$output" | jq -e '.applied == 1'
+  jq -e '.permissions.allow == ["Bash(ls:*)","Bash(newperm:*)"]' "$FIXTURE/settings.json"
+}
+
+@test "BTS-149 AC-4: promote creates .bak for both files and cleans up on success" {
+  set -e
+  cat > "$FIXTURE/settings.json" <<'JSON'
+{"permissions":{"allow":["Bash(ls:*)"]}}
+JSON
+  cat > "$FIXTURE/settings.local.json" <<'JSON'
+{"permissions":{"allow":["Bash(promoteme:*)"]}}
+JSON
+  cat > "$FIXTURE/decisions.jsonl" <<'JSONL'
+{"permission":"Bash(promoteme:*)","decision":"promote"}
+JSONL
+  run bash "$SCRIPT" apply --decisions "$FIXTURE/decisions.jsonl" \
+    --settings-dir "$FIXTURE" --log "$FIXTURE/permissions-log.json"
+  [ "$status" -eq 0 ]
+  [ ! -f "$FIXTURE/settings.json.bak" ]
+  [ ! -f "$FIXTURE/settings.local.json.bak" ]
+}

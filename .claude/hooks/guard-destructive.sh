@@ -44,4 +44,14 @@ if [[ "$COMMAND" =~ git[[:space:]]+clean[[:space:]]+-[a-zA-Z]*f ]]; then
   exit 2
 fi
 
+# Block destructive chmod numeric modes: 777/666 (world-writable), 000 (fully locked).
+# -R variants included. Symbolic modes (a+w etc) intentionally allowed — the hook
+# focuses on the catastrophic numeric-mode footguns.
+if [[ "$COMMAND" =~ chmod[[:space:]]+(-R[[:space:]]+)?(777|666|000)([[:space:]]|$) ]]; then
+  mode="${BASH_REMATCH[2]}"
+  echo "BLOCKED: chmod $mode grants or denies world-permissions broadly." >&2
+  echo "  To bypass: ALLOW_DESTRUCTIVE=1 chmod $mode ..." >&2
+  exit 2
+fi
+
 exit 0

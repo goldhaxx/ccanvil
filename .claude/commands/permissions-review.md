@@ -9,6 +9,7 @@ Walk the user through pending permissions-review candidates interactively, colle
 ```bash
 PR_PROMOTE=$(mktemp -t pr-promote)
 PR_CHECK=$(mktemp -t pr-check)
+DECISIONS=$(mktemp -t pr-decisions)
 bash .ccanvil/scripts/permissions-audit.sh promote-review --json > "$PR_PROMOTE"
 bash .ccanvil/scripts/permissions-audit.sh check --json > "$PR_CHECK"
 ```
@@ -61,11 +62,9 @@ If `skip`: don't append anything. The DANGER entry stays unreviewed (will surfac
 
 ### 5. Dispatch
 
-Create a tmpfile for the decisions buffer, write the per-row JSONL into it, then run:
+By this point, steps 3 and 4 have appended one JSONL record per approved decision into `$DECISIONS` (created up front in step 1). Now dispatch:
 
 ```bash
-DECISIONS=$(mktemp -t pr-decisions)
-# ... step 3/4 wrote one JSON object per line into "$DECISIONS" ...
 bash .ccanvil/scripts/permissions-audit.sh apply --decisions "$DECISIONS"
 ```
 

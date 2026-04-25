@@ -3,7 +3,7 @@
 > Feature: bts-155-gate-find-destructive
 > Work: linear:BTS-155
 > Created: 1777152482
-> Status: In Progress
+> Status: Complete
 
 ## Summary
 

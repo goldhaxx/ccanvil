@@ -717,10 +717,15 @@ JSON
   [ "$status" -eq 0 ]
 }
 
-# BTS-146 AC-12 ("allows cat on system path") was the snapshot of pre-BTS-153
-# behavior — cat outside the workspace was unblocked. BTS-153 supersedes this:
-# `cat /etc/passwd` now blocks (covered by BTS-153 AC-2). The original test
-# intentionally removed; the inverse assertion is now the contract.
+@test "BTS-146 AC-12 (superseded by BTS-153): cat /etc/passwd now blocks" {
+  # Original AC-12 asserted exit 0 (cat outside workspace was unblocked).
+  # BTS-153 flipped the contract; this test now asserts the new behavior in
+  # the same file location so a future regression on either side surfaces
+  # immediately rather than silently dropping coverage.
+  input='{"tool_name":"Bash","tool_input":{"command":"cat /etc/passwd"}}'
+  run bash -c "echo '$input' | '$WORKSPACE_HOOK'"
+  [ "$status" -eq 2 ]
+}
 
 @test "BTS-146 AC-13: ALLOW_OUTSIDE_WORKSPACE=1 bypass works" {
   input='{"tool_name":"Bash","tool_input":{"command":"ALLOW_OUTSIDE_WORKSPACE=1 rm /etc/foo"}}'

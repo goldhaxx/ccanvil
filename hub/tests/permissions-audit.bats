@@ -517,6 +517,146 @@ EOF
   echo "$output" | jq -e '.entries[0].status == "DANGER"'
 }
 
+# =========================================================================
+# BTS-144: promote-review subcommand for settings.local.json delta classification.
+# =========================================================================
+
+@test "BTS-144 AC-7: empty settings.local.json → empty output, exit 0" {
+  set -e
+  cat > "$FIXTURE/settings.json" <<'EOF'
+{"permissions": {"allow": ["Bash(git:*)"]}}
+EOF
+  # No settings.local.json file at all.
+
+  run bash "$SCRIPT" promote-review --settings-dir "$FIXTURE"
+  [ "$status" -eq 0 ]
+  echo "$output" | jq -e '.candidates == [] and .counts.total == 0'
+}
+
+@test "BTS-144 AC-2: candidate set is local-minus-main (string equality)" {
+  set -e
+  cat > "$FIXTURE/settings.json" <<'EOF'
+{"permissions": {"allow": ["Bash(other:*)"]}}
+EOF
+  cat > "$FIXTURE/settings.local.json" <<'EOF'
+{"permissions": {"allow": ["Bash(custom-tool:*)"]}}
+EOF
+
+  run bash "$SCRIPT" promote-review --settings-dir "$FIXTURE"
+  [ "$status" -eq 0 ]
+  echo "$output" | jq -e '.counts.total == 1'
+  echo "$output" | jq -e '.candidates[0].permission == "Bash(custom-tool:*)"'
+}
+
+@test "BTS-144 AC-3: redundant (covered by broader wildcard) → DELETE" {
+  set -e
+  cat > "$FIXTURE/settings.json" <<'EOF'
+{"permissions": {"allow": ["Bash(git:*)"]}}
+EOF
+  cat > "$FIXTURE/settings.local.json" <<'EOF'
+{"permissions": {"allow": ["Bash(git status:*)"]}}
+EOF
+
+  run bash "$SCRIPT" promote-review --settings-dir "$FIXTURE"
+  [ "$status" -eq 0 ]
+  echo "$output" | jq -e '.candidates[0].recommendation == "DELETE"'
+  echo "$output" | jq -e '.candidates[0].reason | test("redundant.*Bash\\(git:\\*\\)")'
+}
+
+@test "BTS-144 AC-4: preset/ path → DELETE dead path" {
+  set -e
+  cat > "$FIXTURE/settings.json" <<'EOF'
+{"permissions": {"allow": []}}
+EOF
+  cat > "$FIXTURE/settings.local.json" <<'EOF'
+{"permissions": {"allow": ["Bash(bash preset/old/script.sh)"]}}
+EOF
+
+  run bash "$SCRIPT" promote-review --settings-dir "$FIXTURE"
+  [ "$status" -eq 0 ]
+  echo "$output" | jq -e '.candidates[0].recommendation == "DELETE"'
+  echo "$output" | jq -e '.candidates[0].reason | test("dead path")'
+}
+
+@test "BTS-144 AC-5: env-prefix bypass with broadly-allowed underlying verb → DELETE one-shot" {
+  set -e
+  cat > "$FIXTURE/settings.json" <<'EOF'
+{"permissions": {"allow": ["Bash(bash:*)"]}}
+EOF
+  cat > "$FIXTURE/settings.local.json" <<'EOF'
+{"permissions": {"allow": ["Bash(ALLOW_OUTSIDE_WORKSPACE=1 bash ./x.sh)"]}}
+EOF
+
+  run bash "$SCRIPT" promote-review --settings-dir "$FIXTURE"
+  [ "$status" -eq 0 ]
+  echo "$output" | jq -e '.candidates[0].recommendation == "DELETE"'
+  echo "$output" | jq -e '.candidates[0].reason | test("one-shot bypass")'
+}
+
+@test "BTS-144 AC-6: no rule matches → TRIAGE" {
+  set -e
+  cat > "$FIXTURE/settings.json" <<'EOF'
+{"permissions": {"allow": ["Bash(other:*)"]}}
+EOF
+  cat > "$FIXTURE/settings.local.json" <<'EOF'
+{"permissions": {"allow": ["Bash(specific-cmd --flag)"]}}
+EOF
+
+  run bash "$SCRIPT" promote-review --settings-dir "$FIXTURE"
+  [ "$status" -eq 0 ]
+  echo "$output" | jq -e '.candidates[0].recommendation == "TRIAGE"'
+  echo "$output" | jq -e '.candidates[0].reason == "manual review required"'
+}
+
+@test "BTS-144 AC-1: JSON output shape includes candidates + counts.{delete,promote,triage,total}" {
+  set -e
+  cat > "$FIXTURE/settings.json" <<'EOF'
+{"permissions": {"allow": ["Bash(git:*)"]}}
+EOF
+  cat > "$FIXTURE/settings.local.json" <<'EOF'
+{"permissions": {"allow": ["Bash(git status:*)", "Bash(specific-cmd)"]}}
+EOF
+
+  run bash "$SCRIPT" promote-review --settings-dir "$FIXTURE"
+  [ "$status" -eq 0 ]
+  echo "$output" | jq -e '
+    (.candidates | type == "array") and
+    (.counts.delete == 1) and
+    (.counts.promote == 0) and
+    (.counts.triage == 1) and
+    (.counts.total == 2)
+  '
+}
+
+@test "BTS-144 AC-9: counts.promote always 0 even with mixed candidates" {
+  set -e
+  cat > "$FIXTURE/settings.json" <<'EOF'
+{"permissions": {"allow": ["Bash(bash:*)"]}}
+EOF
+  cat > "$FIXTURE/settings.local.json" <<'EOF'
+{"permissions": {"allow": ["Bash(ALLOW_OUTSIDE_WORKSPACE=1 bash ./x.sh)", "Bash(custom-tool:*)", "Bash(bash preset/old.sh)"]}}
+EOF
+
+  run bash "$SCRIPT" promote-review --settings-dir "$FIXTURE"
+  [ "$status" -eq 0 ]
+  echo "$output" | jq -e '.counts.promote == 0'
+}
+
+@test "BTS-144 AC-8: text mode shows DELETE and TRIAGE group headers" {
+  set -e
+  cat > "$FIXTURE/settings.json" <<'EOF'
+{"permissions": {"allow": ["Bash(git:*)"]}}
+EOF
+  cat > "$FIXTURE/settings.local.json" <<'EOF'
+{"permissions": {"allow": ["Bash(git status:*)", "Bash(custom-tool:*)"]}}
+EOF
+
+  run bash "$SCRIPT" promote-review --settings-dir "$FIXTURE" --text
+  [ "$status" -eq 0 ]
+  echo "$output" | grep -q "DELETE"
+  echo "$output" | grep -q "TRIAGE"
+}
+
 @test "BTS-143 AC-7: text-mode shows [risk-accepted] annotation on override entry" {
   set -e
   cat > "$FIXTURE/settings.json" <<'EOF'

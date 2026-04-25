@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # guard-workspace.sh — PreToolUse hook for Bash
-# Blocks file-mutation verbs (rm, cp, mv, chmod, chown, bash) when any
+# Blocks file-mutation verbs (rm, cp, mv, chmod, chown, bash, find) when any
 # absolute or tilde-prefixed path argument falls outside the workspace
 # ($HOME/projects/) or whitelisted system temp dirs.
 #
@@ -28,7 +28,7 @@ fi
 
 # Only enforce for commands containing a gated file-mutation verb.
 # Word-boundary match: verb must be at start, or after whitespace/;/|/&.
-if [[ ! "$COMMAND" =~ (^|[[:space:]\;\|\&])(rm|cp|mv|chmod|chown|bash)([[:space:]]|$) ]]; then
+if [[ ! "$COMMAND" =~ (^|[[:space:]\;\|\&])(rm|cp|mv|chmod|chown|bash|find)([[:space:]]|$) ]]; then
   exit 0
 fi
 

@@ -951,3 +951,359 @@ EOF
   [ "$status" -eq 0 ]
   jq -e '.entries | length == 1' "$FIXTURE/permissions-log.json"
 }
+
+# =========================================================================
+# BTS-149: apply --decisions <jsonl> — interactive triage substrate
+# Step 3: scaffolding (AC-1, AC-2, AC-4 partial — empty/invalid input,
+# decision validation, envelope shape, no-mutation no-backup)
+# =========================================================================
+
+@test "BTS-149 AC-1: apply with empty decisions file returns zero envelope" {
+  set -e
+  cat > "$FIXTURE/settings.json" <<'JSON'
+{"permissions":{"allow":["Bash(ls:*)"]}}
+JSON
+  : > "$FIXTURE/decisions.jsonl"
+  run bash "$SCRIPT" apply --decisions "$FIXTURE/decisions.jsonl" \
+    --settings-dir "$FIXTURE" --log "$FIXTURE/permissions-log.json"
+  [ "$status" -eq 0 ]
+  echo "$output" | jq -e '.applied == 0'
+  echo "$output" | jq -e '.skipped == 0'
+  echo "$output" | jq -e '.errors == []'
+}
+
+@test "BTS-149 AC-1: apply emits skipped count for keep-local decisions" {
+  set -e
+  cat > "$FIXTURE/settings.json" <<'JSON'
+{"permissions":{"allow":["Bash(ls:*)"]}}
+JSON
+  cat > "$FIXTURE/decisions.jsonl" <<'JSONL'
+{"permission":"Bash(ls:*)","decision":"keep-local"}
+{"permission":"Bash(ls:*)","decision":"keep-local"}
+JSONL
+  run bash "$SCRIPT" apply --decisions "$FIXTURE/decisions.jsonl" \
+    --settings-dir "$FIXTURE" --log "$FIXTURE/permissions-log.json"
+  [ "$status" -eq 0 ]
+  echo "$output" | jq -e '.applied == 0'
+  echo "$output" | jq -e '.skipped == 2'
+}
+
+@test "BTS-149 AC-2: apply rejects malformed JSONL with exit 2" {
+  cat > "$FIXTURE/settings.json" <<'JSON'
+{"permissions":{"allow":["Bash(ls:*)"]}}
+JSON
+  cat > "$FIXTURE/decisions.jsonl" <<'JSONL'
+{"permission":"Bash(ls:*)","decision":"keep-local"}
+not-valid-json-here
+JSONL
+  run bash "$SCRIPT" apply --decisions "$FIXTURE/decisions.jsonl" \
+    --settings-dir "$FIXTURE" --log "$FIXTURE/permissions-log.json"
+  [ "$status" -eq 2 ]
+}
+
+@test "BTS-149 AC-2: apply rejects unknown decision verb with exit 2" {
+  cat > "$FIXTURE/settings.json" <<'JSON'
+{"permissions":{"allow":["Bash(ls:*)"]}}
+JSON
+  cat > "$FIXTURE/decisions.jsonl" <<'JSONL'
+{"permission":"Bash(ls:*)","decision":"banana"}
+JSONL
+  run bash "$SCRIPT" apply --decisions "$FIXTURE/decisions.jsonl" \
+    --settings-dir "$FIXTURE" --log "$FIXTURE/permissions-log.json"
+  [ "$status" -eq 2 ]
+}
+
+@test "BTS-149 AC-2: apply rejects decision missing 'permission' field with exit 2" {
+  cat > "$FIXTURE/settings.json" <<'JSON'
+{"permissions":{"allow":["Bash(ls:*)"]}}
+JSON
+  cat > "$FIXTURE/decisions.jsonl" <<'JSONL'
+{"decision":"delete"}
+JSONL
+  run bash "$SCRIPT" apply --decisions "$FIXTURE/decisions.jsonl" \
+    --settings-dir "$FIXTURE" --log "$FIXTURE/permissions-log.json"
+  [ "$status" -eq 2 ]
+}
+
+@test "BTS-149 AC-4: apply with no mutating decisions creates no .bak files" {
+  set -e
+  cat > "$FIXTURE/settings.json" <<'JSON'
+{"permissions":{"allow":["Bash(ls:*)"]}}
+JSON
+  cat > "$FIXTURE/settings.local.json" <<'JSON'
+{"permissions":{"allow":["Bash(rm:*)"]}}
+JSON
+  cat > "$FIXTURE/decisions.jsonl" <<'JSONL'
+{"permission":"Bash(ls:*)","decision":"keep-local"}
+JSONL
+  run bash "$SCRIPT" apply --decisions "$FIXTURE/decisions.jsonl" \
+    --settings-dir "$FIXTURE" --log "$FIXTURE/permissions-log.json"
+  [ "$status" -eq 0 ]
+  [ ! -f "$FIXTURE/settings.json.bak" ]
+  [ ! -f "$FIXTURE/settings.local.json.bak" ]
+}
+
+@test "BTS-149: apply requires --decisions argument" {
+  cat > "$FIXTURE/settings.json" <<'JSON'
+{"permissions":{"allow":["Bash(ls:*)"]}}
+JSON
+  run bash "$SCRIPT" apply --settings-dir "$FIXTURE" --log "$FIXTURE/permissions-log.json"
+  [ "$status" -ne 0 ]
+}
+
+# Step 4: AC-3 (delete decision)
+
+@test "BTS-149 AC-3: delete removes entry from settings.local.json allow list" {
+  set -e
+  cat > "$FIXTURE/settings.json" <<'JSON'
+{"permissions":{"allow":["Bash(ls:*)"]}}
+JSON
+  cat > "$FIXTURE/settings.local.json" <<'JSON'
+{"permissions":{"allow":["Bash(rm:*)","Bash(stale:*)"]}}
+JSON
+  cat > "$FIXTURE/decisions.jsonl" <<'JSONL'
+{"permission":"Bash(stale:*)","decision":"delete"}
+JSONL
+  run bash "$SCRIPT" apply --decisions "$FIXTURE/decisions.jsonl" \
+    --settings-dir "$FIXTURE" --log "$FIXTURE/permissions-log.json"
+  [ "$status" -eq 0 ]
+  echo "$output" | jq -e '.applied == 1'
+  echo "$output" | jq -e '.skipped == 0'
+  jq -e '.permissions.allow == ["Bash(rm:*)"]' "$FIXTURE/settings.local.json"
+  jq -e '.permissions.allow == ["Bash(ls:*)"]' "$FIXTURE/settings.json"
+}
+
+@test "BTS-149 AC-3: delete of permission absent from local is a skip not an apply" {
+  set -e
+  cat > "$FIXTURE/settings.json" <<'JSON'
+{"permissions":{"allow":["Bash(ls:*)"]}}
+JSON
+  cat > "$FIXTURE/settings.local.json" <<'JSON'
+{"permissions":{"allow":["Bash(rm:*)"]}}
+JSON
+  cat > "$FIXTURE/decisions.jsonl" <<'JSONL'
+{"permission":"Bash(absent:*)","decision":"delete"}
+JSONL
+  run bash "$SCRIPT" apply --decisions "$FIXTURE/decisions.jsonl" \
+    --settings-dir "$FIXTURE" --log "$FIXTURE/permissions-log.json"
+  [ "$status" -eq 0 ]
+  echo "$output" | jq -e '.applied == 0'
+  echo "$output" | jq -e '.skipped == 1'
+  jq -e '.permissions.allow == ["Bash(rm:*)"]' "$FIXTURE/settings.local.json"
+}
+
+@test "BTS-149 AC-4: delete creates and removes .bak file on success" {
+  set -e
+  cat > "$FIXTURE/settings.json" <<'JSON'
+{"permissions":{"allow":["Bash(ls:*)"]}}
+JSON
+  cat > "$FIXTURE/settings.local.json" <<'JSON'
+{"permissions":{"allow":["Bash(stale:*)"]}}
+JSON
+  cat > "$FIXTURE/decisions.jsonl" <<'JSONL'
+{"permission":"Bash(stale:*)","decision":"delete"}
+JSONL
+  run bash "$SCRIPT" apply --decisions "$FIXTURE/decisions.jsonl" \
+    --settings-dir "$FIXTURE" --log "$FIXTURE/permissions-log.json"
+  [ "$status" -eq 0 ]
+  [ ! -f "$FIXTURE/settings.json.bak" ]
+  [ ! -f "$FIXTURE/settings.local.json.bak" ]
+}
+
+@test "BTS-149 AC-4: refuses to apply when stale .bak files already exist" {
+  cat > "$FIXTURE/settings.json" <<'JSON'
+{"permissions":{"allow":["Bash(ls:*)"]}}
+JSON
+  cat > "$FIXTURE/settings.local.json" <<'JSON'
+{"permissions":{"allow":["Bash(stale:*)"]}}
+JSON
+  echo '{"permissions":{"allow":[]}}' > "$FIXTURE/settings.local.json.bak"
+  cat > "$FIXTURE/decisions.jsonl" <<'JSONL'
+{"permission":"Bash(stale:*)","decision":"delete"}
+JSONL
+  run bash "$SCRIPT" apply --decisions "$FIXTURE/decisions.jsonl" \
+    --settings-dir "$FIXTURE" --log "$FIXTURE/permissions-log.json"
+  [ "$status" -ne 0 ]
+  # original local file untouched (still has the entry)
+  jq -e '.permissions.allow == ["Bash(stale:*)"]' "$FIXTURE/settings.local.json"
+}
+
+@test "BTS-149 AC-3: delete with missing settings.local.json is a skip" {
+  set -e
+  cat > "$FIXTURE/settings.json" <<'JSON'
+{"permissions":{"allow":["Bash(ls:*)"]}}
+JSON
+  cat > "$FIXTURE/decisions.jsonl" <<'JSONL'
+{"permission":"Bash(stale:*)","decision":"delete"}
+JSONL
+  run bash "$SCRIPT" apply --decisions "$FIXTURE/decisions.jsonl" \
+    --settings-dir "$FIXTURE" --log "$FIXTURE/permissions-log.json"
+  [ "$status" -eq 0 ]
+  echo "$output" | jq -e '.applied == 0'
+  echo "$output" | jq -e '.skipped == 1'
+}
+
+# Step 5: AC-3 (promote)
+
+@test "BTS-149 AC-3: promote moves entry from local to main allow list" {
+  set -e
+  cat > "$FIXTURE/settings.json" <<'JSON'
+{"permissions":{"allow":["Bash(ls:*)"]}}
+JSON
+  cat > "$FIXTURE/settings.local.json" <<'JSON'
+{"permissions":{"allow":["Bash(rm:*)","Bash(promoteme:*)"]}}
+JSON
+  cat > "$FIXTURE/decisions.jsonl" <<'JSONL'
+{"permission":"Bash(promoteme:*)","decision":"promote"}
+JSONL
+  run bash "$SCRIPT" apply --decisions "$FIXTURE/decisions.jsonl" \
+    --settings-dir "$FIXTURE" --log "$FIXTURE/permissions-log.json"
+  [ "$status" -eq 0 ]
+  echo "$output" | jq -e '.applied == 1'
+  echo "$output" | jq -e '.skipped == 0'
+  jq -e '.permissions.allow == ["Bash(ls:*)","Bash(promoteme:*)"]' "$FIXTURE/settings.json"
+  jq -e '.permissions.allow == ["Bash(rm:*)"]' "$FIXTURE/settings.local.json"
+}
+
+@test "BTS-149 AC-3: promote is idempotent when already in main allow list" {
+  set -e
+  cat > "$FIXTURE/settings.json" <<'JSON'
+{"permissions":{"allow":["Bash(ls:*)","Bash(promoteme:*)"]}}
+JSON
+  cat > "$FIXTURE/settings.local.json" <<'JSON'
+{"permissions":{"allow":["Bash(promoteme:*)"]}}
+JSON
+  cat > "$FIXTURE/decisions.jsonl" <<'JSONL'
+{"permission":"Bash(promoteme:*)","decision":"promote"}
+JSONL
+  run bash "$SCRIPT" apply --decisions "$FIXTURE/decisions.jsonl" \
+    --settings-dir "$FIXTURE" --log "$FIXTURE/permissions-log.json"
+  [ "$status" -eq 0 ]
+  # Documented semantic: promote increments `applied` whenever local was
+  # mutated, even when main was already up-to-date (idempotent on main).
+  echo "$output" | jq -e '.applied == 1'
+  echo "$output" | jq -e '.skipped == 0'
+  # main list should not contain duplicate
+  count=$(jq -r '[.permissions.allow[] | select(. == "Bash(promoteme:*)")] | length' "$FIXTURE/settings.json")
+  [ "$count" -eq 1 ]
+  # local file should still have the promote remove the entry
+  jq -e '.permissions.allow == []' "$FIXTURE/settings.local.json"
+}
+
+@test "BTS-149 AC-3: promote with permission absent from local still appends to main" {
+  set -e
+  cat > "$FIXTURE/settings.json" <<'JSON'
+{"permissions":{"allow":["Bash(ls:*)"]}}
+JSON
+  cat > "$FIXTURE/settings.local.json" <<'JSON'
+{"permissions":{"allow":[]}}
+JSON
+  cat > "$FIXTURE/decisions.jsonl" <<'JSONL'
+{"permission":"Bash(newperm:*)","decision":"promote"}
+JSONL
+  run bash "$SCRIPT" apply --decisions "$FIXTURE/decisions.jsonl" \
+    --settings-dir "$FIXTURE" --log "$FIXTURE/permissions-log.json"
+  [ "$status" -eq 0 ]
+  echo "$output" | jq -e '.applied == 1'
+  jq -e '.permissions.allow == ["Bash(ls:*)","Bash(newperm:*)"]' "$FIXTURE/settings.json"
+}
+
+@test "BTS-149 AC-4: promote creates .bak for both files and cleans up on success" {
+  set -e
+  cat > "$FIXTURE/settings.json" <<'JSON'
+{"permissions":{"allow":["Bash(ls:*)"]}}
+JSON
+  cat > "$FIXTURE/settings.local.json" <<'JSON'
+{"permissions":{"allow":["Bash(promoteme:*)"]}}
+JSON
+  cat > "$FIXTURE/decisions.jsonl" <<'JSONL'
+{"permission":"Bash(promoteme:*)","decision":"promote"}
+JSONL
+  run bash "$SCRIPT" apply --decisions "$FIXTURE/decisions.jsonl" \
+    --settings-dir "$FIXTURE" --log "$FIXTURE/permissions-log.json"
+  [ "$status" -eq 0 ]
+  [ ! -f "$FIXTURE/settings.json.bak" ]
+  [ ! -f "$FIXTURE/settings.local.json.bak" ]
+}
+
+# Step 6: AC-3 + AC-5 (accept-danger decision)
+
+@test "BTS-149 AC-3: accept-danger writes log entry with accept_danger:true" {
+  set -e
+  cat > "$FIXTURE/settings.json" <<'JSON'
+{"permissions":{"allow":["Bash(rm:*)"]}}
+JSON
+  cat > "$FIXTURE/decisions.jsonl" <<'JSONL'
+{"permission":"Bash(rm:*)","decision":"accept-danger","risk":"data loss","rationale":"used for cleanup scripts","efficiency_justification":"saves 5 prompts/day","reviewer":"zach"}
+JSONL
+  run bash "$SCRIPT" apply --decisions "$FIXTURE/decisions.jsonl" \
+    --settings-dir "$FIXTURE" --log "$FIXTURE/permissions-log.json"
+  [ "$status" -eq 0 ]
+  echo "$output" | jq -e '.applied == 1'
+  jq -e '.entries["Bash(rm:*)"].accept_danger == true' "$FIXTURE/permissions-log.json"
+  jq -e '.entries["Bash(rm:*)"].risk == "data loss"' "$FIXTURE/permissions-log.json"
+  jq -e '.entries["Bash(rm:*)"].rationale == "used for cleanup scripts"' "$FIXTURE/permissions-log.json"
+  jq -e '.entries["Bash(rm:*)"].efficiency_justification == "saves 5 prompts/day"' "$FIXTURE/permissions-log.json"
+  jq -e '.entries["Bash(rm:*)"].reviewer == "zach"' "$FIXTURE/permissions-log.json"
+}
+
+@test "BTS-149 AC-5: accept-danger missing risk field exits 2 with no mutation" {
+  cat > "$FIXTURE/settings.json" <<'JSON'
+{"permissions":{"allow":["Bash(rm:*)"]}}
+JSON
+  cat > "$FIXTURE/decisions.jsonl" <<'JSONL'
+{"permission":"Bash(rm:*)","decision":"accept-danger","rationale":"x","efficiency_justification":"y","reviewer":"z"}
+JSONL
+  run bash "$SCRIPT" apply --decisions "$FIXTURE/decisions.jsonl" \
+    --settings-dir "$FIXTURE" --log "$FIXTURE/permissions-log.json"
+  [ "$status" -eq 2 ]
+  # log untouched (no entry added)
+  jq -e '.entries == {}' "$FIXTURE/permissions-log.json"
+}
+
+@test "BTS-149 AC-5: accept-danger with TODO sentinel field exits 2" {
+  cat > "$FIXTURE/settings.json" <<'JSON'
+{"permissions":{"allow":["Bash(rm:*)"]}}
+JSON
+  cat > "$FIXTURE/decisions.jsonl" <<'JSONL'
+{"permission":"Bash(rm:*)","decision":"accept-danger","risk":"TODO","rationale":"x","efficiency_justification":"y","reviewer":"z"}
+JSONL
+  run bash "$SCRIPT" apply --decisions "$FIXTURE/decisions.jsonl" \
+    --settings-dir "$FIXTURE" --log "$FIXTURE/permissions-log.json"
+  [ "$status" -eq 2 ]
+  jq -e '.entries == {}' "$FIXTURE/permissions-log.json"
+}
+
+@test "BTS-149 AC-5: accept-danger with empty-string field exits 2" {
+  cat > "$FIXTURE/settings.json" <<'JSON'
+{"permissions":{"allow":["Bash(rm:*)"]}}
+JSON
+  cat > "$FIXTURE/decisions.jsonl" <<'JSONL'
+{"permission":"Bash(rm:*)","decision":"accept-danger","risk":"","rationale":"x","efficiency_justification":"y","reviewer":"z"}
+JSONL
+  run bash "$SCRIPT" apply --decisions "$FIXTURE/decisions.jsonl" \
+    --settings-dir "$FIXTURE" --log "$FIXTURE/permissions-log.json"
+  [ "$status" -eq 2 ]
+  jq -e '.entries == {}' "$FIXTURE/permissions-log.json"
+}
+
+@test "BTS-149 AC-3: accept-danger then check classifies as REVIEWED risk-accepted" {
+  set -e
+  # Use a permission that would normally classify as DANGER (matches "rm" pattern)
+  cat > "$FIXTURE/settings.json" <<'JSON'
+{"permissions":{"allow":["Bash(rm:*)"]}}
+JSON
+  cat > "$FIXTURE/decisions.jsonl" <<'JSONL'
+{"permission":"Bash(rm:*)","decision":"accept-danger","risk":"deletes files","rationale":"cleanup","efficiency_justification":"daily use","reviewer":"zach"}
+JSONL
+  run bash "$SCRIPT" apply --decisions "$FIXTURE/decisions.jsonl" \
+    --settings-dir "$FIXTURE" --log "$FIXTURE/permissions-log.json"
+  [ "$status" -eq 0 ]
+
+  # Now check should classify as REVIEWED with risk_accepted:true
+  run bash "$SCRIPT" check --settings-dir "$FIXTURE" --log "$FIXTURE/permissions-log.json"
+  echo "$output" | jq -e '.danger == 0'
+  echo "$output" | jq -e '.reviewed == 1'
+  echo "$output" | jq -e '.entries[0].status == "REVIEWED"'
+  echo "$output" | jq -e '.entries[0].risk_accepted == true'
+}

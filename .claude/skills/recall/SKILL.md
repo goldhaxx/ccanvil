@@ -22,6 +22,7 @@ Read the current state of the project to resume work after a context reset. `/re
 7. If `.ccanvil/scripts/docs-check.sh` exists, run `.ccanvil/scripts/docs-check.sh audit-session --since <last-stasis-commit>` (extract the commit from stasis metadata or use the last 10 commits) and note any new findings.
 
 8. If `.ccanvil/scripts/docs-check.sh` exists, run `.ccanvil/scripts/docs-check.sh idea-count` and note any untriaged ideas.
+9. If `.ccanvil/scripts/permissions-audit.sh` exists (BTS-149), run both: `permissions-audit.sh check --json` and `permissions-audit.sh promote-review --json`. Read `.danger` and `.counts.total` and sum them.
 
 ## Briefing
 
@@ -29,6 +30,7 @@ Then provide a brief summary:
 - Lifecycle state (from steps 0a/0b — aligned/stale/mismatched/no-active-spec + recommended action)
 - **Spec backlog** — count of specs by status from step 0c, and which spec (if any) is active on the current branch
 - **Ideas** — untriaged idea count from step 8 (if > 0, note: "N untriaged ideas — run /idea triage")
+- **Permissions Review** — sum from step 9. When `(check.danger + promote-review.counts.total) > 0`, print one line: `**Permissions Review:** N candidates pending — run /permissions-review`. When 0, omit entirely (no noise).
 - **Branch** — current branch name and whether it follows convention (from step 0d)
 - **Outstanding determinism improvements** — if the previous stasis's `## Determinism Review` had candidates, list them under this heading before the regular summary
 - **Post-stasis audit findings** — if `audit-session` found patterns since the last stasis, list them here

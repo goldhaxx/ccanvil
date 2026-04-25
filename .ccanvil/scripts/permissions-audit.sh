@@ -30,20 +30,23 @@ LOG_FILE=""  # set after parsing args; defaults to SETTINGS_DIR/permissions-log.
 CMD=""
 TEXT_MODE=false
 VERBOSE=false
+DECISIONS_FILE=""
 
 usage() {
-  echo "Usage: permissions-audit.sh <check|init> [--settings-dir DIR] [--log FILE] [--text|--json] [--verbose]" >&2
+  echo "Usage: permissions-audit.sh <check|init|promote-review|apply> [--settings-dir DIR] [--log FILE] [--decisions FILE] [--text|--json] [--verbose]" >&2
   exit 2
 }
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
-    check|init|promote-review)
+    check|init|promote-review|apply)
       CMD="$1"; shift ;;
     --settings-dir)
       SETTINGS_DIR="$2"; shift 2 ;;
     --log)
       LOG_FILE="$2"; shift 2 ;;
+    --decisions)
+      DECISIONS_FILE="$2"; shift 2 ;;
     --text)
       TEXT_MODE=true; shift ;;
     --json)
@@ -541,6 +544,192 @@ cmd_promote_review() {
 }
 
 # ---------------------------------------------------------------------------
+# BTS-149 — apply --decisions <jsonl>: interactive triage substrate
+# ---------------------------------------------------------------------------
+
+# Globals used by the ERR trap installed during cmd_apply's mutation pass.
+# Set immediately before mutations start so the trap can restore from .bak
+# on any failure mid-stream (AC-4 atomicity).
+_APPLY_LOCAL_FILE=""
+_APPLY_MAIN_FILE=""
+
+apply_restore_and_exit() {
+  [[ -n "$_APPLY_LOCAL_FILE" && -f "$_APPLY_LOCAL_FILE.bak" ]] && mv "$_APPLY_LOCAL_FILE.bak" "$_APPLY_LOCAL_FILE"
+  [[ -n "$_APPLY_MAIN_FILE"  && -f "$_APPLY_MAIN_FILE.bak"  ]] && mv "$_APPLY_MAIN_FILE.bak"  "$_APPLY_MAIN_FILE"
+  exit 3
+}
+
+cmd_apply() {
+  if [[ -z "$DECISIONS_FILE" ]]; then
+    emit_error_envelope "apply requires --decisions <file>" 2
+  fi
+  if [[ ! -f "$DECISIONS_FILE" ]]; then
+    emit_error_envelope "decisions file not found: $DECISIONS_FILE" 2
+  fi
+
+  # Pre-flight validation: parse every non-blank line as JSON, check for
+  # required `permission` field, and verify `decision` is in the known set.
+  # Any error → exit 2 BEFORE any backup or mutation. AC-2: no partial
+  # mutation on validation errors.
+  local line_no=0
+  while IFS= read -r line || [[ -n "$line" ]]; do
+    line_no=$((line_no+1))
+    [[ -z "$line" ]] && continue
+
+    if ! echo "$line" | jq -e . >/dev/null 2>&1; then
+      emit_error_envelope "decisions:$line_no: malformed JSON" 2
+    fi
+
+    local perm dec
+    perm=$(echo "$line" | jq -r '.permission // ""')
+    dec=$(echo "$line" | jq -r '.decision // ""')
+
+    if [[ -z "$perm" ]]; then
+      emit_error_envelope "decisions:$line_no: missing 'permission' field" 2
+    fi
+
+    case "$dec" in
+      delete|promote|keep-local) ;;
+      accept-danger)
+        # AC-5: all 4 required fields must be non-empty and not "TODO".
+        local _f
+        for _f in risk rationale efficiency_justification reviewer; do
+          local _v
+          _v=$(echo "$line" | jq -r --arg k "$_f" '.[$k] // ""')
+          if [[ -z "$_v" || "$_v" == "TODO" ]]; then
+            emit_error_envelope "decisions:$line_no: accept-danger requires non-empty '$_f' (got empty or 'TODO')" 2
+          fi
+        done
+        ;;
+      "")
+        emit_error_envelope "decisions:$line_no: missing 'decision' field" 2 ;;
+      *)
+        emit_error_envelope "decisions:$line_no: unknown decision '$dec' (expected delete|promote|keep-local|accept-danger)" 2 ;;
+    esac
+  done < "$DECISIONS_FILE"
+
+  # Determine which target files need backup based on decision verbs.
+  local local_file="$SETTINGS_DIR/settings.local.json"
+  local main_file="$SETTINGS_DIR/settings.json"
+  local needs_local_bak=0 needs_main_bak=0
+  while IFS= read -r line || [[ -n "$line" ]]; do
+    [[ -z "$line" ]] && continue
+    local dec
+    dec=$(echo "$line" | jq -r '.decision')
+    case "$dec" in
+      delete)  needs_local_bak=1 ;;
+      promote) needs_local_bak=1; needs_main_bak=1 ;;
+    esac
+  done < "$DECISIONS_FILE"
+
+  # Refuse to run if stale .bak files exist (recovery from previous
+  # failed apply). Investigate manually rather than silently overwrite.
+  if [[ "$needs_local_bak" -eq 1 && -f "$local_file.bak" ]]; then
+    emit_error_envelope "$local_file.bak exists — recovery file from previous failed apply; investigate and remove manually" 3
+  fi
+  if [[ "$needs_main_bak" -eq 1 && -f "$main_file.bak" ]]; then
+    emit_error_envelope "$main_file.bak exists — recovery file from previous failed apply; investigate and remove manually" 3
+  fi
+
+  # Create backups for the files we're about to mutate. Skip if the
+  # source file doesn't exist (no need to back up nothing). Install the
+  # ERR trap BEFORE the cp commands so a partial-backup failure (e.g.,
+  # second cp fails after first succeeds) is restored, not orphaned.
+  _APPLY_LOCAL_FILE="$local_file"
+  _APPLY_MAIN_FILE="$main_file"
+  trap apply_restore_and_exit ERR
+  if [[ "$needs_local_bak" -eq 1 && -f "$local_file" ]]; then
+    cp "$local_file" "$local_file.bak"
+  fi
+  if [[ "$needs_main_bak" -eq 1 && -f "$main_file" ]]; then
+    cp "$main_file" "$main_file.bak"
+  fi
+
+  # Execution pass. delete is implemented in step 4; promote/accept-danger
+  # land in steps 5-6.
+  local applied=0 skipped=0
+  while IFS= read -r line || [[ -n "$line" ]]; do
+    [[ -z "$line" ]] && continue
+    local dec perm
+    dec=$(echo "$line" | jq -r '.decision')
+    perm=$(echo "$line" | jq -r '.permission')
+    case "$dec" in
+      keep-local)
+        skipped=$((skipped+1))
+        ;;
+      delete)
+        if [[ ! -f "$local_file" ]]; then
+          skipped=$((skipped+1))
+          continue
+        fi
+        # Skip if the permission isn't actually present in local.
+        if ! jq -e --arg p "$perm" '.permissions.allow | index($p) != null' "$local_file" >/dev/null 2>&1; then
+          skipped=$((skipped+1))
+          continue
+        fi
+        local tmp
+        tmp=$(mktemp)
+        jq --arg p "$perm" '.permissions.allow |= map(select(. != $p))' "$local_file" > "$tmp"
+        mv "$tmp" "$local_file"
+        applied=$((applied+1))
+        ;;
+      promote)
+        local tmp_main tmp_local already_main
+        # Append to main if not already present (idempotent).
+        if [[ -f "$main_file" ]]; then
+          already_main=$(jq --arg p "$perm" '.permissions.allow | index($p) != null' "$main_file")
+          if [[ "$already_main" != "true" ]]; then
+            tmp_main=$(mktemp)
+            jq --arg p "$perm" '.permissions.allow += [$p]' "$main_file" > "$tmp_main"
+            mv "$tmp_main" "$main_file"
+          fi
+        else
+          tmp_main=$(mktemp)
+          jq -n --arg p "$perm" '{permissions:{allow:[$p]}}' > "$tmp_main"
+          mv "$tmp_main" "$main_file"
+        fi
+        # Remove from local if present.
+        if [[ -f "$local_file" ]]; then
+          tmp_local=$(mktemp)
+          jq --arg p "$perm" '.permissions.allow |= map(select(. != $p))' "$local_file" > "$tmp_local"
+          mv "$tmp_local" "$local_file"
+        fi
+        applied=$((applied+1))
+        ;;
+      accept-danger)
+        # AC-3: write log entry with accept_danger:true and the four
+        # required fields (already validated pre-flight). Merge into
+        # .entries; existing entries are overwritten by design (re-running
+        # accept-danger updates the rationale).
+        local _risk _rat _eff _rev tmp_log
+        _risk=$(echo "$line" | jq -r '.risk')
+        _rat=$(echo "$line" | jq -r '.rationale')
+        _eff=$(echo "$line" | jq -r '.efficiency_justification')
+        _rev=$(echo "$line" | jq -r '.reviewer')
+        if [[ ! -f "$LOG_FILE" ]]; then
+          jq -n '{entries:{}}' > "$LOG_FILE"
+        fi
+        tmp_log=$(mktemp)
+        jq --arg p "$perm" --arg risk "$_risk" --arg rat "$_rat" \
+           --arg eff "$_eff" --arg rev "$_rev" \
+           '.entries[$p] = {risk: $risk, rationale: $rat, efficiency_justification: $eff, reviewer: $rev, accept_danger: true}' \
+           "$LOG_FILE" > "$tmp_log"
+        mv "$tmp_log" "$LOG_FILE"
+        applied=$((applied+1))
+        ;;
+    esac
+  done < "$DECISIONS_FILE"
+
+  # Cleanup backups on success.
+  trap - ERR
+  [[ -f "$local_file.bak" ]] && rm "$local_file.bak"
+  [[ -f "$main_file.bak"  ]] && rm "$main_file.bak"
+
+  jq -n --argjson a "$applied" --argjson s "$skipped" \
+    '{applied: $a, skipped: $s, errors: []}'
+}
+
+# ---------------------------------------------------------------------------
 # Dispatch
 # ---------------------------------------------------------------------------
 
@@ -548,5 +737,6 @@ case "$CMD" in
   check)          cmd_check ;;
   init)           cmd_init ;;
   promote-review) cmd_promote_review ;;
+  apply)          cmd_apply ;;
   *)              usage ;;
 esac

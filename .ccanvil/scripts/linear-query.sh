@@ -75,7 +75,10 @@ _require_api_key() {
 # an "errors" array.
 _post_graphql() {
   local query="$1"
-  local variables="${2:-{}}"
+  # NOTE: do NOT use ${2:-{}} — bash parameter expansion reads only to the
+  # first '}', making the default '{' and leaving a stray '}' as literal.
+  local variables="${2:-}"
+  [[ -z "$variables" ]] && variables='{}'
   local endpoint="${LINEAR_QUERY_ENDPOINT:-https://api.linear.app/graphql}"
 
   local body
@@ -113,22 +116,144 @@ cmd_viewer() {
 
 cmd_list_issues() {
   _require_api_key
-  _die 3 "list-issues: not yet implemented (Step 3)"
+
+  local project="" team="" state="" label="" limit="50"
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --project) project="$2"; shift 2 ;;
+      --team)    team="$2";    shift 2 ;;
+      --state)   state="$2";   shift 2 ;;
+      --label)   label="$2";   shift 2 ;;
+      --limit)   limit="$2";   shift 2 ;;
+      *) _die 2 "list-issues: unknown flag: $1" ;;
+    esac
+  done
+
+  # Compose the IssueFilter object incrementally so callers only pay for
+  # the dimensions they constrain. Linear's filter shape is canonical:
+  # field: { type/name/id: { eq: value } }, with labels using `some`.
+  local filter='{}'
+  if [[ -n "$project" ]]; then
+    filter=$(printf '%s' "$filter" | jq --arg v "$project" '. + {project:{name:{eq:$v}}}')
+  fi
+  if [[ -n "$team" ]]; then
+    filter=$(printf '%s' "$filter" | jq --arg v "$team" '. + {team:{name:{eq:$v}}}')
+  fi
+  if [[ -n "$state" ]]; then
+    filter=$(printf '%s' "$filter" | jq --arg v "$state" '. + {state:{type:{eq:$v}}}')
+  fi
+  if [[ -n "$label" ]]; then
+    filter=$(printf '%s' "$filter" | jq --arg v "$label" '. + {labels:{some:{name:{eq:$v}}}}')
+  fi
+
+  local variables
+  variables=$(jq -n --argjson f "$filter" --argjson n "$limit" '{filter:$f, first:$n}')
+
+  local query='query ($filter: IssueFilter, $first: Int) {
+    issues(filter: $filter, first: $first) {
+      nodes {
+        identifier title priority createdAt updatedAt
+        state { name type id }
+        labels { nodes { name } }
+      }
+    }
+  }'
+
+  _post_graphql "$query" "$variables" | jq '[.issues.nodes[] | {
+    id: .identifier,
+    title: .title,
+    status: .state.name,
+    statusType: .state.type,
+    priority: (.priority // null),
+    createdAt: .createdAt,
+    updatedAt: .updatedAt,
+    labels: [.labels.nodes[].name]
+  }]'
 }
 
 cmd_get_issue() {
   _require_api_key
-  _die 3 "get-issue: not yet implemented (Step 3)"
+  if [[ $# -lt 1 ]]; then
+    _die 2 "get-issue requires an issue identifier (e.g., BTS-164)"
+  fi
+  local id="$1"
+
+  local variables
+  variables=$(jq -nc --arg id "$id" '{id:$id}')
+
+  local query='query ($id: String!) {
+    issue(id: $id) {
+      identifier title priority createdAt updatedAt description
+      state { name type id }
+      labels { nodes { name } }
+    }
+  }'
+
+  _post_graphql "$query" "$variables" | jq '.issue | {
+    id: .identifier,
+    title: .title,
+    status: .state.name,
+    statusType: .state.type,
+    priority: (.priority // null),
+    createdAt: .createdAt,
+    updatedAt: .updatedAt,
+    description: .description,
+    labels: [.labels.nodes[].name]
+  }'
 }
 
 cmd_list_states() {
   _require_api_key
-  _die 3 "list-states: not yet implemented (Step 3)"
+  local team=""
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --team) team="$2"; shift 2 ;;
+      *) _die 2 "list-states: unknown flag: $1" ;;
+    esac
+  done
+
+  local filter='{}'
+  if [[ -n "$team" ]]; then
+    filter=$(printf '%s' "$filter" | jq --arg v "$team" '. + {team:{name:{eq:$v}}}')
+  fi
+
+  local variables
+  variables=$(jq -n --argjson f "$filter" '{filter:$f}')
+
+  local query='query ($filter: WorkflowStateFilter) {
+    workflowStates(filter: $filter) {
+      nodes { id name type }
+    }
+  }'
+
+  _post_graphql "$query" "$variables" | jq '[.workflowStates.nodes[] | {id, name, type}]'
 }
 
 cmd_list_labels() {
   _require_api_key
-  _die 3 "list-labels: not yet implemented (Step 3)"
+  local team=""
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --team) team="$2"; shift 2 ;;
+      *) _die 2 "list-labels: unknown flag: $1" ;;
+    esac
+  done
+
+  local filter='{}'
+  if [[ -n "$team" ]]; then
+    filter=$(printf '%s' "$filter" | jq --arg v "$team" '. + {team:{name:{eq:$v}}}')
+  fi
+
+  local variables
+  variables=$(jq -n --argjson f "$filter" '{filter:$f}')
+
+  local query='query ($filter: IssueLabelFilter) {
+    issueLabels(filter: $filter) {
+      nodes { id name }
+    }
+  }'
+
+  _post_graphql "$query" "$variables" | jq '[.issueLabels.nodes[] | {id, name}]'
 }
 
 cmd_save_issue() {

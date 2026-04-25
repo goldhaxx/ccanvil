@@ -127,3 +127,113 @@ JSON
   [ "$status" -eq 3 ]
   [[ "$stderr" =~ "Invalid API key" ]]
 }
+
+# ===========================================================================
+# AC-1, AC-8: read subcommands (list-issues, get-issue, list-states, list-labels)
+# ===========================================================================
+
+# Helper: extract the body sent to curl (after the <<BODY>> sentinel).
+_get_body() {
+  awk '/<<BODY>>/{flag=1;next} flag' "$LINEAR_STUB_CAPTURE"
+}
+
+@test "BTS-164 AC-1: list-issues parses .issues.nodes into canonical shape" {
+  set -e
+  _setup_stub
+  cat > "$LINEAR_STUB_RESPONSE" <<'JSON'
+{"data":{"issues":{"nodes":[
+  {"id":"u1","identifier":"BTS-100","title":"first","priority":2,"createdAt":"2026-04-25","state":{"name":"Triage","type":"triage","id":"s1"},"labels":{"nodes":[{"name":"idea"}]}},
+  {"id":"u2","identifier":"BTS-101","title":"second","priority":3,"createdAt":"2026-04-26","state":{"name":"Backlog","type":"backlog","id":"s2"},"labels":{"nodes":[]}}
+]}}}
+JSON
+  run bash -c "source '$STUB_FIXTURE' && bash '$LQ' list-issues"
+  [ "$status" -eq 0 ]
+  echo "$output" | jq -e 'length == 2'
+  echo "$output" | jq -e '.[0].id == "BTS-100" and .[0].status == "Triage" and .[0].statusType == "triage"'
+  echo "$output" | jq -e '.[0].labels == ["idea"]'
+}
+
+@test "BTS-164 AC-1: list-issues --state triage --label idea --project P --team T builds combined filter" {
+  set -e
+  _setup_stub
+  cat > "$LINEAR_STUB_RESPONSE" <<'JSON'
+{"data":{"issues":{"nodes":[]}}}
+JSON
+  run bash -c "source '$STUB_FIXTURE' && bash '$LQ' list-issues --state triage --label idea --project P --team T"
+  [ "$status" -eq 0 ]
+  local body
+  body=$(_get_body)
+  echo "$body" | jq -e '.variables.filter.state.type.eq == "triage"'
+  echo "$body" | jq -e '.variables.filter.labels.some.name.eq == "idea"'
+  echo "$body" | jq -e '.variables.filter.project.name.eq == "P"'
+  echo "$body" | jq -e '.variables.filter.team.name.eq == "T"'
+}
+
+@test "BTS-164 AC-1: list-issues --limit overrides default first" {
+  set -e
+  _setup_stub
+  cat > "$LINEAR_STUB_RESPONSE" <<'JSON'
+{"data":{"issues":{"nodes":[]}}}
+JSON
+  run bash -c "source '$STUB_FIXTURE' && bash '$LQ' list-issues --limit 10"
+  [ "$status" -eq 0 ]
+  _get_body | jq -e '.variables.first == 10'
+}
+
+@test "BTS-164 AC-1: list-issues unknown flag exits 2" {
+  _setup_stub
+  run --separate-stderr bash -c "source '$STUB_FIXTURE' && bash '$LQ' list-issues --bogus x"
+  [ "$status" -eq 2 ]
+  [[ "$stderr" =~ "unknown flag" ]]
+}
+
+@test "BTS-164 AC-1: get-issue requires identifier arg" {
+  _setup_stub
+  run --separate-stderr bash -c "source '$STUB_FIXTURE' && bash '$LQ' get-issue"
+  [ "$status" -eq 2 ]
+  [[ "$stderr" =~ "requires" ]]
+}
+
+@test "BTS-164 AC-1: get-issue BTS-100 sends issue(id) query and parses response" {
+  set -e
+  _setup_stub
+  cat > "$LINEAR_STUB_RESPONSE" <<'JSON'
+{"data":{"issue":{"id":"u1","identifier":"BTS-100","title":"first","priority":2,"createdAt":"2026-04-25","state":{"name":"Triage","type":"triage","id":"s1"},"labels":{"nodes":[{"name":"idea"}]}}}}
+JSON
+  run bash -c "source '$STUB_FIXTURE' && bash '$LQ' get-issue BTS-100"
+  [ "$status" -eq 0 ]
+  echo "$output" | jq -e '.id == "BTS-100" and .title == "first" and .status == "Triage"'
+  _get_body | jq -e '.variables.id == "BTS-100"'
+}
+
+@test "BTS-164 AC-1: list-states --team T sends workflowStates query and parses nodes" {
+  set -e
+  _setup_stub
+  cat > "$LINEAR_STUB_RESPONSE" <<'JSON'
+{"data":{"workflowStates":{"nodes":[
+  {"id":"s1","name":"Triage","type":"triage"},
+  {"id":"s2","name":"Backlog","type":"backlog"}
+]}}}
+JSON
+  run bash -c "source '$STUB_FIXTURE' && bash '$LQ' list-states --team T"
+  [ "$status" -eq 0 ]
+  echo "$output" | jq -e 'length == 2'
+  echo "$output" | jq -e '.[0].id == "s1" and .[0].name == "Triage" and .[0].type == "triage"'
+  _get_body | jq -e '.variables.filter.team.name.eq == "T"'
+}
+
+@test "BTS-164 AC-1: list-labels --team T sends issueLabels query and parses nodes" {
+  set -e
+  _setup_stub
+  cat > "$LINEAR_STUB_RESPONSE" <<'JSON'
+{"data":{"issueLabels":{"nodes":[
+  {"id":"l1","name":"idea"},
+  {"id":"l2","name":"scaffold"}
+]}}}
+JSON
+  run bash -c "source '$STUB_FIXTURE' && bash '$LQ' list-labels --team T"
+  [ "$status" -eq 0 ]
+  echo "$output" | jq -e 'length == 2'
+  echo "$output" | jq -e '.[0].name == "idea"'
+  _get_body | jq -e '.variables.filter.team.name.eq == "T"'
+}

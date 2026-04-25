@@ -3,7 +3,7 @@
 > Feature: bts-166-linear-substrate-phase-2
 > Work: linear:BTS-166
 > Created: 1777158862
-> Status: In Progress
+> Status: Complete
 
 ## Summary
 

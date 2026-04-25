@@ -1,12 +1,17 @@
 #!/usr/bin/env bash
 # guard-workspace.sh — PreToolUse hook for Bash
 # Blocks file-mutation verbs (rm, cp, mv, chmod, chown, bash, find, sort)
-# when any absolute or tilde-prefixed path argument falls outside the
-# workspace ($HOME/projects/) or whitelisted system temp dirs.
+# AND read verbs with exfiltration risk (cat) when any absolute or
+# tilde-prefixed path argument falls outside the workspace
+# ($HOME/projects/) or whitelisted system temp dirs.
 #
 # `sort` is gated because of `-o FILE` (writer flag) and shell-redirect
 # targets (BTS-157). Path-token iteration handles both incidentally;
 # no special-casing for -o needed.
+# `cat` is gated for read-side exfiltration: bash `cat ~/.ssh/id_*` etc.
+# would otherwise pull sensitive files into Claude's context with no
+# prompt. The bash route is intentionally tighter than the Read tool
+# (BTS-153). ALLOW_OUTSIDE_WORKSPACE=1 bypass.
 #
 # Exit 2 = hard block (stderr becomes Claude's feedback)
 # Exit 0 = allow
@@ -18,8 +23,12 @@
 #   - Subshell expansion ($(cmd)) — literal substrings inside $(...) ARE
 #     scanned, so most cases (like rm $(find /)) still trip on the literal /.
 #   - Aliased / case-variant verbs (gsort, gfind on macOS Homebrew; Sort
-#     capitalized) — the alternation is literal and case-sensitive. Add
-#     to the verb list if/when they become operationally relevant.
+#     capitalized; bat as a cat replacement) — the alternation is literal
+#     and case-sensitive. Add to the verb list if/when they become
+#     operationally relevant.
+#   - Intentional friction: cat blocks force operators to either prefix
+#     ALLOW_OUTSIDE_WORKSPACE=1 for ad-hoc system reads, or pivot to the
+#     Read tool. Acceptable — read-tool asymmetry tracked via BTS-150.
 
 set -uo pipefail
 
@@ -35,7 +44,7 @@ fi
 
 # Only enforce for commands containing a gated file-mutation verb.
 # Word-boundary match: verb must be at start, or after whitespace/;/|/&.
-if [[ ! "$COMMAND" =~ (^|[[:space:]\;\|\&])(rm|cp|mv|chmod|chown|bash|find|sort)([[:space:]]|$) ]]; then
+if [[ ! "$COMMAND" =~ (^|[[:space:]\;\|\&])(rm|cp|mv|chmod|chown|bash|find|sort|cat)([[:space:]]|$) ]]; then
   exit 0
 fi
 

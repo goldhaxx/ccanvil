@@ -303,6 +303,9 @@ cmd_save_issue() {
   if [[ -n "$parent_id" ]]; then
     input=$(printf '%s' "$input" | jq --arg v "$parent_id" '. + {parentId:$v}')
   fi
+  if [[ -n "$duplicate_of" ]]; then
+    input=$(printf '%s' "$input" | jq --arg v "$duplicate_of" '. + {duplicateOf:$v}')
+  fi
   if [[ -n "$priority" ]]; then
     input=$(printf '%s' "$input" | jq --argjson v "$priority" '. + {priority:$v}')
   fi

@@ -38,7 +38,7 @@ usage() {
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
-    check|init)
+    check|init|promote-review)
       CMD="$1"; shift ;;
     --settings-dir)
       SETTINGS_DIR="$2"; shift 2 ;;
@@ -415,11 +415,138 @@ cmd_init() {
 }
 
 # ---------------------------------------------------------------------------
+# Promote-review command (BTS-144)
+#
+# Lists settings.local.json entries not in settings.json and classifies each
+# deterministically: DELETE (redundant covered by broader, dead-path, or
+# env-prefix one-shot) or TRIAGE (needs human judgment). PROMOTE is reserved
+# for the future --apply flow.
+#
+# Output: JSON {candidates: [...], counts: {delete, promote, triage, total}}
+# Exit: always 0 (read-only review tooling).
+# ---------------------------------------------------------------------------
+
+cmd_promote_review() {
+  local main_file="$SETTINGS_DIR/settings.json"
+  local local_file="$SETTINGS_DIR/settings.local.json"
+
+  # Empty/missing local file → empty output.
+  if [[ ! -f "$local_file" ]]; then
+    jq -n '{candidates: [], counts: {delete: 0, promote: 0, triage: 0, total: 0}}'
+    return 0
+  fi
+
+  # Both files must exist for delta. Treat missing main as empty allow list.
+  local main_entries local_entries
+  if [[ -f "$main_file" ]]; then
+    main_entries=$(parse_settings_file "$main_file" "settings.json")
+  else
+    main_entries="[]"
+  fi
+  local_entries=$(parse_settings_file "$local_file" "settings.local.json")
+
+  # Filter local entries to those NOT in main (string equality).
+  local main_set
+  main_set=$(echo "$main_entries" | jq -c '[.[].permission]')
+  local candidates_raw
+  candidates_raw=$(jq -nc --argjson l "$local_entries" --argjson m "$main_set" \
+    '$l | map(select(.permission as $p | $m | index($p) | not))')
+
+  # Pre-extract main wildcard list (Bash(<word>:*)) for AC-3.
+  local main_wildcards
+  main_wildcards=$(echo "$main_entries" | jq -r '.[].permission | select(test("^Bash\\(([^:)]+):\\*\\)$"))')
+
+  local classified="[]"
+  local d_count=0 t_count=0
+
+  local n
+  n=$(echo "$candidates_raw" | jq 'length')
+  local i
+  for ((i=0; i<n; i++)); do
+    local perm rec reason
+    perm=$(echo "$candidates_raw" | jq -r ".[$i].permission")
+    rec="TRIAGE"
+    reason="manual review required"
+
+    # AC-3: redundant — broader Bash(<word>:*) wildcard in main covers this entry.
+    # Regex stored in vars to dodge bash's = ~ + paren parsing weirdness.
+    local broader=""
+    local _wildcard_re='^Bash\(([^:)]+):\*\)$'
+    if [[ -n "$main_wildcards" ]]; then
+      while IFS= read -r main_p; do
+        [[ -z "$main_p" ]] && continue
+        if [[ "$main_p" =~ $_wildcard_re ]]; then
+          local word="${BASH_REMATCH[1]}"
+          if [[ "$perm" == "Bash($word "* || "$perm" == "Bash($word:"* ]]; then
+            broader="$main_p"
+            break
+          fi
+        fi
+      done <<< "$main_wildcards"
+    fi
+
+    local _envprefix_re='^Bash\(ALLOW_[A-Z_]+=1 (bash|rm|cp|mv|chmod|chown) '
+    if [[ -n "$broader" ]]; then
+      rec="DELETE"
+      reason="redundant: covered by '$broader' in settings.json"
+    elif [[ "$perm" == *"preset/"* ]]; then
+      # AC-4: dead path — pre-BTS-67 preset/ directory removed during flatten.
+      rec="DELETE"
+      reason="dead path: pre-BTS-67 preset/ structure removed"
+    elif [[ "$perm" =~ $_envprefix_re ]]; then
+      # AC-5: env-prefix one-shot — underlying verb broadly allowed in main.
+      local verb="${BASH_REMATCH[1]}"
+      if echo "$main_entries" | jq -e --arg v "Bash($verb:*)" '.[] | select(.permission == $v)' >/dev/null 2>&1; then
+        rec="DELETE"
+        reason="one-shot bypass: underlying command now broadly allowed"
+      fi
+    fi
+
+    classified=$(echo "$classified" | jq --arg p "$perm" --arg r "$rec" --arg rs "$reason" \
+      '. + [{permission: $p, source: ["settings.local.json"], recommendation: $r, reason: $rs}]')
+
+    if [[ "$rec" == "DELETE" ]]; then
+      d_count=$((d_count + 1))
+    else
+      t_count=$((t_count + 1))
+    fi
+  done
+
+  if [[ "$TEXT_MODE" == "true" ]]; then
+    if [[ "$d_count" -eq 0 && "$t_count" -eq 0 ]]; then
+      echo "No promote-review candidates."
+      return 0
+    fi
+    if [[ "$d_count" -gt 0 ]]; then
+      echo "--- DELETE ---"
+      echo "$classified" | jq -r '
+        [.[] | select(.recommendation == "DELETE")] | .[] |
+        "  \(.permission)  — \(.reason)"
+      '
+      echo ""
+    fi
+    if [[ "$t_count" -gt 0 ]]; then
+      echo "--- TRIAGE ---"
+      echo "$classified" | jq -r '
+        [.[] | select(.recommendation == "TRIAGE")] | .[] |
+        "  \(.permission)  — \(.reason)"
+      '
+      echo ""
+    fi
+    echo "Summary: $d_count DELETE, $t_count TRIAGE"
+  else
+    jq -n --argjson c "$classified" --argjson d "$d_count" --argjson t "$t_count" \
+      '{candidates: $c, counts: {delete: $d, promote: 0, triage: $t, total: ($c | length)}}'
+  fi
+}
+
+# ---------------------------------------------------------------------------
 # Dispatch
 # ---------------------------------------------------------------------------
 
 case "$CMD" in
-  check) cmd_check ;;
-  init)  cmd_init ;;
-  *)     usage ;;
+  check)          cmd_check ;;
+  init)           cmd_init ;;
+  promote-review) cmd_promote_review ;;
+  *)              usage ;;
 esac

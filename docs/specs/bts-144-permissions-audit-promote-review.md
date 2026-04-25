@@ -3,7 +3,7 @@
 > Feature: bts-144-permissions-audit-promote-review
 > Work: linear:BTS-144
 > Created: 1777086458
-> Status: Draft
+> Status: Complete
 
 ## Summary
 

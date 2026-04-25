@@ -3,7 +3,7 @@
 > Feature: bts-145-activate-auto-push-main
 > Work: linear:BTS-145
 > Created: 1777081272
-> Status: In Progress
+> Status: Complete
 
 ## Summary
 

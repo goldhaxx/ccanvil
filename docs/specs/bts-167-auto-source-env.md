@@ -3,7 +3,7 @@
 > Feature: bts-167-auto-source-env
 > Work: linear:BTS-167
 > Created: 1777148448
-> Status: In Progress
+> Status: Complete
 
 ## Summary
 

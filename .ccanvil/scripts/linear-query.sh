@@ -67,13 +67,48 @@ _require_api_key() {
   fi
 }
 
+# POST a GraphQL query to Linear. Args:
+#   $1 — the GraphQL query string
+#   $2 — variables JSON (object), defaults to {}
+# Emits the parsed response payload (the .data field) on stdout.
+# Exits 3 with the GraphQL error message on stderr if the response carries
+# an "errors" array.
+_post_graphql() {
+  local query="$1"
+  local variables="${2:-{}}"
+  local endpoint="${LINEAR_QUERY_ENDPOINT:-https://api.linear.app/graphql}"
+
+  local body
+  body=$(jq -nc --arg q "$query" --argjson v "$variables" '{query:$q,variables:$v}')
+
+  local response
+  response=$(
+    curl -sS -X POST "$endpoint" \
+      -H "Authorization: $LINEAR_API_KEY" \
+      -H "Content-Type: application/json" \
+      -d "$body"
+  ) || _die 3 "linear-query: HTTP request failed (curl exit $?)"
+
+  # GraphQL errors: surface the first one and exit 3. Linear's WAF and auth
+  # layer both return 200 OK with an errors array, so HTTP status alone is
+  # not a reliable signal.
+  local err
+  err=$(printf '%s' "$response" | jq -r '.errors[0].message // empty' 2>/dev/null || true)
+  if [[ -n "$err" ]]; then
+    _die 3 "linear-query: GraphQL error: $err"
+  fi
+
+  printf '%s' "$response" | jq '.data'
+}
+
 # -----------------------------------------------------------------------------
 # Subcommand stubs (filled in by later steps in the BTS-164 plan)
 # -----------------------------------------------------------------------------
 
 cmd_viewer() {
   _require_api_key
-  _die 3 "viewer: not yet implemented (Step 2)"
+  local query='query { viewer { id name } }'
+  _post_graphql "$query" | jq '.viewer'
 }
 
 cmd_list_issues() {

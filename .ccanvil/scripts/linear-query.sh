@@ -258,7 +258,94 @@ cmd_list_labels() {
 
 cmd_save_issue() {
   _require_api_key
-  _die 3 "save-issue: not yet implemented (Step 6)"
+
+  # Mode selector: presence of --id triggers update; absence triggers create.
+  # Caller-provided IDs only — name resolution (team/project/label NAMES → IDs)
+  # is the resolver's job in Step 7. The wrapper stays focused on transport.
+  local id="" title="" description="" state=""
+  local team_id="" project_id="" parent_id="" duplicate_of=""
+  local priority="" label_ids=""
+
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --id)            id="$2";           shift 2 ;;
+      --title)         title="$2";        shift 2 ;;
+      --description)   description="$2";  shift 2 ;;
+      --state)         state="$2";        shift 2 ;;
+      --team-id)       team_id="$2";      shift 2 ;;
+      --project-id)    project_id="$2";   shift 2 ;;
+      --parent-id)     parent_id="$2";    shift 2 ;;
+      --duplicate-of)  duplicate_of="$2"; shift 2 ;;
+      --priority)      priority="$2";     shift 2 ;;
+      --label-ids)     label_ids="$2";    shift 2 ;;
+      *) _die 2 "save-issue: unknown flag: $1" ;;
+    esac
+  done
+
+  # Build the input object incrementally — Linear's IssueCreateInput and
+  # IssueUpdateInput share the same field names for everything we set.
+  local input='{}'
+  if [[ -n "$title" ]]; then
+    input=$(printf '%s' "$input" | jq --arg v "$title" '. + {title:$v}')
+  fi
+  if [[ -n "$description" ]]; then
+    input=$(printf '%s' "$input" | jq --arg v "$description" '. + {description:$v}')
+  fi
+  if [[ -n "$state" ]]; then
+    input=$(printf '%s' "$input" | jq --arg v "$state" '. + {stateId:$v}')
+  fi
+  if [[ -n "$team_id" ]]; then
+    input=$(printf '%s' "$input" | jq --arg v "$team_id" '. + {teamId:$v}')
+  fi
+  if [[ -n "$project_id" ]]; then
+    input=$(printf '%s' "$input" | jq --arg v "$project_id" '. + {projectId:$v}')
+  fi
+  if [[ -n "$parent_id" ]]; then
+    input=$(printf '%s' "$input" | jq --arg v "$parent_id" '. + {parentId:$v}')
+  fi
+  if [[ -n "$priority" ]]; then
+    input=$(printf '%s' "$input" | jq --argjson v "$priority" '. + {priority:$v}')
+  fi
+  if [[ -n "$label_ids" ]]; then
+    # CSV → JSON array of strings.
+    local arr
+    arr=$(printf '%s' "$label_ids" | jq -R 'split(",")')
+    input=$(printf '%s' "$input" | jq --argjson v "$arr" '. + {labelIds:$v}')
+  fi
+
+  if [[ -z "$id" ]]; then
+    # Create mode. Required: title. team_id is required by Linear's schema
+    # but emitting a clear error here surfaces the gap before the API call.
+    if [[ -z "$title" ]]; then
+      _die 2 "save-issue create requires --title"
+    fi
+    if [[ -z "$team_id" ]]; then
+      _die 2 "save-issue create requires --team-id (use list-teams to discover)"
+    fi
+
+    local query='mutation IssueCreate($input: IssueCreateInput!) {
+      issueCreate(input: $input) { success issue { identifier title } }
+    }'
+    local variables
+    variables=$(jq -n --argjson i "$input" '{input:$i}')
+    _post_graphql "$query" "$variables" | jq '.issueCreate.issue | {
+      id: .identifier,
+      title: .title
+    }'
+  else
+    # Update mode. Linear's issueUpdate accepts the same input shape minus
+    # creation-only fields (teamId is rejected for update, but we already
+    # don't add it for the update path's expected callers).
+    local query='mutation IssueUpdate($id: String!, $input: IssueUpdateInput!) {
+      issueUpdate(id: $id, input: $input) { success issue { identifier title } }
+    }'
+    local variables
+    variables=$(jq -n --arg id "$id" --argjson i "$input" '{id:$id, input:$i}')
+    _post_graphql "$query" "$variables" | jq '.issueUpdate.issue | {
+      id: .identifier,
+      title: .title
+    }'
+  fi
 }
 
 # -----------------------------------------------------------------------------

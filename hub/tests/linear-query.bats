@@ -237,3 +237,91 @@ JSON
   echo "$output" | jq -e '.[0].name == "idea"'
   _get_body | jq -e '.variables.filter.team.name.eq == "T"'
 }
+
+# ===========================================================================
+# AC-7: save-issue (write mutations)
+# ===========================================================================
+# v1 takes IDs directly (--team-id, --project-id, --state, --label-ids). Name
+# resolution is the resolver's job in Step 7 — config carries team_id, project_id,
+# state_ids, etc., so the resolver pre-resolves and the wrapper stays focused
+# on transport. Mode selector: presence of --id triggers update; absence triggers
+# create.
+
+@test "BTS-164 AC-7: save-issue create (no --id) sends issueCreate mutation" {
+  set -e
+  _setup_stub
+  cat > "$LINEAR_STUB_RESPONSE" <<'JSON'
+{"data":{"issueCreate":{"success":true,"issue":{"id":"u1","identifier":"BTS-200","title":"new"}}}}
+JSON
+  run bash -c "source '$STUB_FIXTURE' && bash '$LQ' save-issue --team-id team-uuid --project-id proj-uuid --title 'new' --description 'body'"
+  [ "$status" -eq 0 ]
+  echo "$output" | jq -e '.id == "BTS-200"'
+  local body
+  body=$(_get_body)
+  echo "$body" | jq -e '.query | contains("issueCreate")'
+  echo "$body" | jq -e '.variables.input.teamId == "team-uuid"'
+  echo "$body" | jq -e '.variables.input.projectId == "proj-uuid"'
+  echo "$body" | jq -e '.variables.input.title == "new"'
+}
+
+@test "BTS-164 AC-7: save-issue --id <ID> --state <STATE_ID> sends issueUpdate (transition)" {
+  set -e
+  _setup_stub
+  cat > "$LINEAR_STUB_RESPONSE" <<'JSON'
+{"data":{"issueUpdate":{"success":true,"issue":{"id":"u1","identifier":"BTS-100","title":"t"}}}}
+JSON
+  run bash -c "source '$STUB_FIXTURE' && bash '$LQ' save-issue --id BTS-100 --state state-uuid-done"
+  [ "$status" -eq 0 ]
+  echo "$output" | jq -e '.id == "BTS-100"'
+  local body
+  body=$(_get_body)
+  echo "$body" | jq -e '.query | contains("issueUpdate")'
+  echo "$body" | jq -e '.variables.id == "BTS-100"'
+  echo "$body" | jq -e '.variables.input.stateId == "state-uuid-done"'
+}
+
+@test "BTS-164 AC-7: save-issue --id <ID> --priority <N> sends issueUpdate" {
+  set -e
+  _setup_stub
+  cat > "$LINEAR_STUB_RESPONSE" <<'JSON'
+{"data":{"issueUpdate":{"success":true,"issue":{"id":"u1","identifier":"BTS-100","title":"t"}}}}
+JSON
+  run bash -c "source '$STUB_FIXTURE' && bash '$LQ' save-issue --id BTS-100 --priority 2"
+  [ "$status" -eq 0 ]
+  local body
+  body=$(_get_body)
+  echo "$body" | jq -e '.variables.input.priority == 2'
+}
+
+@test "BTS-164 AC-7: save-issue --id <ID> --label-ids l1,l2 sends issueUpdate with label array" {
+  set -e
+  _setup_stub
+  cat > "$LINEAR_STUB_RESPONSE" <<'JSON'
+{"data":{"issueUpdate":{"success":true,"issue":{"id":"u1","identifier":"BTS-100","title":"t"}}}}
+JSON
+  run bash -c "source '$STUB_FIXTURE' && bash '$LQ' save-issue --id BTS-100 --label-ids l1,l2"
+  [ "$status" -eq 0 ]
+  local body
+  body=$(_get_body)
+  echo "$body" | jq -e '.variables.input.labelIds == ["l1", "l2"]'
+}
+
+@test "BTS-164 AC-7: save-issue create requires --title (and --team-id)" {
+  _setup_stub
+  cat > "$LINEAR_STUB_RESPONSE" <<'JSON'
+{"data":{}}
+JSON
+  run --separate-stderr bash -c "source '$STUB_FIXTURE' && bash '$LQ' save-issue --description 'no title'"
+  [ "$status" -eq 2 ]
+  [[ "$stderr" =~ "title" ]] || [[ "$stderr" =~ "team" ]]
+}
+
+@test "BTS-164 AC-7: save-issue surfaces GraphQL errors as exit 3" {
+  _setup_stub
+  cat > "$LINEAR_STUB_RESPONSE" <<'JSON'
+{"errors":[{"message":"Field is required: title"}]}
+JSON
+  run --separate-stderr bash -c "source '$STUB_FIXTURE' && bash '$LQ' save-issue --id BTS-100 --priority 1"
+  [ "$status" -eq 3 ]
+  [[ "$stderr" =~ "Field is required" ]]
+}

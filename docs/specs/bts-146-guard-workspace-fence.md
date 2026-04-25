@@ -3,7 +3,7 @@
 > Feature: bts-146-guard-workspace-fence
 > Work: linear:BTS-146
 > Created: 1777080454
-> Status: Draft
+> Status: Complete
 
 ## Summary
 

@@ -3,7 +3,7 @@
 > Feature: bts-147-guard-workspace-bare-slash
 > Work: linear:BTS-147
 > Created: 1777083046
-> Status: Draft
+> Status: Complete
 
 ## Summary
 

@@ -1,8 +1,12 @@
 #!/usr/bin/env bash
 # guard-workspace.sh — PreToolUse hook for Bash
-# Blocks file-mutation verbs (rm, cp, mv, chmod, chown, bash, find) when any
-# absolute or tilde-prefixed path argument falls outside the workspace
-# ($HOME/projects/) or whitelisted system temp dirs.
+# Blocks file-mutation verbs (rm, cp, mv, chmod, chown, bash, find, sort)
+# when any absolute or tilde-prefixed path argument falls outside the
+# workspace ($HOME/projects/) or whitelisted system temp dirs.
+#
+# `sort` is gated because of `-o FILE` (writer flag) and shell-redirect
+# targets (BTS-157). Path-token iteration handles both incidentally;
+# no special-casing for -o needed.
 #
 # Exit 2 = hard block (stderr becomes Claude's feedback)
 # Exit 0 = allow
@@ -13,6 +17,9 @@
 #   - Relative-path traversal (../../etc/x) — bypasses absolute-path check.
 #   - Subshell expansion ($(cmd)) — literal substrings inside $(...) ARE
 #     scanned, so most cases (like rm $(find /)) still trip on the literal /.
+#   - Aliased / case-variant verbs (gsort, gfind on macOS Homebrew; Sort
+#     capitalized) — the alternation is literal and case-sensitive. Add
+#     to the verb list if/when they become operationally relevant.
 
 set -uo pipefail
 
@@ -28,7 +35,7 @@ fi
 
 # Only enforce for commands containing a gated file-mutation verb.
 # Word-boundary match: verb must be at start, or after whitespace/;/|/&.
-if [[ ! "$COMMAND" =~ (^|[[:space:]\;\|\&])(rm|cp|mv|chmod|chown|bash|find)([[:space:]]|$) ]]; then
+if [[ ! "$COMMAND" =~ (^|[[:space:]\;\|\&])(rm|cp|mv|chmod|chown|bash|find|sort)([[:space:]]|$) ]]; then
   exit 0
 fi
 

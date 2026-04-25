@@ -111,7 +111,10 @@ JSON
 @test "BTS-164 AC-5: idea-count on linear-routed project without LINEAR_API_KEY exits non-zero" {
   _with_linear_routing
   unset LINEAR_API_KEY
-  run --separate-stderr bash -c "source '$STUB_FIXTURE' && bash '$DOCS' idea-count '$PROJECT'"
+  # cd into $PROJECT so the resolver's relative-path linear-query.sh
+  # invocation resolves AND BTS-167's $PWD-anchored .env auto-source
+  # terminates without a key (no .git ancestor of $PROJECT).
+  run --separate-stderr bash -c "cd '$PROJECT' && source '$STUB_FIXTURE' && bash '$DOCS' idea-count '$PROJECT'"
   [ "$status" -ne 0 ]
   [[ "$stderr" =~ "LINEAR_API_KEY" ]]
 }

@@ -38,13 +38,15 @@ setup() {
 }
 
 @test "BTS-164 AC-2: list-issues without LINEAR_API_KEY exits 2 with clear message" {
-  run --separate-stderr bash "$LQ" list-issues
+  # cd into tmpdir so BTS-167's $PWD-anchored auto-source can't reach a real
+  # .env up the tree (e.g., the operator's repo when running locally).
+  run --separate-stderr bash -c "cd '$BATS_TEST_TMPDIR' && bash '$LQ' list-issues"
   [ "$status" -eq 2 ]
   [[ "$stderr" =~ "LINEAR_API_KEY not set" ]]
 }
 
 @test "BTS-164 AC-2: viewer without LINEAR_API_KEY exits 2 with clear message" {
-  run --separate-stderr bash "$LQ" viewer
+  run --separate-stderr bash -c "cd '$BATS_TEST_TMPDIR' && bash '$LQ' viewer"
   [ "$status" -eq 2 ]
   [[ "$stderr" =~ "LINEAR_API_KEY not set" ]]
 }

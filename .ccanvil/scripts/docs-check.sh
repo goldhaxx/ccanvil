@@ -1917,13 +1917,12 @@ cmd_idea_count() {
       cmd_idea_count_local "$project_dir"
       ;;
     http)
-      local auth_env
-      auth_env=$(printf '%s' "$resolution" | jq -r '.invocation.auth_env')
-      if [[ -z "${!auth_env:-}" ]]; then
-        echo "ERROR: idea-count requires $auth_env (env var not set). Set it via your shell rc or run /onboard linear (BTS-165) when that workflow ships." >&2
-        return 2
-      fi
-
+      # BTS-167: env-var presence is enforced by linear-query.sh itself —
+      # it auto-sources project-root .env when LINEAR_API_KEY is unset and
+      # fails loud (exit 2 with remediation hint) when neither path provides
+      # a key. The caller-side pre-flight check that lived here became
+      # redundant: it duplicated linear-query.sh's contract and fired
+      # before the substrate could load .env.
       local cmd
       cmd=$(printf '%s' "$resolution" | jq -r '.invocation.command')
 

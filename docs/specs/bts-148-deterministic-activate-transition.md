@@ -3,7 +3,7 @@
 > Feature: bts-148-deterministic-activate-transition
 > Work: linear:BTS-148
 > Created: 1777084057
-> Status: In Progress
+> Status: Complete
 
 ## Summary
 

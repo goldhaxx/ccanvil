@@ -15,12 +15,14 @@ setup() {
   unset LINEAR_QUERY_ENDPOINT
 }
 
-# Stage a fake project root: $PROJECT/.git/ (sentinel) and optionally $PROJECT/.env.
-# Tests cd into $PROJECT before invoking the script so $PWD walk anchors there.
+# Stage a fake project root: <root>/.git/ (sentinel) and optionally <root>/.env.
+# Tests call `PROJECT=$(_make_project)` so the function returns the path via
+# stdout; tests then cd into $PROJECT before invoking the script so $PWD
+# walk anchors there.
 _make_project() {
-  PROJECT="$BATS_TEST_TMPDIR/project"
-  mkdir -p "$PROJECT/.git"
-  echo "$PROJECT"
+  local root="$BATS_TEST_TMPDIR/project"
+  mkdir -p "$root/.git"
+  echo "$root"
 }
 
 # ===========================================================================
@@ -48,6 +50,20 @@ _make_project() {
   [ "$status" -eq 2 ]
   [[ "$stderr" =~ "export LINEAR_API_KEY" ]]
   [[ "$stderr" =~ ".env" ]]
+}
+
+@test "BTS-167 AC-3: .env present but does not define LINEAR_API_KEY → exit 2" {
+  # The helper sources the file (so other vars get exported), but the key
+  # stays unset and the existing fail-loud branch fires. Distinct from the
+  # "no .env" path covered above — verifies that a partial .env doesn't
+  # silently succeed with an empty key.
+  PROJECT=$(_make_project)
+  cat > "$PROJECT/.env" <<'EOF'
+OTHER_VAR=something
+EOF
+  run --separate-stderr bash -c "cd '$PROJECT' && bash '$LQ' viewer"
+  [ "$status" -eq 2 ]
+  [[ "$stderr" =~ "LINEAR_API_KEY not set" ]]
 }
 
 # ===========================================================================

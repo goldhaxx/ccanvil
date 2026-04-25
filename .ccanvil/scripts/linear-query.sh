@@ -83,6 +83,10 @@ _load_env_if_needed() {
         # `set -a` exports every var assigned during the source step; the
         # script ships with `set -euo pipefail`, so a parse error in .env
         # surfaces as a non-zero exit rather than a silent skip (AC-6).
+        # Note: `set +a` is unreachable when the source aborts under
+        # `set -e` — that's harmless because the script exits entirely.
+        # Don't refactor this into a sourced helper without revisiting
+        # this scope leak.
         set -a
         # shellcheck disable=SC1091
         . "$dir/.env"

@@ -526,10 +526,12 @@ linear_mcp_adapter() {
       ;;
     idea.count)
       # BTS-164: emit mechanism=http with a linear-query.sh invocation. The
-      # consumer (Step 5's cmd_idea_count) shells out to the wrapper, parses
-      # the resulting list, and aggregates counts by status. linear-query.sh
-      # handles auth + transport; the resolver only carries enough info for
-      # the consumer to invoke the wrapper and pre-flight LINEAR_API_KEY.
+      # consumer (cmd_idea_count) shells out to the wrapper, parses the
+      # resulting list, and aggregates counts by status. linear-query.sh
+      # owns auth (BTS-167: auto-sources .env when LINEAR_API_KEY is unset)
+      # + transport. `auth_env` is informational on the resolver JSON;
+      # consumers no longer pre-flight against it (the substrate handles
+      # the contract end-to-end).
       output_contract='["id","status","statusType"]'
       jq -n --arg project "$project" --arg team "$team" --arg label "$idea_label" \
         --argjson output "$output_contract" \

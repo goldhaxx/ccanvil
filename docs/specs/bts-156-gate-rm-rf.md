@@ -3,7 +3,7 @@
 > Feature: bts-156-gate-rm-rf
 > Work: linear:BTS-156
 > Created: 1777151296
-> Status: In Progress
+> Status: Complete
 
 ## Summary
 

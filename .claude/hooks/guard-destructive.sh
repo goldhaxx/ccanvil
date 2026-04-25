@@ -16,6 +16,16 @@ if [[ "$COMMAND" =~ ALLOW_DESTRUCTIVE=1 ]]; then
   exit 0
 fi
 
+# BTS-151: skip git commit. Commit messages routinely mention destructive-
+# shape strings (e.g. "fix the rm -rf gate") that our regex matches
+# anywhere in the literal command. False positives are constant; the only
+# real bypass workaround is `git commit -F /tmp/msg.txt`. Trade-off: a
+# chained command like `git commit -m "x" && rm -rf /` would skip the
+# destructive scan. Operationally rare (tracked in spec out-of-scope).
+if [[ "$COMMAND" =~ ^([A-Z_][A-Z0-9_]*=[^[:space:]]*[[:space:]]+)*git[[:space:]]+commit($|[[:space:]]) ]]; then
+  exit 0
+fi
+
 # Block git reset --hard
 if [[ "$COMMAND" =~ git[[:space:]]+reset[[:space:]]+--hard ]]; then
   echo "BLOCKED: git reset --hard discards commits and changes." >&2

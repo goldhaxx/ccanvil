@@ -3,7 +3,7 @@
 > Feature: bts-150-suppress-redundant-permission-persistence
 > Work: linear:BTS-150
 > Created: 1777171760
-> Status: In Progress
+> Status: Complete
 
 ## Summary
 

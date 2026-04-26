@@ -3,7 +3,7 @@
 > Feature: bts-199-launchd-install-wrapper
 > Work: linear:BTS-199
 > Created: 1777237334
-> Status: In Progress
+> Status: Complete
 
 ## Summary
 

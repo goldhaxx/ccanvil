@@ -295,6 +295,212 @@ JSON
 }
 
 # ===========================================================================
+# BTS-170: workspace-scoped label fallback
+# ===========================================================================
+
+@test "BTS-170 AC-1: list-labels --workspace-scoped sends team:{null:{eq:true}} filter" {
+  set -e
+  _setup_stub
+  cat > "$LINEAR_STUB_RESPONSE" <<'JSON'
+{"data":{"issueLabels":{"nodes":[{"id":"l1","name":"idea"}]}}}
+JSON
+  run bash -c "source '$STUB_FIXTURE' && bash '$LQ' list-labels --workspace-scoped"
+  [ "$status" -eq 0 ]
+  echo "$output" | jq -e 'length == 1'
+  echo "$output" | jq -e '.[0].name == "idea"'
+  _get_body | jq -e '.variables.filter.team.null == true'
+}
+
+@test "BTS-170 AC-2: list-labels rejects --workspace-scoped + --team-id" {
+  _setup_stub
+  run --separate-stderr bash -c "source '$STUB_FIXTURE' && bash '$LQ' list-labels --workspace-scoped --team-id t1"
+  [ "$status" -eq 2 ]
+  [[ "$stderr" == *"workspace-scoped"* ]]
+}
+
+@test "BTS-170 AC-2: list-labels rejects --workspace-scoped + --team" {
+  _setup_stub
+  run --separate-stderr bash -c "source '$STUB_FIXTURE' && bash '$LQ' list-labels --workspace-scoped --team T"
+  [ "$status" -eq 2 ]
+  [[ "$stderr" == *"workspace-scoped"* ]]
+}
+
+
+# BTS-170: save-issue label resolution falls through to workspace-scoped
+# when team-scoped lookup misses. Multi-roundtrip seq-aware stub pattern.
+
+_setup_seq_stub() {
+  # Helper: builds an exported curl that returns sequential responses from
+  # numbered files in $1. Tracks call count in $COUNTER. Self-contained —
+  # also calls _setup_stub so callers don't have to remember the precondition.
+  local responses_dir="$1"
+  _setup_stub
+  COUNTER="$BATS_TEST_TMPDIR/seq.count"
+  echo 0 > "$COUNTER"
+  cat > "$BATS_TEST_TMPDIR/seq-stub.sh" <<EOF
+curl() {
+  local n
+  n=\$(cat '$COUNTER')
+  n=\$((n + 1))
+  echo "\$n" > '$COUNTER'
+  cat '$responses_dir/'"\$n"'.json'
+  local body=""
+  while [ \$# -gt 0 ]; do
+    case "\$1" in
+      --data|--data-raw|-d) body="\$2"; shift 2 ;;
+      *) shift ;;
+    esac
+  done
+  printf 'BODY:%s\n' "\$body" >> "\$LINEAR_STUB_CAPTURE"
+}
+export -f curl
+EOF
+}
+
+@test "BTS-170 AC-4: save-issue --team --labels with team-scoped match — single lookup, no fallback" {
+  set -e
+  _setup_stub
+  local responses="$BATS_TEST_TMPDIR/responses"
+  mkdir -p "$responses"
+  echo '{"data":{"teams":{"nodes":[{"id":"team-uuid","name":"T","key":"BTS"}]}}}' > "$responses/1.json"
+  echo '{"data":{"issueLabels":{"nodes":[{"id":"team-label-uuid","name":"idea"}]}}}' > "$responses/2.json"
+  echo '{"data":{"issueCreate":{"success":true,"issue":{"id":"u","identifier":"BTS-302","title":"x"}}}}' > "$responses/3.json"
+  # Response 4 deliberately invalid to catch any extra roundtrip.
+  echo '{"errors":[{"message":"unexpected fourth roundtrip — fallback should not have fired"}]}' > "$responses/4.json"
+  _setup_seq_stub "$responses"
+  run bash -c "source '$BATS_TEST_TMPDIR/seq-stub.sh' && bash '$LQ' save-issue --team T --labels idea --title 'x' --description 'y'"
+  [ "$status" -eq 0 ]
+  echo "$output" | jq -e '.id == "BTS-302"'
+  # Counter should be 3 (team-lookup, label-lookup, issueCreate). NOT 4.
+  [ "$(cat "$COUNTER")" = "3" ]
+  # Verify team-scoped label id flowed through.
+  local create_body
+  create_body=$(grep '^BODY:' "$LINEAR_STUB_CAPTURE" | sed 's/^BODY://' | while read -r line; do
+    echo "$line" | jq -e '.query | contains("issueCreate")' >/dev/null 2>&1 && echo "$line"
+  done)
+  echo "$create_body" | jq -e '.variables.input.labelIds == ["team-label-uuid"]'
+}
+
+@test "BTS-170 AC-6: save-issue exits 2 with original error when both lookups miss" {
+  _setup_stub
+  local responses="$BATS_TEST_TMPDIR/responses"
+  mkdir -p "$responses"
+  echo '{"data":{"teams":{"nodes":[{"id":"team-uuid","name":"T","key":"BTS"}]}}}' > "$responses/1.json"
+  echo '{"data":{"issueLabels":{"nodes":[]}}}' > "$responses/2.json"
+  echo '{"data":{"issueLabels":{"nodes":[]}}}' > "$responses/3.json"
+  _setup_seq_stub "$responses"
+  run --separate-stderr bash -c "source '$BATS_TEST_TMPDIR/seq-stub.sh' && bash '$LQ' save-issue --team T --labels missing --title 'x' --description 'y'"
+  [ "$status" -eq 2 ]
+  [[ "$stderr" == *"did not resolve to a label id"* ]]
+}
+
+@test "BTS-170 AC-9: save-issue falls through when team-scoped returns labels but none match by name" {
+  set -e
+  _setup_stub
+  local responses="$BATS_TEST_TMPDIR/responses"
+  mkdir -p "$responses"
+  echo '{"data":{"teams":{"nodes":[{"id":"team-uuid","name":"T","key":"BTS"}]}}}' > "$responses/1.json"
+  # team-scoped: returns OTHER labels, not 'idea'
+  echo '{"data":{"issueLabels":{"nodes":[{"id":"other","name":"bug"}]}}}' > "$responses/2.json"
+  # workspace-scoped: contains 'idea'
+  echo '{"data":{"issueLabels":{"nodes":[{"id":"workspace-label","name":"idea"}]}}}' > "$responses/3.json"
+  echo '{"data":{"issueCreate":{"success":true,"issue":{"id":"u","identifier":"BTS-303","title":"x"}}}}' > "$responses/4.json"
+  _setup_seq_stub "$responses"
+  run bash -c "source '$BATS_TEST_TMPDIR/seq-stub.sh' && bash '$LQ' save-issue --team T --labels idea --title 'x' --description 'y'"
+  [ "$status" -eq 0 ]
+  echo "$output" | jq -e '.id == "BTS-303"'
+  local create_body
+  create_body=$(grep '^BODY:' "$LINEAR_STUB_CAPTURE" | sed 's/^BODY://' | while read -r line; do
+    echo "$line" | jq -e '.query | contains("issueCreate")' >/dev/null 2>&1 && echo "$line"
+  done)
+  echo "$create_body" | jq -e '.variables.input.labelIds == ["workspace-label"]'
+}
+
+@test "BTS-170 AC-5: team-scoped wins when both team-scoped and workspace-scoped exist" {
+  set -e
+  _setup_stub
+  local responses="$BATS_TEST_TMPDIR/responses"
+  mkdir -p "$responses"
+  echo '{"data":{"teams":{"nodes":[{"id":"team-uuid","name":"T","key":"BTS"}]}}}' > "$responses/1.json"
+  # Team-scoped lookup returns the team-scoped label by the same name.
+  echo '{"data":{"issueLabels":{"nodes":[{"id":"team-label-wins","name":"idea"}]}}}' > "$responses/2.json"
+  echo '{"data":{"issueCreate":{"success":true,"issue":{"id":"u","identifier":"BTS-304","title":"x"}}}}' > "$responses/3.json"
+  echo '{"errors":[{"message":"workspace fallback should not fire when team-scoped match exists"}]}' > "$responses/4.json"
+  _setup_seq_stub "$responses"
+  run bash -c "source '$BATS_TEST_TMPDIR/seq-stub.sh' && bash '$LQ' save-issue --team T --labels idea --title 'x' --description 'y'"
+  [ "$status" -eq 0 ]
+  local create_body
+  create_body=$(grep '^BODY:' "$LINEAR_STUB_CAPTURE" | sed 's/^BODY://' | while read -r line; do
+    echo "$line" | jq -e '.query | contains("issueCreate")' >/dev/null 2>&1 && echo "$line"
+  done)
+  echo "$create_body" | jq -e '.variables.input.labelIds == ["team-label-wins"]'
+}
+
+@test "BTS-170 AC-7: save-issue update mode (no --team) — fallback does NOT fire" {
+  # Genuinely unscoped path: update mode (--id) doesn't require team_id, so
+  # cmd_save_issue can reach the label loop with an empty label_filter array.
+  # The fallback condition `${#label_filter[@]} -gt 0` keeps fallback gated
+  # behind team scoping; this test asserts the unscoped path stays a single
+  # query (label-lookup + issueUpdate, counter == 2).
+  set -e
+  _setup_stub
+  local responses="$BATS_TEST_TMPDIR/responses"
+  mkdir -p "$responses"
+  echo '{"data":{"issueLabels":{"nodes":[{"id":"some-label","name":"idea"}]}}}' > "$responses/1.json"
+  echo '{"data":{"issueUpdate":{"success":true,"issue":{"id":"u","identifier":"BTS-305","title":"x"}}}}' > "$responses/2.json"
+  echo '{"errors":[{"message":"unscoped path should NOT have triggered a third roundtrip"}]}' > "$responses/3.json"
+  _setup_seq_stub "$responses"
+  run bash -c "source '$BATS_TEST_TMPDIR/seq-stub.sh' && bash '$LQ' save-issue --id BTS-305 --labels idea --title 'updated'"
+  [ "$status" -eq 0 ]
+  [ "$(cat "$COUNTER")" = "2" ]
+}
+
+@test "BTS-170 AC-8: save-issue resolves label name with spaces via workspace fallback" {
+  set -e
+  _setup_stub
+  local responses="$BATS_TEST_TMPDIR/responses"
+  mkdir -p "$responses"
+  echo '{"data":{"teams":{"nodes":[{"id":"team-uuid","name":"T","key":"BTS"}]}}}' > "$responses/1.json"
+  echo '{"data":{"issueLabels":{"nodes":[]}}}' > "$responses/2.json"
+  echo '{"data":{"issueLabels":{"nodes":[{"id":"spaced-label","name":"name with spaces"}]}}}' > "$responses/3.json"
+  echo '{"data":{"issueCreate":{"success":true,"issue":{"id":"u","identifier":"BTS-306","title":"x"}}}}' > "$responses/4.json"
+  _setup_seq_stub "$responses"
+  run bash -c "source '$BATS_TEST_TMPDIR/seq-stub.sh' && bash '$LQ' save-issue --team T --labels 'name with spaces' --title 'x' --description 'y'"
+  [ "$status" -eq 0 ]
+  local create_body
+  create_body=$(grep '^BODY:' "$LINEAR_STUB_CAPTURE" | sed 's/^BODY://' | while read -r line; do
+    echo "$line" | jq -e '.query | contains("issueCreate")' >/dev/null 2>&1 && echo "$line"
+  done)
+  echo "$create_body" | jq -e '.variables.input.labelIds == ["spaced-label"]'
+}
+
+@test "BTS-170 AC-3: save-issue --team --labels resolves workspace-scoped on team-scoped miss" {
+  set -e
+  _setup_stub
+  local responses="$BATS_TEST_TMPDIR/responses"
+  mkdir -p "$responses"
+  # 1: team-name → team-id
+  echo '{"data":{"teams":{"nodes":[{"id":"team-uuid","name":"T","key":"BTS"}]}}}' > "$responses/1.json"
+  # 2: team-scoped issueLabels → empty
+  echo '{"data":{"issueLabels":{"nodes":[]}}}' > "$responses/2.json"
+  # 3: workspace-scoped issueLabels → contains the label
+  echo '{"data":{"issueLabels":{"nodes":[{"id":"workspace-label-uuid","name":"idea"}]}}}' > "$responses/3.json"
+  # 4: issueCreate
+  echo '{"data":{"issueCreate":{"success":true,"issue":{"id":"u1","identifier":"BTS-301","title":"x"}}}}' > "$responses/4.json"
+  _setup_seq_stub "$responses"
+  run bash -c "source '$BATS_TEST_TMPDIR/seq-stub.sh' && bash '$LQ' save-issue --team T --labels idea --title 'x' --description 'y'"
+  [ "$status" -eq 0 ]
+  echo "$output" | jq -e '.id == "BTS-301"'
+  # Verify the issueCreate body uses the workspace label id.
+  local create_body
+  create_body=$(grep '^BODY:' "$LINEAR_STUB_CAPTURE" | sed 's/^BODY://' | while read -r line; do
+    echo "$line" | jq -e '.query | contains("issueCreate")' >/dev/null 2>&1 && echo "$line"
+  done)
+  echo "$create_body" | jq -e '.variables.input.labelIds == ["workspace-label-uuid"]'
+}
+
+
+# ===========================================================================
 # AC-7: save-issue (write mutations)
 # ===========================================================================
 # v1 takes IDs directly (--team-id, --project-id, --state, --label-ids). Name

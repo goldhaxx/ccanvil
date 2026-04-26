@@ -3153,6 +3153,90 @@ cmd_drift_watchdog_preflight() {
     '{claude_p_available: $cp, linear_query_works: $lq}'
 }
 
+cmd_drift_watchdog_launchd_install() {
+  # BTS-199: idempotent install/reload of the drift-watchdog launchd entry.
+  # Wraps the four-step recipe (generate + lint + optional unload + cp + load
+  # + verify) into one atomic call. Replaces operator prose that was
+  # reformulated by hand 4 separate times during BTS-21 activation.
+  #
+  # NOTE: writes to ~/Library/LaunchAgents/ which is OUTSIDE the workspace.
+  # Operators must invoke with ALLOW_OUTSIDE_WORKSPACE=1 so the workspace-
+  # fence hook (guard-workspace.sh) does not block the cp + launchctl steps.
+  #
+  # Exit codes:
+  #   0 — installed + verified
+  #   2 — plist-generation-failed | plist-lint-failed (refuses launchctl ops)
+  #   3 — verify-failed (entry not loaded after launchctl load)
+  local reload=0
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --reload) reload=1; shift ;;
+      *) shift ;;
+    esac
+  done
+
+  local plist_path="$HOME/Library/LaunchAgents/com.ccanvil.drift-watchdog.plist"
+  local tmp_plist
+  tmp_plist=$(mktemp -t drift-watchdog-plist.XXXXXX)
+
+  # 1. Generate plist
+  if [[ "${DRIFT_WATCHDOG_PLIST_FORCE_EMPTY:-0}" == "1" ]]; then
+    : > "$tmp_plist"
+  else
+    cmd_drift_watchdog_launchd_print > "$tmp_plist" 2>/dev/null || true
+  fi
+
+  if [[ ! -s "$tmp_plist" ]]; then
+    rm -f "$tmp_plist"
+    jq -n '{installed:false, reloaded:false, error:"plist-generation-failed"}'
+    return 2
+  fi
+
+  # 2. Lint with plutil (skip if not available)
+  if command -v plutil >/dev/null 2>&1; then
+    if ! plutil -lint "$tmp_plist" >/dev/null 2>&1; then
+      rm -f "$tmp_plist"
+      jq -n '{installed:false, reloaded:false, error:"plist-lint-failed"}'
+      return 2
+    fi
+  else
+    echo "WARN: plutil not available, skipping lint" >&2
+  fi
+
+  # 3. Optional unload
+  local reloaded=false
+  if (( reload )); then
+    launchctl unload "$plist_path" 2>/dev/null || true
+    reloaded=true
+  fi
+
+  # 4. Copy plist into place
+  mkdir -p "$(dirname "$plist_path")"
+  cp "$tmp_plist" "$plist_path"
+  rm -f "$tmp_plist"
+
+  # 5. Load (load -w; second invocation may exit non-zero but verify is authoritative)
+  launchctl load -w "$plist_path" >/dev/null 2>&1 || true
+
+  # 6. Verify via launchctl print. `set -e` is active at script-level — wrap
+  # the call in `if !` so a non-zero rc does not abort before we can emit JSON.
+  local print_out
+  if ! print_out=$(launchctl print "gui/$(id -u)/com.ccanvil.drift-watchdog" 2>&1); then
+    jq -n --arg p "$plist_path" --argjson r "$reloaded" \
+      '{installed:true, reloaded:$r, plist_path:$p, verified:false, error:"verify-failed-launchctl-print-rc"}'
+    return 3
+  fi
+
+  if ! echo "$print_out" | grep -q 'state'; then
+    jq -n --arg p "$plist_path" --argjson r "$reloaded" \
+      '{installed:true, reloaded:$r, plist_path:$p, verified:false, error:"no-state-in-print-output"}'
+    return 3
+  fi
+
+  jq -n --arg p "$plist_path" --argjson r "$reloaded" \
+    '{installed:true, reloaded:$r, plist_path:$p, verified:true}'
+}
+
 cmd_drift_watchdog_launchd_print() {
   local hub_dir
   hub_dir=$(git rev-parse --show-toplevel 2>/dev/null || pwd)
@@ -3258,6 +3342,7 @@ case "${1:-}" in
   drift-watchdog-list)          cmd_drift_watchdog_list ;;
   drift-watchdog-preflight)     cmd_drift_watchdog_preflight ;;
   drift-watchdog-launchd-print) cmd_drift_watchdog_launchd_print ;;
+  drift-watchdog-launchd-install) shift; cmd_drift_watchdog_launchd_install "$@" ;;
 
   # --- Stack commands ---
   stack-list)       cmd_stack_list ;;

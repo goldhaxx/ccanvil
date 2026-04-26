@@ -32,6 +32,10 @@ Either way, `/idea` never touches git. No commits. No branch creation. Capture w
 
 If the first arg is not `list`, `triage`, `review-icebox`, or `sync`, treat everything after `/idea` as the idea text.
 
+### Step 0 — extract `--parent <ref>` (BTS-162, optional)
+
+Before generating the title, scan the raw input for `--parent <ref>` (in either leading or trailing position). If present, extract it into `$PARENT` and remove the flag + value from the body. Validate non-empty + no-whitespace (`[[ "$PARENT" =~ [[:space:]] ]]` → error). The parent ref is passed through verbatim — `BTS-158`, `idea-7`, `linear:BTS-158` all valid; cross-provider validation happens at the dispatch surface.
+
 ### Step 1 — generate a title
 
 - If the raw text is ≤80 chars and single-line, the title = the raw text (short-text fast path; no Claude round-trip).
@@ -50,6 +54,11 @@ BTS-166: capture rides the http substrate. The resolver returns `.invocation.com
 ```bash
 RESOLUTION=$(bash .ccanvil/scripts/operations.sh resolve idea.add --project-dir .)
 cmd=$(echo "$RESOLUTION" | jq -r '.invocation.command')
+# BTS-162: capture-time parent link. Append --parent-id when --parent was
+# extracted in Step 0. Quote via jq -Rr @sh so refs round-trip safely.
+if [[ -n "$PARENT" ]]; then
+  cmd="$cmd --parent-id $(printf '%s' "$PARENT" | jq -Rr @sh)"
+fi
 jq -n --arg title "$TITLE" --arg description "$BODY" \
   '{title:$title, description:$description}' \
   | eval "$cmd --input-json -"
@@ -60,8 +69,11 @@ On success: parse the resolver's output (`{id, title}` from the GraphQL `issueCr
 **On failure** (non-zero exit from `eval`: network, missing `LINEAR_API_KEY`, GraphQL error): append to pending log via the deterministic helper (BTS-123 — never hand-roll JSON via `echo` + interpolation):
 
 ```bash
+# BTS-162: forward --parent so the replay path re-dispatches with --parent-id.
+PARENT_ARGS=()
+[[ -n "$PARENT" ]] && PARENT_ARGS=(--parent "$PARENT")
 bash .ccanvil/scripts/docs-check.sh idea-pending-append \
-  --op add --title "$TITLE" --body "$BODY"
+  --op add --title "$TITLE" --body "$BODY" "${PARENT_ARGS[@]}"
 ```
 
 Then count entries via the validator (NEVER `wc -l` — physical lines ≠ JSON entries):
@@ -74,13 +86,15 @@ Echo `PENDING: <title> ($N total pending)`. Exit 0 — capture MUST succeed from
 
 ### Step 3b — local path (`mechanism == "bash"`)
 
-Run the resolved command:
+Run the resolved command. BTS-162: forward `--parent "$PARENT"` when set so the local JSONL entry carries `parent_id`:
 
 ```bash
-bash .ccanvil/scripts/docs-check.sh idea-add "<body>" --title "<title>" .
+PARENT_FLAG=()
+[[ -n "$PARENT" ]] && PARENT_FLAG=(--parent "$PARENT")
+bash .ccanvil/scripts/docs-check.sh idea-add "<body>" --title "<title>" "${PARENT_FLAG[@]}" .
 ```
 
-The script appends one JSONL line with `status:"triage"`.
+The script appends one JSONL line with `status:"triage"` (and `parent_id` when `--parent` is supplied).
 
 ### Step 4 — return
 
@@ -177,7 +191,7 @@ Only meaningful when the Linear provider is configured and `.ccanvil/ideas-pendi
 1. Resolve: `bash .ccanvil/scripts/operations.sh resolve idea.sync --project-dir .`
 2. Run the returned command (always local bash: `docs-check.sh idea-sync`) to enumerate pending entries.
 3. For each entry, dispatch by `op` via the http substrate (BTS-166):
-   - `add` → re-resolve `idea.add` via `operations.sh`; pipe `{title, description}` JSON to `eval "$cmd --input-json -"`. Idempotency caveat: Linear creates aren't deduped server-side, so a replayed `add` could double-capture if the original earlier-replay actually succeeded but the `--ack` failed. Acceptable risk for capture (rare); operator can dismiss the dup via `/idea triage`.
+   - `add` → re-resolve `idea.add` via `operations.sh`; if the pending entry has `args.parent_id`, append `--parent-id $(printf '%s' "$parent_id" | jq -Rr @sh)` to `$cmd` before `eval` (BTS-162). Pipe `{title, description}` JSON to `eval "$cmd --input-json -"`. Idempotency caveat: Linear creates aren't deduped server-side, so a replayed `add` could double-capture if the original earlier-replay actually succeeded but the `--ack` failed. Acceptable risk for capture (rare); operator can dismiss the dup via `/idea triage`.
    - `promote` → re-resolve `ticket.transition <args.id> backlog`; eval `"$cmd --priority $priority"`.
    - `defer` / `dismiss` → re-resolve `ticket.transition <args.id> {icebox|canceled}`; eval `"$cmd"`.
    - `merge` → re-resolve `ticket.transition <args.id> duplicate`; eval `"$cmd --duplicate-of $target"`.

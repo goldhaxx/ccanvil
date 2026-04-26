@@ -1732,14 +1732,27 @@ cmd_radar_gather() {
 cmd_idea_add() {
   local body=""
   local title=""
+  local parent=""
   local project_dir="."
 
-  # Parse args: first positional is body, then optional --title flag,
-  # final positional (if any) is the project dir (defaults to cwd).
+  # Parse args: first positional is body, then optional --title / --parent
+  # flags, final positional (if any) is the project dir (defaults to cwd).
   while [[ $# -gt 0 ]]; do
     case "$1" in
       --title)
         title="$2"; shift 2 ;;
+      --parent)
+        # BTS-162: capture-time parent link. Validate at parse time so
+        # malformed values fail before the JSONL write.
+        if [[ -z "$2" ]]; then
+          echo "ERROR: idea-add: --parent requires a non-empty value" >&2
+          return 2
+        fi
+        if [[ "$2" =~ [[:space:]] ]]; then
+          echo "ERROR: idea-add: --parent value '$2' contains whitespace" >&2
+          return 2
+        fi
+        parent="$2"; shift 2 ;;
       *)
         if [[ -z "$body" ]]; then
           body="$1"
@@ -1751,7 +1764,7 @@ cmd_idea_add() {
     esac
   done
 
-  [[ -n "$body" ]] || { echo "Usage: idea-add <body> [--title TITLE] [project-dir]" >&2; exit 1; }
+  [[ -n "$body" ]] || { echo "Usage: idea-add <body> [--title TITLE] [--parent REF] [project-dir]" >&2; exit 1; }
 
   # Defense-in-depth: on Linear-configured nodes, captures must route
   # through the /idea skill (operations.sh -> MCP). Refuse direct script
@@ -1777,10 +1790,17 @@ cmd_idea_add() {
   uid=$(head -c 2 /dev/urandom | xxd -p)
   epoch=$(date +%s)
 
-  jq -cn --arg uid "$uid" --argjson created "$epoch" \
-         --arg title "$title" --arg body "$body" \
-    '{uid:$uid, created:$created, status:"triage", title:$title, body:$body}' \
-    >> "$ideas_log"
+  if [[ -n "$parent" ]]; then
+    jq -cn --arg uid "$uid" --argjson created "$epoch" \
+           --arg title "$title" --arg body "$body" --arg parent "$parent" \
+      '{uid:$uid, created:$created, status:"triage", title:$title, body:$body, parent_id:$parent}' \
+      >> "$ideas_log"
+  else
+    jq -cn --arg uid "$uid" --argjson created "$epoch" \
+           --arg title "$title" --arg body "$body" \
+      '{uid:$uid, created:$created, status:"triage", title:$title, body:$body}' \
+      >> "$ideas_log"
+  fi
 
   echo "Captured: $title"
 }
@@ -2797,7 +2817,7 @@ cmd_remote_presence() {
 #   ticket.transition --id <ID> --role <ROLE>
 # ---------------------------------------------------------------------------
 cmd_idea_pending_append() {
-  local op="" title="" body="" id="" priority="" role="" duplicate_of=""
+  local op="" title="" body="" id="" priority="" role="" duplicate_of="" parent=""
   local project_dir="."
 
   while [[ $# -gt 0 ]]; do
@@ -2809,6 +2829,18 @@ cmd_idea_pending_append() {
       --priority)       priority="$2"; shift 2 ;;
       --role)           role="$2"; shift 2 ;;
       --duplicate-of)   duplicate_of="$2"; shift 2 ;;
+      --parent)
+        # BTS-162: validate parity with cmd_idea_add — defense in depth
+        # against direct callers, even though the skill validates upstream.
+        if [[ -z "$2" ]]; then
+          echo "ERROR: idea-pending-append: --parent requires a non-empty value" >&2
+          return 2
+        fi
+        if [[ "$2" =~ [[:space:]] ]]; then
+          echo "ERROR: idea-pending-append: --parent value '$2' contains whitespace" >&2
+          return 2
+        fi
+        parent="$2"; shift 2 ;;
       --project-dir)    project_dir="$2"; shift 2 ;;
       *)                echo "ERROR: unknown flag: $1" >&2; return 2 ;;
     esac
@@ -2829,9 +2861,16 @@ cmd_idea_pending_append() {
   case "$op" in
     add)
       if [[ -z "$title" ]]; then echo "ERROR: --op add requires --title" >&2; return 2; fi
-      entry=$(jq -nc \
-        --arg op "$op" --arg title "$title" --arg body "$body" --argjson ts "$ts" \
-        '{op:$op, args:{title:$title, body:$body}, ts:$ts}')
+      if [[ -n "$parent" ]]; then
+        entry=$(jq -nc \
+          --arg op "$op" --arg title "$title" --arg body "$body" \
+          --arg parent "$parent" --argjson ts "$ts" \
+          '{op:$op, args:{title:$title, body:$body, parent_id:$parent}, ts:$ts}')
+      else
+        entry=$(jq -nc \
+          --arg op "$op" --arg title "$title" --arg body "$body" --argjson ts "$ts" \
+          '{op:$op, args:{title:$title, body:$body}, ts:$ts}')
+      fi
       ;;
     promote)
       if [[ -z "$id" || -z "$priority" ]]; then

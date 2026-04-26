@@ -555,8 +555,10 @@ cmd_recommend() {
         next_action="/compact to wrap session"
         reason="All docs aligned with stasis. Run /compact to preserve context, then start the next feature."
       else
+        # Post-compact, mid-feature: stasis already snapshot, compact already
+        # ran, the operator is resuming. Reason makes the resumption explicit.
         next_action="Ready to build"
-        reason="Spec and plan are aligned. Start implementing via TDD."
+        reason="Resuming mid-feature implementation — continue from the stasis snapshot."
       fi
       ;;
 
@@ -583,12 +585,11 @@ cmd_recommend() {
       ;;
 
     blocked)
-      # Map specific validate.result values to the established recommend
-      # output strings. The blocker set is small and stable — mismatched,
-      # stale-plan, stale-stasis, unlinked, missing-determinism-review.
-      local validate_json validate_result
-      validate_json=$(cmd_validate "$docs_dir")
-      validate_result=$(echo "$validate_json" | jq -r '.result')
+      # BTS-20 review WARN-1: read validate_result from the envelope (carried
+      # by cmd_lifecycle_state) instead of re-running cmd_validate. Avoids a
+      # second full validation pass on every blocked path.
+      local validate_result
+      validate_result=$(echo "$envelope" | jq -r '.validate_result // ""')
       case "$validate_result" in
         unlinked)
           next_action="Add lifecycle metadata to docs"
@@ -3899,12 +3900,14 @@ cmd_lifecycle_state() {
       ;;
   esac
 
-  # Suggestions: free-form hints, currently empty for Session-1.
+  # Carry the underlying validate.result so consumers like cmd_recommend
+  # can map blocked → specific recovery message without re-running validate.
   jq -n \
     --arg state "$state" \
+    --arg validate_result "$result" \
     --argjson actions "$actions" \
     --argjson blockers "$blockers" \
-    '{state:$state, legal_next_actions:$actions, blockers:$blockers, suggestions:[]}'
+    '{state:$state, validate_result:$validate_result, legal_next_actions:$actions, blockers:$blockers, suggestions:[]}'
 }
 
 # ---------------------------------------------------------------------------

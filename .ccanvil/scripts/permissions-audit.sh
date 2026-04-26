@@ -39,16 +39,19 @@ RISK=""
 RATIONALE=""
 EFFICIENCY=""
 REVIEWER=""
+# BTS-161: entry-context positional permission arg.
+ENTRY_CONTEXT_PERM=""
 
 usage() {
-  echo "Usage: permissions-audit.sh <check|init|promote-review|apply|decision-append> [flags...]" >&2
+  echo "Usage: permissions-audit.sh <check|init|promote-review|apply|decision-append|entry-context> [flags...]" >&2
   echo "  decision-append --buffer FILE --permission PERM --decision delete|promote|keep-local|accept-danger [accept-danger fields]" >&2
+  echo "  entry-context <permission> [--settings-dir DIR]" >&2
   exit 2
 }
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
-    check|init|promote-review|apply|decision-append)
+    check|init|promote-review|apply|decision-append|entry-context)
       CMD="$1"; shift ;;
     --settings-dir)
       SETTINGS_DIR="$2"; shift 2 ;;
@@ -79,7 +82,12 @@ while [[ $# -gt 0 ]]; do
     -h|--help)
       usage ;;
     *)
-      echo "Unknown option: $1" >&2; usage ;;
+      # BTS-161: entry-context takes one positional permission argument.
+      if [[ "$CMD" == "entry-context" && -z "$ENTRY_CONTEXT_PERM" && "$1" != -* ]]; then
+        ENTRY_CONTEXT_PERM="$1"; shift
+      else
+        echo "Unknown option: $1" >&2; usage
+      fi ;;
   esac
 done
 
@@ -846,6 +854,133 @@ cmd_decision_append() {
 }
 
 # ---------------------------------------------------------------------------
+# BTS-161: entry-context — deterministic per-row context for /permissions-review
+# ---------------------------------------------------------------------------
+
+extract_leading_verb() {
+  # Bash(...) → strip wrapper → drop leading <NAME=val> env-prefix tokens →
+  # take first whitespace-separated token → strip trailing :*.
+  local inner="$1"
+  # Drop leading env assignments like "ALLOW_DESTRUCTIVE=1 chmod:* …"
+  while [[ "$inner" =~ ^[A-Z_][A-Z0-9_]*=[^[:space:]]+[[:space:]]+ ]]; do
+    inner="${inner#${BASH_REMATCH[0]}}"
+  done
+  local verb="${inner%%[[:space:]]*}"
+  verb="${verb%:*}"
+  echo "$verb"
+}
+
+scan_hooks_for_verb() {
+  local verb="$1"
+  local hooks_dir="${2:-.claude/hooks}"
+  if [[ -z "$verb" || ! -d "$hooks_dir" ]]; then
+    echo '[]'
+    return
+  fi
+  # Verb's character set might be regex-special — use grep -F is wrong (we want
+  # word boundaries). Use grep -nE with word boundary anchors. Skip echo and
+  # comment lines so noise like `echo "BLOCKED: chmod ..."` doesn't count.
+  local accum='[]'
+  local f
+  for f in "$hooks_dir"/*.sh; do
+    [[ -f "$f" ]] || continue
+    local matches
+    # \bVERB\b matches the verb as a whole word. Keep only lines that ALSO
+    # contain a gate-relevant operator: =~ (regex), case/*) (case branch), or
+    # a regex variable definition with |. Skip comments. This filters out pure
+    # invocations like `INPUT=$(echo ...)` while keeping the actual gating
+    # regexes like `=~ (rm|chmod|chown|...)`.
+    matches=$(grep -nE "\b${verb}\b" "$f" 2>/dev/null \
+      | awk '
+        {
+          # Strip leading "LINENO:" prefix without splitting on inner colons
+          # (which would mangle [[:space:]] character classes — review NIT N1).
+          if (match($0, /^[0-9]+:/) == 0) next
+          line = substr($0, 1, RLENGTH - 1)
+          text = substr($0, RLENGTH + 1)
+          if (text ~ /^[[:space:]]*#/) next
+          if (text ~ /=~/ || text ~ /[[:space:]]case[[:space:]]/ || text ~ /\*\)/) {
+            print line
+          }
+        }')
+    if [[ -n "$matches" ]]; then
+      # Review CONCERN 1: emit one entry per gate-context line rather than a
+      # [first, last] hull across the file. Hulls can span unrelated code when
+      # a verb gates two non-contiguous blocks. One-entry-per-line is truthful.
+      while IFS= read -r line_no; do
+        accum=$(echo "$accum" | jq --arg p "$f" --argjson n "$line_no" \
+          '. + [{path:$p, lines:[$n, $n]}]')
+      done <<< "$matches"
+    fi
+  done
+  echo "$accum"
+}
+
+cmd_entry_context() {
+  if [[ -z "$ENTRY_CONTEXT_PERM" ]]; then
+    echo "ERROR: entry-context requires a permission argument" >&2
+    exit 2
+  fi
+
+  local perm="$ENTRY_CONTEXT_PERM"
+
+  # source_files: which settings file(s) contain the permission, sorted.
+  local source_files='[]'
+  local main_file="$SETTINGS_DIR/settings.json"
+  local local_file="$SETTINGS_DIR/settings.local.json"
+  for f in "$main_file" "$local_file"; do
+    [[ -f "$f" ]] || continue
+    if jq -e --arg p "$perm" '.permissions.allow // [] | index($p)' "$f" >/dev/null 2>&1; then
+      source_files=$(echo "$source_files" | jq --arg f "$f" '. + [$f]')
+    fi
+  done
+  source_files=$(echo "$source_files" | jq 'sort')
+
+  # matched_pattern: reuse check_danger via strip_bash_wrapper for Bash() shapes.
+  # Non-Bash shapes return null.
+  local matched_pattern_arg='null'
+  if [[ "$perm" == Bash\(* ]]; then
+    local inner mp
+    inner=$(strip_bash_wrapper "$perm")
+    mp=$(check_danger "$inner" || true)
+    if [[ -n "$mp" ]]; then
+      matched_pattern_arg=$(jq -nc --arg mp "$mp" '$mp')
+    fi
+  fi
+
+  # matched_hooks: leading-verb scan against .claude/hooks/*.sh.
+  local matched_hooks='[]'
+  if [[ "$perm" == Bash\(* ]]; then
+    local inner verb
+    inner=$(strip_bash_wrapper "$perm")
+    verb=$(extract_leading_verb "$inner")
+    matched_hooks=$(scan_hooks_for_verb "$verb")
+  fi
+
+  # introduced_in: first commit (oldest) that introduced the permission string
+  # into either settings file. Null when source_files is empty or git history
+  # has no record of the string.
+  local introduced_arg='null'
+  if [[ "$(echo "$source_files" | jq 'length')" -gt 0 ]]; then
+    local log_line
+    # Review CONCERN 2: scope git log to $SETTINGS_DIR rather than hardcoding
+    # .claude/. Otherwise non-default --settings-dir silently returns null.
+    log_line=$(git log -S "$perm" --reverse --pretty=format:'%h%x09%s' \
+      -- "$SETTINGS_DIR/settings.json" "$SETTINGS_DIR/settings.local.json" 2>/dev/null | head -1 || true)
+    if [[ -n "$log_line" ]]; then
+      local commit subject
+      commit="${log_line%%	*}"
+      subject="${log_line#*	}"
+      introduced_arg=$(jq -nc --arg c "$commit" --arg s "$subject" \
+        '{commit:$c, subject:$s}')
+    fi
+  fi
+
+  jq -n --arg permission "$perm" --argjson sf "$source_files" --argjson mp "$matched_pattern_arg" --argjson mh "$matched_hooks" --argjson ii "$introduced_arg" \
+    '{permission:$permission, source_files:$sf, matched_pattern:$mp, matched_hooks:$mh, introduced_in:$ii}'
+}
+
+# ---------------------------------------------------------------------------
 # Dispatch
 # ---------------------------------------------------------------------------
 
@@ -855,5 +990,6 @@ case "$CMD" in
   promote-review)   cmd_promote_review ;;
   apply)            cmd_apply ;;
   decision-append)  cmd_decision_append ;;
+  entry-context)    cmd_entry_context ;;
   *)              usage ;;
 esac

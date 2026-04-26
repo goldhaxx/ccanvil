@@ -3,7 +3,7 @@
 > Feature: bts-20-lifecycle-state-primitive
 > Work: linear:BTS-20
 > Created: 1777243739
-> Status: In Progress
+> Status: Complete
 
 ## Summary
 

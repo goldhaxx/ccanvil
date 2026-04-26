@@ -106,8 +106,11 @@ AGENT="$REPO_ROOT/.claude/agents/drift-analyst.md"
 # AC-10: drift-watchdog label
 # =========================================================================
 
-@test "AC-10: skill includes --label drift-watchdog in issue creation pattern" {
-  grep -qF -- '--label drift-watchdog' "$SKILL"
+@test "AC-10: skill includes drift-watchdog in --labels for create dispatch" {
+  # linear-query.sh save-issue takes --labels (plural, comma-separated). The
+  # resolver default is `--labels 'idea'`; the skill must override with
+  # `--labels 'idea,drift-watchdog'` so both labels stick.
+  grep -qF -- "--labels 'idea,drift-watchdog'" "$SKILL"
 }
 
 @test "AC-10: skill filters existing issues by drift-watchdog label" {

@@ -59,17 +59,26 @@ Spawn the `drift-analyst` sub-agent with the drift record + recent git context +
 
 Title: `[drift-watchdog] <node_name>: <drift_key>` — the `drift_key` in the title is the dedup key. Never compose with timestamps.
 
-Dispatch the create via http:
+Dispatch the create via http. CRITICAL EXECUTION CONTRACT — you MUST run each Bash command literally and capture its actual exit status; do not summarize the work without running it. Echo the actual stderr+stdout from each step:
 
 ```bash
 RESOLUTION=$(bash .ccanvil/scripts/operations.sh resolve idea.add --project-dir .)
 cmd=$(echo "$RESOLUTION" | jq -r '.invocation.command')
 TITLE="[drift-watchdog] $NODE_NAME: $DRIFT_KEY"
-if jq -n --arg title "$TITLE" --arg description "$BODY" \
+echo "drift-watchdog: dispatching create for $NODE_NAME ($DRIFT_KEY)"
+# `--labels 'idea,drift-watchdog'` overrides the resolver's default `--labels idea`
+# so BOTH labels stick. linear-query.sh's --labels flag accepts a comma-separated
+# string; multiple --labels invocations have last-write-wins semantics.
+RESULT=$(jq -n --arg title "$TITLE" --arg description "$BODY" \
   '{title:$title, description:$description}' \
-  | eval "$cmd --label drift-watchdog --input-json -" >/dev/null 2>&1; then
-  echo "drift-watchdog: created issue for $NODE_NAME ($DRIFT_KEY)"
+  | eval "$cmd --labels 'idea,drift-watchdog' --input-json -" 2>&1)
+RC=$?
+echo "drift-watchdog: linear-query.sh exit=$RC output=$RESULT"
+if [[ $RC -eq 0 ]]; then
+  CREATED_ID=$(echo "$RESULT" | jq -r '.id // empty')
+  echo "drift-watchdog: created $CREATED_ID for $NODE_NAME ($DRIFT_KEY)"
 else
+  echo "drift-watchdog: create FAILED for $NODE_NAME ($DRIFT_KEY) — queueing pending"
   bash .ccanvil/scripts/docs-check.sh idea-pending-append \
     --op add --title "$TITLE" --body "$BODY"
   PENDING_N=$(bash .ccanvil/scripts/docs-check.sh idea-pending-validate | jq -r .count)
@@ -77,7 +86,7 @@ else
 fi
 ```
 
-The `--label drift-watchdog` is mandatory — every issue must carry it so future runs find them. Pending-log fallback always counts entries via `idea-pending-validate`, never via line-count utilities.
+The `drift-watchdog` label is mandatory — every issue must carry it so future runs find them. The label MUST exist in Linear before any create succeeds (one-time operator setup; the skill assumes it exists). Pending-log fallback always counts entries via `idea-pending-validate`.
 
 ### 5. Substrate purity
 

@@ -3,7 +3,7 @@
 > Feature: bts-21-drift-watchdog
 > Work: linear:BTS-21
 > Created: 1777226176
-> Status: In Progress
+> Status: Complete
 
 ## Summary
 

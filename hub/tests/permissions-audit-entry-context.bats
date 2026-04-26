@@ -268,6 +268,18 @@ EOF
 
 
 # =========================================================================
+# AC-9: /permissions-review skill prose drift-guard
+# =========================================================================
+
+@test "AC-9: permissions-review skill references entry-context substrate" {
+  local skill="$BATS_TEST_DIRNAME/../../.claude/commands/permissions-review.md"
+  [ -f "$skill" ]
+  grep -q 'entry-context' "$skill"
+  grep -q 'matched_hooks' "$skill"
+}
+
+
+# =========================================================================
 # AC-6: positional arg required → exit 2 with specific error on stderr
 # =========================================================================
 

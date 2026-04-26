@@ -49,11 +49,21 @@ The script validates the decision verb against the same schema `apply --decision
 
 ### 4. DANGER walkthrough
 
-For each DANGER entry without `accept_danger:true`, present:
+For each DANGER entry without `accept_danger:true`, fetch the deterministic per-row context via the BTS-161 `entry-context` substrate before prompting:
+
+```bash
+CTX=$(bash .ccanvil/scripts/permissions-audit.sh entry-context "<permission>")
+```
+
+The output is a JSON object: `{permission, source_files, matched_pattern, matched_hooks, introduced_in}`. Surface `matched_hooks[].path` (which hook(s) gate the verb) and `introduced_in.commit` (where the permission entered the repo) in the prompt context — Claude renders only the judgment-heavy "net effect" prose, not the deterministic spine.
+
+Present:
 
 ```
 Permission: <permission>  [DANGER: <matched_pattern>]
-Action? [accept-danger / skip] (default skip)
+Hooks:      <matched_hooks[].path joined by ", ">
+Introduced: <introduced_in.commit> (<introduced_in.subject>)
+Action?     [accept-danger / skip] (default skip)
 ```
 
 If `accept-danger`:

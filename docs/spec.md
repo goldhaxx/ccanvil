@@ -48,19 +48,12 @@ Each criterion is independently testable. Binary pass/fail.
 
 ## Implementation Notes
 
-- **Skip-rule placement.** Insert AFTER the BTS-169 pure-slash skip and BEFORE the `case "$token" in /?*)` path-shape scan. Pattern:
-  ```bash
-  # BTS-173: single-segment slash-prefixed alphabetic words (slash-command
-  # names like /idea, /permissions-review) are lexical fragments, not
-  # filesystem paths. Skip the path scan when the token has exactly one
-  # segment, starts with an alphabetic character, contains only
-  # [a-zA-Z0-9_-], and is ≤30 chars after the slash.
-  [[ "$token" =~ ^/[a-zA-Z][a-zA-Z0-9_-]{0,29}$ ]] && continue
-  ```
-- **Why alphabetic-leading.** Real absolute paths under `/` like `/123foo` exist, and the segment lengths can be short. Restricting the exemption to `/<alpha>...` matches the slash-command convention exactly without weakening the real-path check on numeric-prefixed system paths.
-- **Why 30-char cap.** Slash-command names are conventionally short (`/idea`, `/permissions-review` is 18 chars). Capping at 30 prevents an attacker from exploiting the exemption with a long-lexical-token name like `/aaaaaaaaaaaaaaaa-this-is-not-a-path-honest-aaaaa`. Belt-and-suspenders.
+- **Allowlist approach (revised mid-implementation).** First-attempt regex-only exemption `^/[a-zA-Z][a-zA-Z0-9_-]{0,29}$` correctly exempted `/idea` BUT also exempted `/etc`, `/var`, `/usr`, `/a` — real system paths and slash-command names are syntactically identical. Two existing tests (BTS-155 AC-10 `find /etc` traversal; BTS-147 AC-6 `/a` whitelist) regressed. Pure-syntactic disambiguation is impossible. Fix: build an allowlist on first-match-attempt by enumerating `$CLAUDE_PROJECT_DIR/.claude/commands/*.md` and `.claude/skills/*/`, cache for the rest of the hook invocation, exempt only single-segment tokens whose basename appears in the allowlist.
+- **Skip-rule placement.** Insert AFTER the BTS-169 pure-slash skip and BEFORE the `case "$token" in /?*)` path-shape scan.
+- **Why the regex prefilter still applies.** Defense in depth — the regex prunes obvious non-candidates (numeric-leading, underscore-leading, too-long, multi-segment) before paying the directory-listing cost. A token like `/123` doesn't make it to the allowlist check.
+- **Allowlist build cost.** Two `for entry in dir/*` glob expansions on first match-attempt within a single hook invocation. Both directories are O(20) entries. Negligible; cost is amortized across the rest of the token loop.
 - **Test-fixture pattern.** Mirror `hub/tests/guard-workspace-jq-exemption.bats` (BTS-169) — synthesize the hook's stdin JSON via `jq -n --arg cmd "$CMD" '{tool_input:{command:$cmd}}'` and pipe to the hook script; assert exit code + stderr content.
-- **No live-API risk.** Pure shell-logic substrate change. /review can be skipped per skip-feedback memory if the diff is purely additive.
+- **No live-API risk.** Pure shell-logic substrate change. /review skipped per skip-feedback memory.
 
 <!-- NODE-SPECIFIC-START -->
 <!-- Add project-specific content below this line. -->

@@ -68,6 +68,10 @@ When you run `/recall` after `/compact` (or `/clear`), Claude reads these source
 
 It reports the state but does NOT start implementing. You say "Continue" when ready.
 
+## Unified lifecycle-state primitive (BTS-20)
+
+`docs-check.sh lifecycle-state` is the canonical state envelope for skills: one resolver call returns `{state, legal_next_actions, blockers, suggestions}`, codified against `.ccanvil/templates/lifecycle-graph.json`. Skills consume this single primitive instead of re-parsing `validate` + `recommend` independently. `/recall` migrated as the proof-point consumer; `/plan`, `/pr`, and `/stasis` migrate in Session-2/3 ships. The transition graph is data, not skill prose — adding a new state or edge is a JSON edit, not a substrate rewrite.
+
 ## Recommend freshness (BTS-113)
 
 `docs-check.sh recommend` distinguishes *"session about to end"* from *"session just resumed after `/compact` + `/recall`"* via a filesystem marker at `.ccanvil/state/last-compact-ts` (epoch). The marker is written by a **PreCompact hook** (`.claude/hooks/post-compact-marker.sh`, registered in `.claude/settings.json` under `hooks.PreCompact`) that fires before every `/compact`.

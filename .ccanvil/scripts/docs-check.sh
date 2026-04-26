@@ -3729,6 +3729,138 @@ cmd_evidence_scan_session() {
 }
 
 # ---------------------------------------------------------------------------
+# cmd_lifecycle_state (BTS-20) — Unified state envelope.
+#
+# Composes cmd_validate + git/marker state into a structured envelope:
+#   {state, legal_next_actions:[{action, command, reason}], blockers:[], suggestions:[]}
+#
+# Consumes the codified transition graph at .ccanvil/templates/lifecycle-graph.json
+# for state IDs and structural edges; contextual filtering (post-compact freshness,
+# spec/plan presence) lives in code.
+# ---------------------------------------------------------------------------
+cmd_lifecycle_state() {
+  local project_dir="."
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --project-dir) project_dir="${2:-.}"; shift 2 ;;
+      *) shift ;;
+    esac
+  done
+
+  # AC-9: uninitialized — missing .ccanvil/scripts/ or not inside a git repo.
+  if [[ ! -d "$project_dir/.ccanvil/scripts" || ! -d "$project_dir/.git" ]]; then
+    jq -n --arg err "not a ccanvil project (.ccanvil/scripts/ or .git/ missing)" \
+      '{state:"uninitialized", legal_next_actions:[], blockers:[], suggestions:[], error:$err}'
+    return 2
+  fi
+
+  local docs_dir="$project_dir/docs"
+  local validate_json
+  validate_json=$(cmd_validate "$docs_dir")
+
+  local result spec_exists plan_exists stasis_exists stasis_kind
+  result=$(echo "$validate_json" | jq -r '.result')
+  spec_exists=$(echo "$validate_json" | jq -r '.status.spec.exists')
+  plan_exists=$(echo "$validate_json" | jq -r '.status.plan.exists')
+  stasis_exists=$(echo "$validate_json" | jq -r '.status.stasis.exists')
+  stasis_kind=$(echo "$validate_json" | jq -r '.status.stasis.kind // empty')
+
+  # post-compact freshness: marker_ts >= stasis.last_updated means compact
+  # has run at or after the current stasis was written. Mirrors the marker
+  # check in cmd_recommend (BTS-113).
+  local stasis_ts marker_ts marker_path
+  stasis_ts=$(echo "$validate_json" | jq -r '.status.stasis.last_updated // empty')
+  marker_path="$project_dir/.ccanvil/state/last-compact-ts"
+  marker_ts=""
+  if [[ -f "$marker_path" ]]; then
+    marker_ts=$(tr -d '[:space:]' < "$marker_path" 2>/dev/null || echo "")
+  fi
+  local compact_fresh=false
+  if [[ -n "$marker_ts" && "$marker_ts" =~ ^[0-9]+$ \
+        && -n "$stasis_ts" && "$stasis_ts" =~ ^[0-9]+$ \
+        && "$marker_ts" -ge "$stasis_ts" ]]; then
+    compact_fresh=true
+  fi
+
+  # Derive state.
+  local state="no-active-spec"
+  local blockers='[]'
+
+  case "$result" in
+    mismatched|stale-plan|stale-stasis|unlinked|missing-determinism-review)
+      state="blocked"
+      blockers=$(echo "$validate_json" | jq -c '.details')
+      ;;
+    *)
+      if [[ "$spec_exists" == "true" && "$plan_exists" != "true" ]]; then
+        state="spec-activated"
+      elif [[ "$spec_exists" == "true" && "$plan_exists" == "true" ]]; then
+        if [[ "$stasis_exists" == "true" && "$stasis_kind" != "session" ]]; then
+          state="implementing"
+        else
+          state="plan-written"
+        fi
+      elif [[ "$stasis_exists" == "true" && "$stasis_kind" == "session" ]]; then
+        state="session-wrap"
+      else
+        state="no-active-spec"
+      fi
+      ;;
+  esac
+
+  # Derive legal_next_actions for the current state. Structural edges live
+  # in lifecycle-graph.json; contextual filtering happens here.
+  local actions='[]'
+  case "$state" in
+    no-active-spec)
+      actions=$(jq -n '[
+        {action:"/radar", command:"/radar", reason:"orient before next feature"},
+        {action:"/idea triage", command:"/idea triage", reason:"clear triage queue first"},
+        {action:"/spec", command:"/spec <work-ref> <description>", reason:"start a new feature"},
+        {action:"activate", command:"bash .ccanvil/scripts/docs-check.sh activate <feature-id>", reason:"activate a Ready spec from docs/specs/"}
+      ]')
+      ;;
+    spec-activated)
+      actions=$(jq -n '[
+        {action:"/plan", command:"/plan", reason:"draft implementation plan from active spec"}
+      ]')
+      ;;
+    plan-written|implementing)
+      actions=$(jq -n '[
+        {action:"implement", command:"TDD red → green → refactor → commit", reason:"execute plan steps"},
+        {action:"/pr", command:"/pr", reason:"finalize and mark PR ready"},
+        {action:"/stasis", command:"/stasis", reason:"snapshot session progress before context reset"}
+      ]')
+      ;;
+    session-wrap)
+      if $compact_fresh; then
+        actions=$(jq -n '[
+          {action:"/radar", command:"/radar", reason:"orient on next feature (compact already ran)"},
+          {action:"activate", command:"bash .ccanvil/scripts/docs-check.sh activate <feature-id>", reason:"start the next feature"},
+          {action:"/idea triage", command:"/idea triage", reason:"clear triage queue if non-empty"}
+        ]')
+      else
+        actions=$(jq -n '[
+          {action:"/compact", command:"/compact", reason:"clear context after stasis"}
+        ]')
+      fi
+      ;;
+    blocked)
+      actions=$(jq -n --argjson b "$blockers" '[
+        {action:"recover", command:"address validate.details", reason:($b | join("; "))}
+      ]')
+      ;;
+  esac
+
+  # Suggestions: free-form hints, currently empty for Session-1.
+  jq -n \
+    --arg state "$state" \
+    --argjson actions "$actions" \
+    --argjson blockers "$blockers" \
+    '{state:$state, legal_next_actions:$actions, blockers:$blockers, suggestions:[]}'
+}
+
+# ---------------------------------------------------------------------------
 # Dispatch
 # ---------------------------------------------------------------------------
 
@@ -3779,6 +3911,7 @@ case "$cmd" in
   idea-pending-validate) cmd_idea_pending_validate "$@" ;;
   remote-presence)   cmd_remote_presence "$@" ;;
   evidence-scan-session) cmd_evidence_scan_session "$@" ;;
+  lifecycle-state)   cmd_lifecycle_state "$@" ;;
   *)
     echo "Usage: docs-check.sh {status|validate|recommend|audit-session|config-get|list-specs|activate|complete|pr-cleanup|land|idea-add|idea-list|idea-count|idea-update|idea-sync|idea-pending-replay|refresh-plan-hash|idea-migrate|idea-setup|idea-upgrade|title-from-body|legacy-refs-scan|stamp-spec|idea-pending-append|idea-pending-validate|remote-presence} [args...]" >&2
     exit 1

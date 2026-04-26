@@ -1,0 +1,118 @@
+{
+  "version": "1.0",
+  "description": "Codified ccanvil lifecycle state machine. Consumed by docs-check.sh lifecycle-state to derive legal next actions per current state. See docs/specs/bts-20-lifecycle-state-primitive.md for the design rationale.",
+  "states": [
+    {
+      "id": "no-active-spec",
+      "description": "On main with no active spec on the branch. Specs may exist in docs/specs/ backlog. Default starting state."
+    },
+    {
+      "id": "spec-drafted",
+      "description": "A spec file exists in docs/specs/ but has not been activated to a branch. Equivalent to no-active-spec when listing scope; this state exists for graph completeness."
+    },
+    {
+      "id": "spec-activated",
+      "description": "On a claude/<type>/<id> feature branch with docs/spec.md present, no plan yet. Lifecycle copied the spec into the active slot via docs-check.sh activate."
+    },
+    {
+      "id": "plan-written",
+      "description": "Active spec + active plan present on the feature branch. Ready to implement under TDD."
+    },
+    {
+      "id": "implementing",
+      "description": "Plan-written state with commits ahead of branch base. Active TDD work in progress."
+    },
+    {
+      "id": "pr-open",
+      "description": "Feature branch has a PR open (draft or ready). Local detection is best-effort via gh; primarily a logical state."
+    },
+    {
+      "id": "pr-merged",
+      "description": "Transient state — PR was squash-merged on GitHub, local main not yet fast-forwarded."
+    },
+    {
+      "id": "session-wrap",
+      "description": "Session-kind stasis present and post-compact marker is fresh (>= stasis.last_updated). Session boundary; recommend forward action."
+    },
+    {
+      "id": "blocked",
+      "description": "Validate returned a non-aligned result (stale-plan, stale-stasis, mismatched, unlinked, missing-determinism-review). Recovery action required before further forward motion."
+    },
+    {
+      "id": "uninitialized",
+      "description": "Not a ccanvil project (no .ccanvil/scripts/) or not a git repo. Edge state for substrate primitives invoked from foreign trees."
+    }
+  ],
+  "edges": [
+    {
+      "from": "no-active-spec",
+      "to": "spec-drafted",
+      "action": "/spec",
+      "command": "/spec <work-ref> <description>",
+      "guard": "work-ref-resolves"
+    },
+    {
+      "from": "spec-drafted",
+      "to": "spec-activated",
+      "action": "activate",
+      "command": "bash .ccanvil/scripts/docs-check.sh activate <feature-id>",
+      "guard": "main-clean-and-spec-exists"
+    },
+    {
+      "from": "spec-activated",
+      "to": "plan-written",
+      "action": "/plan",
+      "command": "/plan",
+      "guard": "validate-aligned"
+    },
+    {
+      "from": "plan-written",
+      "to": "implementing",
+      "action": "implement",
+      "command": "TDD red → green → refactor → commit",
+      "guard": "spec-and-plan-aligned"
+    },
+    {
+      "from": "implementing",
+      "to": "pr-open",
+      "action": "/pr",
+      "command": "/pr",
+      "guard": "tests-pass-and-validate-aligned-and-pr-guard-ok"
+    },
+    {
+      "from": "pr-open",
+      "to": "pr-merged",
+      "action": "merge",
+      "command": "gh pr merge --squash --delete-branch",
+      "guard": "ci-green-and-reviewed"
+    },
+    {
+      "from": "pr-merged",
+      "to": "no-active-spec",
+      "action": "/land",
+      "command": "/land",
+      "guard": "branch-on-main-or-feature-branch"
+    },
+    {
+      "from": "no-active-spec",
+      "to": "session-wrap",
+      "action": "/stasis",
+      "command": "/stasis",
+      "guard": "session-objective-complete"
+    },
+    {
+      "from": "session-wrap",
+      "to": "no-active-spec",
+      "action": "/compact",
+      "command": "/compact",
+      "guard": "stasis-fresh-vs-compact-marker"
+    },
+    {
+      "from": "blocked",
+      "to": "no-active-spec",
+      "action": "recover",
+      "command": "Address validate.details (mismatched / stale-plan / stale-stasis / unlinked / missing-determinism-review)",
+      "guard": "validate-detail-resolved"
+    }
+  ]
+}

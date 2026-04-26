@@ -250,8 +250,10 @@ OPERATIONS="$REPO_ROOT/.ccanvil/scripts/operations.sh"
   grep -q 'audit-session' "$REPO_ROOT/.claude/skills/recall/SKILL.md"
 }
 
-@test "recall skill: runs docs-check.sh validate" {
-  grep -q 'docs-check.sh validate' "$REPO_ROOT/.claude/skills/recall/SKILL.md"
+@test "recall skill: runs docs-check.sh lifecycle-state (BTS-20 migration)" {
+  # BTS-20 migrated /recall from separate validate + recommend calls to a
+  # single lifecycle-state envelope. Pin the post-migration shape.
+  grep -q 'docs-check.sh lifecycle-state' "$REPO_ROOT/.claude/skills/recall/SKILL.md"
 }
 
 @test "legacy catchup command: .claude/commands/catchup.md is deleted" {

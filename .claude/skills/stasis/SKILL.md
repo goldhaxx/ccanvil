@@ -81,6 +81,39 @@ Decisions made, alternatives considered, failed approaches. Anything the next se
 ### ## Determinism Review
 Follow `.claude/rules/self-review.md`. Review operations from this session; flag ones that should become scripts/hooks. Fill `operations_reviewed: <count>`, `candidates_found: <count>`, plus a bullet per candidate or "No candidates this session." **This section is mandatory** — validate will flag it as missing-determinism-review if empty.
 
+**BTS-115: dual-capture each candidate as a Linear idea.** After writing the section, for each candidate (skip entirely if `candidates_found == 0` or the resolved provider is `local`):
+
+1. **Derive a deterministic title:** `Determinism: <candidate-slug>` where `<candidate-slug>` is the bolded operation name from the bullet (markdown `**` markers stripped, trimmed, ≤80 chars). Stable across sessions — same input, same title.
+2. **Dedup against existing ideas:**
+   ```bash
+   IDEA_LIST=$(bash .ccanvil/scripts/operations.sh resolve idea.list --project-dir .)
+   provider=$(echo "$IDEA_LIST" | jq -r '.provider')
+   [[ "$provider" != "linear" ]] && continue   # local-routed: skip the capture step entirely
+   listing=$(eval "$(echo "$IDEA_LIST" | jq -r '.invocation.command')")
+   match=$(echo "$listing" | jq -r --arg t "$TITLE" '[.[] | select(.title == $t)] | .[0].id // ""')
+   if [[ -n "$match" ]]; then
+     echo "dedup: skipped '$TITLE' — existing idea $match"
+     continue
+   fi
+   ```
+3. **Capture via the BTS-166 http substrate:**
+   ```bash
+   RESOLUTION=$(bash .ccanvil/scripts/operations.sh resolve idea.add --project-dir .)
+   cmd=$(echo "$RESOLUTION" | jq -r '.invocation.command')
+   if jq -n --arg title "$TITLE" --arg description "$BODY" \
+        '{title:$title, description:$description}' \
+        | eval "$cmd --input-json -" >/dev/null 2>&1; then
+     echo "Captured idea: $TITLE"
+   else
+     # Pending-log fallback — replay later via /idea sync.
+     bash .ccanvil/scripts/docs-check.sh idea-pending-append \
+       --op add --title "$TITLE" --body "$BODY"
+     echo "PENDING: capture queued for /idea sync"
+   fi
+   ```
+
+The capture body is the bullet's full text (operation, what happened, deterministic replacement, impact). Capture failure NEVER aborts the stasis flow — pending-log fallback guarantees forward progress.
+
 ### ## Permissions Review Pending (BTS-149)
 Conditional section — include ONLY when `(promote-review.counts.total + check.danger) > 0`. When both counts are 0, OMIT this section entirely (no noise).
 

@@ -20,6 +20,12 @@ Fill the `## Determinism Review` section in `docs/stasis.md` with:
 - For each candidate: `**[operation]**: Claude [what happened]. Should be [deterministic replacement]. Impact: [high/medium/low].`
 - If no candidates: "No candidates this session."
 
+## Dual-capture to Linear (BTS-115)
+
+When `candidates_found > 0` AND the project is Linear-routed, `/stasis` automatically captures each candidate as a Linear idea (title `Determinism: <slug>`) so the candidate is visible in `/idea triage`, `/radar`, and the cross-session backlog. Dedup is by exact title match against the existing idea list. You don't need to manually `/idea` flagged candidates — `/stasis` handles it.
+
+On local-routed projects, the dual-capture step is a no-op — candidates still land in `docs/stasis.md` (existing behavior preserved).
+
 ## When NOT to Flag
 
 - Merge conflict resolution (requires semantic understanding)

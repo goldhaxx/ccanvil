@@ -297,6 +297,23 @@ OPERATIONS="$REPO_ROOT/.ccanvil/scripts/operations.sh"
   grep -q 'legacy-refs-scan' "$REPO_ROOT/.claude/skills/stasis/SKILL.md"
 }
 
+@test "BTS-115 AC-9: stasis skill dual-captures determinism candidates as Linear ideas" {
+  local s="$REPO_ROOT/.claude/skills/stasis/SKILL.md"
+  # Positive grep for the deterministic title prefix and the BTS-166 capture surface.
+  grep -q 'Determinism:' "$s"
+  grep -q 'idea.add' "$s"
+  # Must reference the dedup mechanism (idea.list resolver).
+  grep -q 'idea.list' "$s"
+  # Must reference the pending-log fallback for capture failures.
+  grep -q 'idea-pending-append' "$s"
+}
+
+@test "BTS-115 AC-10: self-review.md notes the dual-capture behavior" {
+  local r="$REPO_ROOT/.claude/rules/self-review.md"
+  grep -q 'Determinism:' "$r"
+  grep -qi 'dual.capture\|automatically captures' "$r"
+}
+
 @test "stasis skill: reads HEAD~1:docs/stasis.md for prior-state diff (AC-5, AC-10)" {
   grep -q 'HEAD~1:docs/stasis\.md' "$REPO_ROOT/.claude/skills/stasis/SKILL.md"
 }

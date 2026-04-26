@@ -3,7 +3,7 @@
 > Feature: bts-116-broadcast-resolve-auto
 > Work: linear:BTS-116
 > Created: 1777174532
-> Status: In Progress
+> Status: Complete
 
 ## Summary
 

@@ -953,8 +953,25 @@ cmd_entry_context() {
     matched_hooks=$(scan_hooks_for_verb "$verb")
   fi
 
-  jq -n --arg permission "$perm" --argjson sf "$source_files" --argjson mp "$matched_pattern_arg" --argjson mh "$matched_hooks" \
-    '{permission:$permission, source_files:$sf, matched_pattern:$mp, matched_hooks:$mh, introduced_in:null}'
+  # introduced_in: first commit (oldest) that introduced the permission string
+  # into either settings file. Null when source_files is empty or git history
+  # has no record of the string.
+  local introduced_arg='null'
+  if [[ "$(echo "$source_files" | jq 'length')" -gt 0 ]]; then
+    local log_line
+    log_line=$(git log -S "$perm" --reverse --pretty=format:'%h%x09%s' \
+      -- .claude/settings.json .claude/settings.local.json 2>/dev/null | head -1 || true)
+    if [[ -n "$log_line" ]]; then
+      local commit subject
+      commit="${log_line%%	*}"
+      subject="${log_line#*	}"
+      introduced_arg=$(jq -nc --arg c "$commit" --arg s "$subject" \
+        '{commit:$c, subject:$s}')
+    fi
+  fi
+
+  jq -n --arg permission "$perm" --argjson sf "$source_files" --argjson mp "$matched_pattern_arg" --argjson mh "$matched_hooks" --argjson ii "$introduced_arg" \
+    '{permission:$permission, source_files:$sf, matched_pattern:$mp, matched_hooks:$mh, introduced_in:$ii}'
 }
 
 # ---------------------------------------------------------------------------

@@ -189,6 +189,85 @@ EOF
 
 
 # =========================================================================
+# AC-5: introduced_in via git log -S
+# =========================================================================
+
+@test "AC-5: introduced_in null when permission not in any settings file" {
+  set -e
+  cat > "$FIXTURE/settings.json" <<'EOF'
+{ "permissions": { "allow": ["Bash(other:*)"] } }
+EOF
+  run bash "$SCRIPT" entry-context "Bash(notpresent:*)" --settings-dir "$FIXTURE"
+  [ "$status" -eq 0 ]
+  echo "$output" | jq -e '.introduced_in == null'
+}
+
+@test "AC-5: introduced_in returns commit + subject for tracked permission" {
+  set -e
+  # Use the actual repo's git history. Pick a permission known to exist in
+  # .claude/settings.json so git log -S finds the introducing commit.
+  cd "$BATS_TEST_DIRNAME/../.."
+  # Pick the first Bash() permission from settings.json deterministically.
+  local perm
+  perm=$(jq -r '.permissions.allow[] | select(startswith("Bash("))' .claude/settings.json | head -1)
+  [ -n "$perm" ]
+  run bash "$SCRIPT" entry-context "$perm" --settings-dir .claude
+  [ "$status" -eq 0 ]
+  echo "$output" | jq -e '.introduced_in != null'
+  echo "$output" | jq -e '.introduced_in | has("commit") and has("subject")'
+  echo "$output" | jq -e '.introduced_in.commit | length > 0'
+  echo "$output" | jq -e '.introduced_in.subject | length > 0'
+}
+
+
+# =========================================================================
+# AC-7: absent permission graceful path
+# =========================================================================
+
+@test "AC-7: absent permission returns full envelope, exit 0" {
+  set -e
+  cat > "$FIXTURE/settings.json" <<'EOF'
+{ "permissions": { "allow": ["Bash(other:*)"] } }
+EOF
+  cd "$BATS_TEST_DIRNAME/../.."
+  run bash "$SCRIPT" entry-context "Bash(neverhappens:*)" --settings-dir "$FIXTURE"
+  [ "$status" -eq 0 ]
+  echo "$output" | jq -e '.permission == "Bash(neverhappens:*)"'
+  echo "$output" | jq -e '.source_files == []'
+  echo "$output" | jq -e '.introduced_in == null'
+  # matched_hooks may still scan the real hooks dir for the leading verb
+  # (independent of settings presence) — assertion is just that the field
+  # exists and is an array.
+  echo "$output" | jq -e '.matched_hooks | type == "array"'
+}
+
+
+# =========================================================================
+# AC-8: round-trip drift-guard against cmd_check
+# =========================================================================
+
+@test "AC-8: matched_pattern matches cmd_check output for same DANGER entry" {
+  set -e
+  cat > "$FIXTURE/settings.json" <<'EOF'
+{ "permissions": { "allow": ["Bash(chmod:*)"] } }
+EOF
+  # cmd_check classifies Bash(chmod:*) → DANGER with a matched_pattern.
+  run bash "$SCRIPT" check --settings-dir "$FIXTURE" --json
+  [ "$status" -ne 0 ]   # 2 (DANGER) or 1 (UNREVIEWED) — never 0 here
+  local check_pattern
+  check_pattern=$(echo "$output" | jq -r '.entries[] | select(.permission == "Bash(chmod:*)") | .matched_pattern')
+  [ -n "$check_pattern" ]
+  [ "$check_pattern" != "null" ]
+
+  run bash "$SCRIPT" entry-context "Bash(chmod:*)" --settings-dir "$FIXTURE"
+  [ "$status" -eq 0 ]
+  local ec_pattern
+  ec_pattern=$(echo "$output" | jq -r '.matched_pattern')
+  [ "$ec_pattern" = "$check_pattern" ]
+}
+
+
+# =========================================================================
 # AC-6: positional arg required → exit 2 with specific error on stderr
 # =========================================================================
 

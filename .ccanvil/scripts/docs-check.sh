@@ -2388,6 +2388,7 @@ cmd_refresh_plan_hash() {
 # ---------------------------------------------------------------------------
 cmd_derive_pr_title() {
   local spec_file="${1:-}"
+  local lookback=8
   if [[ -z "$spec_file" ]]; then
     echo "ERROR: derive-pr-title: missing <spec-file> argument" >&2
     return 1
@@ -2409,9 +2410,17 @@ cmd_derive_pr_title() {
   # Period-strip: drop everything from the first '.' onward.
   local suffix="${first_line%%.*}"
 
-  # 80-char cap, then trim trailing whitespace.
+  # 80-char cap, then word-boundary walk (BTS-182), then trim trailing ws.
   if (( ${#suffix} > 80 )); then
     suffix="${suffix:0:80}"
+    local i ch
+    for (( i=79; i >= 80 - lookback; i-- )); do
+      ch="${suffix:i:1}"
+      if [[ "$ch" == " " || "$ch" == $'\t' || "$ch" == "-" ]]; then
+        suffix="${suffix:0:i}"
+        break
+      fi
+    done
   fi
   suffix="${suffix%"${suffix##*[![:space:]]}"}"
 

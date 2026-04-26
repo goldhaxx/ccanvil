@@ -84,19 +84,18 @@ EOF
 # AC-4: 80-char truncation when no period in first 80
 # =========================================================================
 
-@test "AC-4: long line without period truncates suffix at 80 chars" {
+@test "AC-4: long line without period or word-boundary in lookback truncates at 80 chars" {
   set -e
-  # 120 chars, no periods
-  local line="aaaaaaaaaa bbbbbbbbbb cccccccccc dddddddddd eeeeeeeeee ffffffffff gggggggggg hhhhhhhhhh iiiiiiiiii jjjjjjjjjj kkkkkkkkkk"
+  # 120 chars of solid letters — no period, no spaces, no hyphens, so
+  # BTS-182's word-boundary walk falls through and the hard 80-char cut applies.
+  local line=""
+  local i
+  for (( i=0; i<120; i++ )); do line="${line}a"; done
   _write_spec "$PROJECT/docs/spec.md" "bts-x" "$line"
   run bash "$SCRIPT" derive-pr-title "$PROJECT/docs/spec.md"
   [ "$status" -eq 0 ]
-  # Suffix after `feat(bts-x): ` is exactly 80 chars; expected suffix is
-  # the first 80 chars of $line, with no trailing whitespace.
   local expected_suffix="${line:0:80}"
-  expected_suffix="${expected_suffix%"${expected_suffix##*[![:space:]]}"}"
   [ "$output" = "feat(bts-x): $expected_suffix" ]
-  # Also: no trailing whitespace after parameter expansion.
   [[ ! "$output" =~ [[:space:]]$ ]]
 }
 
@@ -139,6 +138,117 @@ EOF
 @test "AC-6: non-existent file → non-zero exit" {
   run bash "$SCRIPT" derive-pr-title "$PROJECT/docs/does-not-exist.md"
   [ "$status" -ne 0 ]
+}
+
+# =========================================================================
+# BTS-182 — word-boundary truncation
+# =========================================================================
+
+@test "BTS-182 AC-2: space at position 75 truncates suffix at the space" {
+  set -e
+  # 75 'a's + ' ' + 30 'b's = 106 chars, no period.
+  local line=""
+  local i
+  for (( i=0; i<75; i++ )); do line="${line}a"; done
+  line="${line} "
+  for (( i=0; i<30; i++ )); do line="${line}b"; done
+  _write_spec "$PROJECT/docs/spec.md" "bts-x" "$line"
+  run bash "$SCRIPT" derive-pr-title "$PROJECT/docs/spec.md"
+  [ "$status" -eq 0 ]
+  # Suffix after `feat(bts-x): ` should be exactly 75 'a's (boundary char dropped).
+  local prefix="feat(bts-x): "
+  local suffix="${output#"$prefix"}"
+  [ "${#suffix}" -eq 75 ]
+  [[ ! "$suffix" =~ [[:space:]]$ ]]
+}
+
+@test "BTS-182 AC-3: hyphen at position 76 truncates and drops the hyphen" {
+  set -e
+  # 75 'a's + '-' + 30 'b's = 106 chars, no period, no spaces.
+  local line=""
+  local i
+  for (( i=0; i<75; i++ )); do line="${line}a"; done
+  line="${line}-"
+  for (( i=0; i<30; i++ )); do line="${line}b"; done
+  _write_spec "$PROJECT/docs/spec.md" "bts-x" "$line"
+  run bash "$SCRIPT" derive-pr-title "$PROJECT/docs/spec.md"
+  [ "$status" -eq 0 ]
+  local prefix="feat(bts-x): "
+  local suffix="${output#"$prefix"}"
+  [ "${#suffix}" -eq 75 ]
+  # Last char must NOT be a hyphen.
+  [ "${suffix: -1}" != "-" ]
+}
+
+@test "BTS-182 AC-4: no boundary in lookback → falls back to hard 80-char cut" {
+  set -e
+  # 100 'a's, no spaces, no hyphens, no period.
+  local line=""
+  local i
+  for (( i=0; i<100; i++ )); do line="${line}a"; done
+  _write_spec "$PROJECT/docs/spec.md" "bts-x" "$line"
+  run bash "$SCRIPT" derive-pr-title "$PROJECT/docs/spec.md"
+  [ "$status" -eq 0 ]
+  local prefix="feat(bts-x): "
+  local suffix="${output#"$prefix"}"
+  [ "${#suffix}" -eq 80 ]
+}
+
+@test "BTS-182 AC-5: period-strip happens BEFORE word-boundary logic" {
+  set -e
+  # `Add foo. ` + 100 'a's — period-strip drops everything after `Add foo`.
+  local line="Add foo. "
+  local i
+  for (( i=0; i<100; i++ )); do line="${line}a"; done
+  _write_spec "$PROJECT/docs/spec.md" "bts-x" "$line"
+  run bash "$SCRIPT" derive-pr-title "$PROJECT/docs/spec.md"
+  [ "$status" -eq 0 ]
+  [ "$output" = "feat(bts-x): Add foo" ]
+}
+
+@test "BTS-182 AC-6: lookback window is parameterized as 'local lookback=8'" {
+  set -e
+  local start end
+  start=$(grep -n '^cmd_derive_pr_title()' "$SCRIPT" | head -1 | cut -d: -f1)
+  [ -n "$start" ]
+  end=$(awk -v s="$start" 'NR > s && /^cmd_[a-z_]+\(\)/ { print NR; exit }' "$SCRIPT")
+  [ -n "$end" ]
+  sed -n "${start},${end}p" "$SCRIPT" | grep -qE '^\s*local\s+lookback=8\s*$'
+}
+
+@test "BTS-182 AC-7: trailing whitespace is trimmed after boundary cut" {
+  set -e
+  # 73 'a's + ' ' + 30 'b's — boundary at position 73, suffix should be 73 'a's, no trailing space.
+  local line=""
+  local i
+  for (( i=0; i<73; i++ )); do line="${line}a"; done
+  line="${line} "
+  for (( i=0; i<30; i++ )); do line="${line}b"; done
+  _write_spec "$PROJECT/docs/spec.md" "bts-x" "$line"
+  run bash "$SCRIPT" derive-pr-title "$PROJECT/docs/spec.md"
+  [ "$status" -eq 0 ]
+  [[ ! "$output" =~ [[:space:]]$ ]]
+}
+
+@test "BTS-182 AC-8: empty Summary fallback unchanged (regression guard)" {
+  set -e
+  cat > "$PROJECT/docs/spec.md" <<EOF
+# Feature: Test
+
+> Feature: bts-x-empty
+> Work: linear:BTS-X
+> Created: 1700000000
+> Status: Draft
+
+## Summary
+
+## Acceptance Criteria
+
+- [ ] AC-1
+EOF
+  run bash "$SCRIPT" derive-pr-title "$PROJECT/docs/spec.md"
+  [ "$status" -eq 0 ]
+  [ "$output" = "feat(bts-x-empty): activate feature" ]
 }
 
 # =========================================================================

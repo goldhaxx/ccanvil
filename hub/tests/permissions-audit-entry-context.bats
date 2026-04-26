@@ -47,6 +47,91 @@ EOF
 
 
 # =========================================================================
+# AC-2: source_files derivation
+# =========================================================================
+
+@test "AC-2: source_files for permission only in settings.json" {
+  set -e
+  cat > "$FIXTURE/settings.json" <<'EOF'
+{ "permissions": { "allow": ["Bash(ls:*)"] } }
+EOF
+  run bash "$SCRIPT" entry-context "Bash(ls:*)" --settings-dir "$FIXTURE"
+  [ "$status" -eq 0 ]
+  echo "$output" | jq -e --arg p "$FIXTURE/settings.json" '.source_files == [$p]'
+}
+
+@test "AC-2: source_files for permission only in settings.local.json" {
+  set -e
+  cat > "$FIXTURE/settings.local.json" <<'EOF'
+{ "permissions": { "allow": ["Bash(ls:*)"] } }
+EOF
+  run bash "$SCRIPT" entry-context "Bash(ls:*)" --settings-dir "$FIXTURE"
+  [ "$status" -eq 0 ]
+  echo "$output" | jq -e --arg p "$FIXTURE/settings.local.json" '.source_files == [$p]'
+}
+
+@test "AC-2: source_files for permission in both files (sorted)" {
+  set -e
+  cat > "$FIXTURE/settings.json" <<'EOF'
+{ "permissions": { "allow": ["Bash(ls:*)"] } }
+EOF
+  cat > "$FIXTURE/settings.local.json" <<'EOF'
+{ "permissions": { "allow": ["Bash(ls:*)"] } }
+EOF
+  run bash "$SCRIPT" entry-context "Bash(ls:*)" --settings-dir "$FIXTURE"
+  [ "$status" -eq 0 ]
+  echo "$output" | jq -e --arg a "$FIXTURE/settings.json" --arg b "$FIXTURE/settings.local.json" \
+    '.source_files == [$a, $b]'
+}
+
+@test "AC-2: source_files empty when permission absent from both files" {
+  set -e
+  cat > "$FIXTURE/settings.json" <<'EOF'
+{ "permissions": { "allow": ["Bash(other:*)"] } }
+EOF
+  run bash "$SCRIPT" entry-context "Bash(missing:*)" --settings-dir "$FIXTURE"
+  [ "$status" -eq 0 ]
+  echo "$output" | jq -e '.source_files == []'
+}
+
+
+# =========================================================================
+# AC-3: matched_pattern via check_danger
+# =========================================================================
+
+@test "AC-3: matched_pattern populated for DANGER-classified Bash(chmod:*)" {
+  set -e
+  cat > "$FIXTURE/settings.json" <<'EOF'
+{ "permissions": { "allow": ["Bash(chmod:*)"] } }
+EOF
+  run bash "$SCRIPT" entry-context "Bash(chmod:*)" --settings-dir "$FIXTURE"
+  [ "$status" -eq 0 ]
+  echo "$output" | jq -e '.matched_pattern != null'
+  echo "$output" | jq -e '.matched_pattern | length > 0'
+}
+
+@test "AC-3: matched_pattern null for non-DANGER Bash(ls:*)" {
+  set -e
+  cat > "$FIXTURE/settings.json" <<'EOF'
+{ "permissions": { "allow": ["Bash(ls:*)"] } }
+EOF
+  run bash "$SCRIPT" entry-context "Bash(ls:*)" --settings-dir "$FIXTURE"
+  [ "$status" -eq 0 ]
+  echo "$output" | jq -e '.matched_pattern == null'
+}
+
+@test "AC-3: matched_pattern null for non-Bash permission shape" {
+  set -e
+  cat > "$FIXTURE/settings.json" <<'EOF'
+{ "permissions": { "allow": ["Read(//Users/foo)"] } }
+EOF
+  run bash "$SCRIPT" entry-context "Read(//Users/foo)" --settings-dir "$FIXTURE"
+  [ "$status" -eq 0 ]
+  echo "$output" | jq -e '.matched_pattern == null'
+}
+
+
+# =========================================================================
 # AC-6: positional arg required → exit 2 with specific error on stderr
 # =========================================================================
 

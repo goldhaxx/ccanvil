@@ -865,8 +865,32 @@ cmd_entry_context() {
 
   local perm="$ENTRY_CONTEXT_PERM"
 
-  jq -n --arg permission "$perm" \
-    '{permission:$permission, source_files:[], matched_pattern:null, matched_hooks:[], introduced_in:null}'
+  # source_files: which settings file(s) contain the permission, sorted.
+  local source_files='[]'
+  local main_file="$SETTINGS_DIR/settings.json"
+  local local_file="$SETTINGS_DIR/settings.local.json"
+  for f in "$main_file" "$local_file"; do
+    [[ -f "$f" ]] || continue
+    if jq -e --arg p "$perm" '.permissions.allow // [] | index($p)' "$f" >/dev/null 2>&1; then
+      source_files=$(echo "$source_files" | jq --arg f "$f" '. + [$f]')
+    fi
+  done
+  source_files=$(echo "$source_files" | jq 'sort')
+
+  # matched_pattern: reuse check_danger via strip_bash_wrapper for Bash() shapes.
+  # Non-Bash shapes return null.
+  local matched_pattern_arg='null'
+  if [[ "$perm" == Bash\(* ]]; then
+    local inner mp
+    inner=$(strip_bash_wrapper "$perm")
+    mp=$(check_danger "$inner" || true)
+    if [[ -n "$mp" ]]; then
+      matched_pattern_arg=$(jq -nc --arg mp "$mp" '$mp')
+    fi
+  fi
+
+  jq -n --arg permission "$perm" --argjson sf "$source_files" --argjson mp "$matched_pattern_arg" \
+    '{permission:$permission, source_files:$sf, matched_pattern:$mp, matched_hooks:[], introduced_in:null}'
 }
 
 # ---------------------------------------------------------------------------

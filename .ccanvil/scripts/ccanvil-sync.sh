@@ -3069,6 +3069,128 @@ cmd_stack_apply() {
 
 require_jq
 
+# ---------------------------------------------------------------------------
+# BTS-21: drift-watchdog substrate primitives.
+# Read-only — never mutates the registry, never visits downstream filesystems,
+# never commits. Drift detection is purely commit-graph-based: compare each
+# registered node's last_synced_version against the current hub HEAD.
+# ---------------------------------------------------------------------------
+
+cmd_drift_watchdog_list() {
+  local registry="${CCANVIL_REGISTRY:-.ccanvil/registry.json}"
+  if [[ ! -f "$registry" ]]; then
+    echo "[]"
+    return 0
+  fi
+  local head_hash
+  head_hash=$(git rev-parse HEAD 2>/dev/null || echo "")
+  if [[ -z "$head_hash" ]]; then
+    echo "[]"
+    return 0
+  fi
+
+  # Build the canonical set of distributable paths (currently in hub +
+  # matching TRACKED_PATTERNS). Used to filter touched paths so the watchdog
+  # surfaces only paths that downstream nodes actually receive — hub-private
+  # paths (hub/, docs/specs/, docs/sessions/, etc.) are noise here.
+  local hub_root
+  hub_root=$(git rev-parse --show-toplevel 2>/dev/null || pwd)
+  local tracked_set
+  tracked_set=$(scan_hub_files "$hub_root" 2>/dev/null | sort -u || true)
+
+  # Iterate nodes; for each drifted node, build a record.
+  local records="[]"
+  local uuid name last_v all_touched filtered paths_json count drift_key summary
+  while IFS= read -r uuid; do
+    name=$(jq -r --arg u "$uuid" '.nodes[$u].name // ""' "$registry")
+    last_v=$(jq -r --arg u "$uuid" '.nodes[$u].last_synced_version // ""' "$registry")
+    if [[ -z "$last_v" || "$last_v" == "$head_hash" ]]; then
+      continue
+    fi
+    # Touched paths between last_v..HEAD, deduplicated.
+    all_touched=$(git log --name-only --pretty=format: "${last_v}..HEAD" 2>/dev/null \
+      | grep -v '^$' | sort -u || true)
+    # Intersect with tracked_set so noise from hub-private files is removed.
+    if [[ -n "$tracked_set" && -n "$all_touched" ]]; then
+      filtered=$(comm -12 <(echo "$all_touched") <(echo "$tracked_set") || true)
+    else
+      filtered="$all_touched"
+    fi
+    if [[ -z "$filtered" ]]; then
+      continue
+    fi
+    paths_json=$(echo "$filtered" | jq -R . | jq -s . 2>/dev/null || echo "[]")
+    count=$(git rev-list --count "${last_v}..HEAD" 2>/dev/null || echo 0)
+    drift_key=$(printf '%s:%s' "$name" "$(echo "$paths_json" | jq -r '. | join("\n")')" \
+      | shasum -a 256 | cut -c1-16)
+    summary="$count commits behind, $(echo "$paths_json" | jq 'length') tracked paths touched"
+    records=$(echo "$records" | jq --arg uuid "$uuid" --arg name "$name" \
+      --arg dk "$drift_key" --argjson paths "$paths_json" \
+      --argjson cb "$count" --arg summary "$summary" \
+      '. + [{node_uuid: $uuid, node_name: $name, drift_key: $dk,
+             paths_drifted: $paths, commits_behind: $cb, summary: $summary}]')
+  done < <(jq -r '.nodes | keys[]' "$registry" 2>/dev/null)
+
+  echo "$records"
+}
+
+cmd_drift_watchdog_preflight() {
+  local linear_query="${CCANVIL_LINEAR_QUERY:-.ccanvil/scripts/linear-query.sh}"
+  local claude_ok="false" linear_ok="false"
+  if command -v claude >/dev/null 2>&1; then
+    claude_ok="true"
+  fi
+  if [[ -x "$linear_query" ]] || [[ -f "$linear_query" ]]; then
+    if output=$(bash "$linear_query" viewer 2>/dev/null) && echo "$output" | jq -e '.' >/dev/null 2>&1; then
+      linear_ok="true"
+    fi
+  elif command -v linear-query.sh >/dev/null 2>&1; then
+    if output=$(linear-query.sh viewer 2>/dev/null) && echo "$output" | jq -e '.' >/dev/null 2>&1; then
+      linear_ok="true"
+    fi
+  fi
+  jq -n --argjson cp "$claude_ok" --argjson lq "$linear_ok" \
+    '{claude_p_available: $cp, linear_query_works: $lq}'
+}
+
+cmd_drift_watchdog_launchd_print() {
+  local hub_dir
+  hub_dir=$(git rev-parse --show-toplevel 2>/dev/null || pwd)
+  cat <<PLIST
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.ccanvil.drift-watchdog</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/bin/bash</string>
+    <string>-lc</string>
+    <string>cd "${hub_dir}" &amp;&amp; claude -p "/drift-watchdog" --max-budget-usd 0.50</string>
+  </array>
+  <key>WorkingDirectory</key>
+  <string>${hub_dir}</string>
+  <key>StartCalendarInterval</key>
+  <dict>
+    <key>Weekday</key>
+    <integer>1</integer>
+    <key>Hour</key>
+    <integer>9</integer>
+    <key>Minute</key>
+    <integer>13</integer>
+  </dict>
+  <key>RunAtLoad</key>
+  <false/>
+  <key>StandardOutPath</key>
+  <string>${hub_dir}/.ccanvil/drift-watchdog.log</string>
+  <key>StandardErrorPath</key>
+  <string>${hub_dir}/.ccanvil/drift-watchdog.err</string>
+</dict>
+</plist>
+PLIST
+}
+
 # Allow sourcing for tests: `source ccanvil-sync.sh --source-only`
 if [[ "${1:-}" == "--source-only" ]]; then
   return 0 2>/dev/null || exit 0
@@ -3117,6 +3239,11 @@ case "${1:-}" in
   events)           shift; cmd_events "$@" ;;
   broadcast)        shift; cmd_broadcast "$@" ;;
   broadcast-resolve-auto) shift; cmd_broadcast_resolve_auto "$@" ;;
+
+  # --- Drift watchdog (BTS-21) ---
+  drift-watchdog-list)          cmd_drift_watchdog_list ;;
+  drift-watchdog-preflight)     cmd_drift_watchdog_preflight ;;
+  drift-watchdog-launchd-print) cmd_drift_watchdog_launchd_print ;;
 
   # --- Stack commands ---
   stack-list)       cmd_stack_list ;;

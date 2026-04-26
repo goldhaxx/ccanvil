@@ -3,7 +3,7 @@
 > Feature: bts-161-entry-context-substrate
 > Work: linear:BTS-161
 > Created: 1777166389
-> Status: In Progress
+> Status: Complete
 
 ## Summary
 

@@ -3,7 +3,7 @@
 > Feature: bts-175-backlog-list-canonical
 > Work: linear:BTS-175
 > Created: 1777184242
-> Status: In Progress
+> Status: Complete
 
 ## Summary
 

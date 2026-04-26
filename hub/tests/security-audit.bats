@@ -3,6 +3,8 @@
 #
 # Each test creates an isolated git repo with specific scenarios.
 
+bats_require_minimum_version 1.5.0
+
 SCRIPT="$BATS_TEST_DIRNAME/../../.ccanvil/scripts/security-audit.sh"
 
 setup() {
@@ -231,6 +233,32 @@ EOF
   # Non-zero exit (malformed allowlist line is a load-time error).
   [ "$status" -ne 0 ]
   [[ "$stderr" == *"allowlist"* ]] || [[ "$stderr" == *"malformed"* ]]
+}
+
+@test "BTS-152 AC-6 (error): triple with > 3 ::-segments is also rejected" {
+  echo "Read(/Users/me/projects/foo)" > settings.json
+  cat > .security-audit-allowlist <<'EOF'
+settings.json::pii::detail::extra
+EOF
+  git add -A && git commit -q -m "add fixture"
+
+  run --separate-stderr bash "$SCRIPT" --files-only
+  [ "$status" -ne 0 ]
+  [[ "$stderr" == *"malformed"* ]] || [[ "$stderr" == *"3 ::-separated"* ]]
+}
+
+@test "BTS-152: literal pipe in any allowlist segment is rejected (internal delimiter guard)" {
+  echo "Read(/Users/me/projects/foo)" > settings.json
+  # Pipe in detail segment — would corrupt the in-memory pipe-delimited
+  # representation if not validated.
+  cat > .security-audit-allowlist <<'EOF'
+settings.json::pii::has|pipe
+EOF
+  git add -A && git commit -q -m "add fixture"
+
+  run --separate-stderr bash "$SCRIPT" --files-only
+  [ "$status" -ne 0 ]
+  [[ "$stderr" == *"|"* ]] || [[ "$stderr" == *"reserved"* ]]
 }
 
 @test "BTS-152 AC-7 (edge): empty file-substring is rejected" {

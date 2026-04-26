@@ -95,7 +95,7 @@ if [[ -f "$PROJECT_ALLOWLIST_FILE" ]]; then
       # Triple format. Use awk to split on `::` literal.
       parts=$(printf '%s' "$trimmed" | awk -F'::' '{print NF}')
       if [[ "$parts" -ne 3 ]]; then
-        echo "ERROR: $PROJECT_ALLOWLIST_FILE:$lineno: malformed triple (expected <file>::<category>::<detail>): $trimmed" >&2
+        echo "ERROR: $PROJECT_ALLOWLIST_FILE:$lineno: malformed triple (expected exactly 3 ::-separated segments, got $parts): $trimmed" >&2
         exit 2
       fi
       file_part=$(printf '%s' "$trimmed" | awk -F'::' '{print $1}')
@@ -105,8 +105,20 @@ if [[ -f "$PROJECT_ALLOWLIST_FILE" ]]; then
         echo "ERROR: $PROJECT_ALLOWLIST_FILE:$lineno: empty file-substring is not allowed (would silence all findings): $trimmed" >&2
         exit 2
       fi
+      # Reject literal `|` in any segment — the in-memory representation
+      # uses `|` as the field separator (bash 3.2 lacks better options).
+      # Pipes in user input would corrupt the splitter in is_allowlisted.
+      if [[ "$file_part" == *"|"* || "$cat_part" == *"|"* || "$det_part" == *"|"* ]]; then
+        echo "ERROR: $PROJECT_ALLOWLIST_FILE:$lineno: segments must not contain '|' (reserved internal delimiter): $trimmed" >&2
+        exit 2
+      fi
       ALLOWLIST_ENTRIES+=("triple|$file_part|$cat_part|$det_part")
     else
+      # Reject literal `|` in legacy file-only entries too (same rationale).
+      if [[ "$trimmed" == *"|"* ]]; then
+        echo "ERROR: $PROJECT_ALLOWLIST_FILE:$lineno: file-substring must not contain '|' (reserved internal delimiter): $trimmed" >&2
+        exit 2
+      fi
       ALLOWLIST_ENTRIES+=("file|$trimmed")
     fi
   done < "$PROJECT_ALLOWLIST_FILE"
@@ -256,9 +268,12 @@ scan_git_history_secrets() {
   # script's own pattern definitions (and other documentation containing
   # example tokens) don't trigger false positives. Without this, -S matches
   # the literal regex strings inside SECRET_PATTERNS when the script itself
-  # appears in a commit diff. BTS-152: triple-form entries are not pathspec-
-  # excludable (they need finding-level context), so they're checked at the
-  # add_finding boundary instead.
+  # appears in a commit diff. BTS-152: triple-form entries do not affect
+  # history scanning — the history pickaxe operates at the file/diff level
+  # and emits per-commit findings without populating the detail/category
+  # fields a triple would match against. Triples filter file-scan findings
+  # only; if you need to silence a finding in history, use a file-only
+  # entry. Documented in .security-audit-allowlist header.
   local pathspec_args=('.')
   for entry in "${ALLOWLIST_ENTRIES[@]}"; do
     case "$entry" in

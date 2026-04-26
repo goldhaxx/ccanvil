@@ -15,10 +15,15 @@
 #      <file-substring> is rejected.
 #      Recognized categories: secret, pii, email, dangerous-file.
 #      Unknown categories are harmless (just won't match any finding).
+#      Triples filter file-scan findings only; history scans (--history-only,
+#      default mode's history pass) ignore triples and silence only via
+#      file-only entries.
 #
 # Lines starting with # and blank lines are ignored. Whitespace is trimmed.
-# Malformed triples (fewer than 3 ::-separated segments) cause a load-time
-# error.
+# Malformed lines cause a load-time error with line number:
+#   - triple with != 3 ::-separated segments
+#   - empty file-substring (would silence everything globally)
+#   - any segment containing '|' (reserved as internal delimiter)
 #
 # Each entry MUST include a comment explaining why the finding is
 # allowlisted and what review surface still covers it.

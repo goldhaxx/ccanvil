@@ -93,6 +93,40 @@ for token in $NORMALIZED; do
   # detection.
   [[ "$token" =~ ^/+$ ]] && continue
 
+  # BTS-173: single-segment slash-prefixed tokens that match a KNOWN
+  # slash-command name (entries in $CLAUDE_PROJECT_DIR/.claude/commands/
+  # *.md or .claude/skills/<name>/) are lexical fragments, not filesystem
+  # paths. The allowlist is built lazily on first match-attempt and
+  # cached for the rest of the hook invocation. A purely syntactic rule
+  # cannot disambiguate /idea (slash-command) from /etc (real path) —
+  # both are short alphabetic-leading single-segment tokens. The
+  # filesystem-rooted allowlist is the only deterministic path.
+  if [[ "$token" =~ ^/([a-zA-Z][a-zA-Z0-9_-]{0,29})$ ]]; then
+    candidate="${BASH_REMATCH[1]}"
+    if [[ -z "${SLASH_COMMANDS+x}" ]]; then
+      SLASH_COMMANDS=" "
+      cmd_dir="${CLAUDE_PROJECT_DIR:-.}/.claude/commands"
+      if [[ -d "$cmd_dir" ]]; then
+        for entry in "$cmd_dir"/*.md; do
+          [[ -e "$entry" ]] || continue
+          base="${entry##*/}"; base="${base%.md}"
+          SLASH_COMMANDS+="$base "
+        done
+      fi
+      skill_dir="${CLAUDE_PROJECT_DIR:-.}/.claude/skills"
+      if [[ -d "$skill_dir" ]]; then
+        for entry in "$skill_dir"/*; do
+          [[ -d "$entry" ]] || continue
+          base="${entry##*/}"
+          SLASH_COMMANDS+="$base "
+        done
+      fi
+    fi
+    if [[ "$SLASH_COMMANDS" == *" $candidate "* ]]; then
+      continue
+    fi
+  fi
+
   case "$token" in
     /?*)
       # Absolute path (≥1 char after the slash — bare `/` is ignored)

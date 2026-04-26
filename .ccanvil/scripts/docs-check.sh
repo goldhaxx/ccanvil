@@ -2379,6 +2379,101 @@ cmd_refresh_plan_hash() {
 }
 
 # ---------------------------------------------------------------------------
+# cmd_assert_pr_title — BTS-178: ensure a draft PR's live title matches the
+# spec-derived expected form (`feat(<feature-id>): <first-summary-line>`).
+# Force-updates via `gh pr edit` when the title is placeholder-shaped (e.g.
+# `feat(auth-system)`, `feat(default)`) or missing the `feat(<feature-id>):`
+# prefix. No-op when prefix already matches — trusts user edits to the
+# descriptive suffix.
+#
+# Eliminates the BTS-175 trap where PR #99 squash-merged with subject
+# `feat(auth-system): Auth feature.` because the placeholder title slipped
+# past `cmd_activate`'s creation flow.
+#
+# Invocation:
+#   assert-pr-title <pr-number> [--project-dir <dir>]
+#
+# Output: {updated: <bool>, expected: "<title>", actual: "<title>"}
+# Exit 0 on success (updated or no-op); non-zero on missing spec, missing
+# branch, or gh CLI absent.
+# ---------------------------------------------------------------------------
+cmd_assert_pr_title() {
+  local pr_number=""
+  local project_dir="."
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --project-dir) project_dir="$2"; shift 2 ;;
+      *)
+        if [[ -z "$pr_number" ]]; then pr_number="$1"; else project_dir="$1"; fi
+        shift
+        ;;
+    esac
+  done
+
+  if [[ -z "$pr_number" ]]; then
+    echo "ERROR: assert-pr-title requires <pr-number>" >&2
+    return 2
+  fi
+  if ! command -v gh >/dev/null 2>&1; then
+    echo "ERROR: gh CLI not available — assert-pr-title requires GitHub CLI" >&2
+    return 1
+  fi
+
+  # Locate spec source: prefer active docs/spec.md; fall back to the archive
+  # at docs/specs/<feature-id>.md keyed by the current branch name.
+  local spec_file=""
+  if [[ -f "$project_dir/docs/spec.md" ]]; then
+    spec_file="$project_dir/docs/spec.md"
+  else
+    local branch
+    branch=$(git -C "$project_dir" branch --show-current 2>/dev/null || echo "")
+    # Accept claude/feat/<id>, feat/<id>, or any prefix ending in feat/<id>.
+    local feature_id=""
+    if [[ "$branch" =~ /feat/(.+)$ ]] || [[ "$branch" =~ ^feat/(.+)$ ]]; then
+      feature_id="${BASH_REMATCH[1]}"
+    fi
+    if [[ -n "$feature_id" && -f "$project_dir/docs/specs/$feature_id.md" ]]; then
+      spec_file="$project_dir/docs/specs/$feature_id.md"
+    else
+      echo "ERROR: no spec found for branch '$branch' to derive expected title" >&2
+      return 1
+    fi
+  fi
+
+  # Derive expected title: feat(<feature-id>): <first non-blank Summary line>
+  local feature_id_meta first_line
+  feature_id_meta=$(grep -m1 '^> Feature:' "$spec_file" | sed -E 's/^> Feature:[[:space:]]*//')
+  first_line=$(sed -n '/^## Summary$/,/^## /{ /^## /d; /^$/d; p; }' "$spec_file" | head -1 | sed 's/^[[:space:]]*//')
+  local expected_title="feat(${feature_id_meta}): ${first_line:-activate feature}"
+
+  # Read live title.
+  local actual_title
+  actual_title=$(gh pr view "$pr_number" --json title --jq .title 2>&1) || {
+    echo "ERROR: gh pr view failed: $actual_title" >&2
+    return 1
+  }
+
+  # Decision: force-update when title is placeholder-shaped OR missing the
+  # feat(<feature-id>): prefix. Trust user edits to the suffix as long as
+  # the prefix matches.
+  local needs_update=false
+  if [[ "$actual_title" =~ ^feat\(auth-system\) ]] || [[ "$actual_title" =~ ^feat\(default\) ]]; then
+    needs_update=true
+  elif ! [[ "$actual_title" == "feat(${feature_id_meta}):"* ]]; then
+    needs_update=true
+  fi
+
+  if $needs_update; then
+    gh pr edit "$pr_number" --title "$expected_title" >/dev/null
+    jq -n --arg expected "$expected_title" --arg actual "$actual_title" \
+      '{updated:true, expected:$expected, actual:$actual}'
+  else
+    jq -n --arg expected "$expected_title" --arg actual "$actual_title" \
+      '{updated:false, expected:$expected, actual:$actual}'
+  fi
+}
+
+# ---------------------------------------------------------------------------
 # cmd_idea_pending_replay — BTS-179: replay every entry in
 # .ccanvil/ideas-pending.log via the http substrate, ack on success,
 # preserve on failure. Replaces the per-skill shell loop in /idea sync.
@@ -3392,6 +3487,7 @@ case "$cmd" in
   idea-sync)         cmd_idea_sync "$@" ;;
   idea-pending-replay) cmd_idea_pending_replay "$@" ;;
   refresh-plan-hash) cmd_refresh_plan_hash "$@" ;;
+  assert-pr-title)   cmd_assert_pr_title "$@" ;;
   idea-review-icebox) cmd_idea_review_icebox "$@" ;;
   idea-migrate-state) cmd_idea_migrate_state "$@" ;;
   idea-migrate)      cmd_idea_migrate "$@" ;;

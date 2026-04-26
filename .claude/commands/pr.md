@@ -43,9 +43,9 @@ This command ensures the branch is ready for merge: tests pass, docs are validat
 8. Push the current branch: `git push`
 9. Check if a draft PR already exists for this branch:
    ```bash
-   gh pr view --json state,url 2>/dev/null
+   gh pr view --json state,url,number 2>/dev/null
    ```
-   - **If PR exists:** Mark it ready with `gh pr ready`. Update the body if needed.
+   - **If PR exists:** Mark it ready with `gh pr ready`. Then assert the title matches the spec-derived expected form via `bash .ccanvil/scripts/docs-check.sh assert-pr-title <pr-number>` (BTS-178) — force-updates placeholder titles like `feat(auth-system)` so the squash-merge commit on main carries the correct subject. Update the body if needed.
    - **If no PR exists:** Create one using the flow below.
 10. If creating a new PR, determine the title:
     - If the archived spec exists in `docs/specs/`, use: `feat(<feature-id>): <short description>`

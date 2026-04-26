@@ -116,3 +116,11 @@ AGENT="$REPO_ROOT/.claude/agents/drift-analyst.md"
 @test "AC-10: skill filters existing issues by drift-watchdog label" {
   grep -qF '"drift-watchdog"' "$SKILL"
 }
+
+# =========================================================================
+# BTS-199: skill references the launchd-install wrapper
+# =========================================================================
+
+@test "BTS-199: skill references drift-watchdog-launchd-install wrapper" {
+  grep -qF 'drift-watchdog-launchd-install' "$SKILL"
+}

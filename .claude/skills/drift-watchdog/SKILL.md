@@ -1,6 +1,14 @@
 Run the drift watchdog: detect drift between the hub and registered downstream nodes, then open a thoughtful, idempotent Linear issue per drifted node via the http substrate.
 
-This skill is designed to be invoked autonomously via `claude -p "/drift-watchdog"` from a launchd entry (see `bash .ccanvil/scripts/ccanvil-sync.sh drift-watchdog-launchd-print`). It runs end-to-end without operator interaction.
+This skill is designed to be invoked autonomously via `claude -p "/drift-watchdog"` from a launchd entry. It runs end-to-end without operator interaction.
+
+**Operator install / reload (BTS-199):** one idempotent command wraps plist generation, lint, optional unload, copy, load, and verify:
+
+```bash
+ALLOW_OUTSIDE_WORKSPACE=1 bash .ccanvil/scripts/ccanvil-sync.sh drift-watchdog-launchd-install --reload
+```
+
+Without `--reload`, the install is idempotent for first-time setup. The `ALLOW_OUTSIDE_WORKSPACE=1` prefix is required because the wrapper writes to `~/Library/LaunchAgents/`. The legacy multi-step recipe (`drift-watchdog-launchd-print` + `plutil -lint` + `launchctl unload/cp/load -w` + verify) still works directly but is no longer the canonical path — use the wrapper.
 
 ## Steps
 

@@ -3,7 +3,7 @@
 > Feature: bts-154-classifier-bash-keywords
 > Work: linear:BTS-154
 > Created: 1777162008
-> Status: In Progress
+> Status: Complete
 
 ## Summary
 

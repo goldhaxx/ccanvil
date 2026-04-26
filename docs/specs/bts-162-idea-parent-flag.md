@@ -3,7 +3,7 @@
 > Feature: bts-162-idea-parent-flag
 > Work: linear:BTS-162
 > Created: 1777176703
-> Status: In Progress
+> Status: Complete
 
 ## Summary
 

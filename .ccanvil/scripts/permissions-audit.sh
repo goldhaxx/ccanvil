@@ -39,16 +39,19 @@ RISK=""
 RATIONALE=""
 EFFICIENCY=""
 REVIEWER=""
+# BTS-161: entry-context positional permission arg.
+ENTRY_CONTEXT_PERM=""
 
 usage() {
-  echo "Usage: permissions-audit.sh <check|init|promote-review|apply|decision-append> [flags...]" >&2
+  echo "Usage: permissions-audit.sh <check|init|promote-review|apply|decision-append|entry-context> [flags...]" >&2
   echo "  decision-append --buffer FILE --permission PERM --decision delete|promote|keep-local|accept-danger [accept-danger fields]" >&2
+  echo "  entry-context <permission> [--settings-dir DIR]" >&2
   exit 2
 }
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
-    check|init|promote-review|apply|decision-append)
+    check|init|promote-review|apply|decision-append|entry-context)
       CMD="$1"; shift ;;
     --settings-dir)
       SETTINGS_DIR="$2"; shift 2 ;;
@@ -79,7 +82,12 @@ while [[ $# -gt 0 ]]; do
     -h|--help)
       usage ;;
     *)
-      echo "Unknown option: $1" >&2; usage ;;
+      # BTS-161: entry-context takes one positional permission argument.
+      if [[ "$CMD" == "entry-context" && -z "$ENTRY_CONTEXT_PERM" && "$1" != -* ]]; then
+        ENTRY_CONTEXT_PERM="$1"; shift
+      else
+        echo "Unknown option: $1" >&2; usage
+      fi ;;
   esac
 done
 
@@ -846,6 +854,22 @@ cmd_decision_append() {
 }
 
 # ---------------------------------------------------------------------------
+# BTS-161: entry-context — deterministic per-row context for /permissions-review
+# ---------------------------------------------------------------------------
+
+cmd_entry_context() {
+  if [[ -z "$ENTRY_CONTEXT_PERM" ]]; then
+    echo "ERROR: entry-context requires a permission argument" >&2
+    exit 2
+  fi
+
+  local perm="$ENTRY_CONTEXT_PERM"
+
+  jq -n --arg permission "$perm" \
+    '{permission:$permission, source_files:[], matched_pattern:null, matched_hooks:[], introduced_in:null}'
+}
+
+# ---------------------------------------------------------------------------
 # Dispatch
 # ---------------------------------------------------------------------------
 
@@ -855,5 +879,6 @@ case "$CMD" in
   promote-review)   cmd_promote_review ;;
   apply)            cmd_apply ;;
   decision-append)  cmd_decision_append ;;
+  entry-context)    cmd_entry_context ;;
   *)              usage ;;
 esac

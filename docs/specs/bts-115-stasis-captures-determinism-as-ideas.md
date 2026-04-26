@@ -3,7 +3,7 @@
 > Feature: bts-115-stasis-captures-determinism-as-ideas
 > Work: linear:BTS-115
 > Created: 1777165172
-> Status: In Progress
+> Status: Complete
 
 ## Summary
 

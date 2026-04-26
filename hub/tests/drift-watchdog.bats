@@ -250,6 +250,17 @@ STUB
   echo "$output" | grep -qF '/drift-watchdog'
 }
 
+@test "AC-9: launchd-print embeds EnvironmentVariables.PATH so claude resolves under launchd" {
+  set -e
+  # Set a sentinel PATH so we can verify it's embedded.
+  PATH="/sentinel/bin:/usr/local/bin:/opt/homebrew/bin:/usr/bin:/bin" \
+    run bash "$SCRIPT" drift-watchdog-launchd-print
+  [ "$status" -eq 0 ]
+  echo "$output" | grep -qF '<key>EnvironmentVariables</key>'
+  echo "$output" | grep -qF '<key>PATH</key>'
+  echo "$output" | grep -qF '/sentinel/bin'
+}
+
 @test "AC-9: launchd-print output parses as XML via xmllint" {
   set -e
   if ! command -v xmllint >/dev/null 2>&1; then

@@ -3156,6 +3156,15 @@ cmd_drift_watchdog_preflight() {
 cmd_drift_watchdog_launchd_print() {
   local hub_dir
   hub_dir=$(git rev-parse --show-toplevel 2>/dev/null || pwd)
+  # launchd's default PATH excludes Homebrew (and most user-installed bins) —
+  # `bash -lc` doesn't reliably pick up the operator's profile under launchd.
+  # Embed the operator's current PATH at print time so `claude` and friends
+  # resolve. The .plist is per-machine anyway; baking in PATH is correct.
+  local launchd_path="${PATH:-/usr/local/bin:/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin}"
+  # Escape XML special chars (& < >) — PATH typically has none of these but
+  # be defensive.
+  local launchd_path_xml
+  launchd_path_xml=$(printf '%s' "$launchd_path" | sed -e 's/&/\&amp;/g' -e 's/</\&lt;/g' -e 's/>/\&gt;/g')
   cat <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -3163,10 +3172,15 @@ cmd_drift_watchdog_launchd_print() {
 <dict>
   <key>Label</key>
   <string>com.ccanvil.drift-watchdog</string>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>PATH</key>
+    <string>${launchd_path_xml}</string>
+  </dict>
   <key>ProgramArguments</key>
   <array>
     <string>/bin/bash</string>
-    <string>-lc</string>
+    <string>-c</string>
     <string>cd "${hub_dir}" &amp;&amp; claude -p "/drift-watchdog" --max-budget-usd 0.50</string>
   </array>
   <key>WorkingDirectory</key>

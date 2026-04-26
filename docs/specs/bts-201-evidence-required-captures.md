@@ -3,7 +3,7 @@
 > Feature: bts-201-evidence-required-captures
 > Work: linear:BTS-201
 > Created: 1777236317
-> Status: In Progress
+> Status: Complete
 
 ## Summary
 

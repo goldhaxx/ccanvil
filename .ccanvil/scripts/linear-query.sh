@@ -275,21 +275,30 @@ cmd_list_states() {
 
 cmd_list_labels() {
   _require_api_key
-  local team="" team_id=""
+  local team="" team_id="" workspace_scoped=false
   while [[ $# -gt 0 ]]; do
     case "$1" in
-      --team)    team="$2";    shift 2 ;;
-      --team-id) team_id="$2"; shift 2 ;;
+      --team)             team="$2";    shift 2 ;;
+      --team-id)          team_id="$2"; shift 2 ;;
+      --workspace-scoped) workspace_scoped=true; shift ;;
       *) _die 2 "list-labels: unknown flag: $1" ;;
     esac
   done
+
+  # BTS-170: --workspace-scoped is mutually exclusive with team scoping —
+  # workspace-scoped means "no team filter," not "team filter AND null."
+  if $workspace_scoped && [[ -n "$team_id" || -n "$team" ]]; then
+    _die 2 "list-labels: --workspace-scoped is mutually exclusive with --team / --team-id"
+  fi
 
   # BTS-166: --team-id wins over --team for scoping (mirrors save-issue
   # precedence). Allows multi-team-aware callers to pass the already-known
   # UUID and skip a name-resolution roundtrip while still scoping the label
   # filter precisely.
   local filter='{}'
-  if [[ -n "$team_id" ]]; then
+  if $workspace_scoped; then
+    filter=$(printf '%s' "$filter" | jq '. + {team:{null:{eq:true}}}')
+  elif [[ -n "$team_id" ]]; then
     filter=$(printf '%s' "$filter" | jq --arg v "$team_id" '. + {team:{id:{eq:$v}}}')
   elif [[ -n "$team" ]]; then
     filter=$(printf '%s' "$filter" | jq --arg v "$team" '. + {team:{name:{eq:$v}}}')
@@ -433,6 +442,14 @@ cmd_save_issue() {
       fi
       local lid
       lid=$(cmd_list_labels "${label_filter[@]}" | jq -r --arg n "$label_name" '.[] | select(.name == $n) | .id' | head -1)
+      # BTS-170: when team-scoping was set but the team-scoped lookup found
+      # no label by that name, fall through to a workspace-scoped lookup.
+      # Workspace-scoped labels (team:null) are NOT included in the team
+      # filter; without this fallback, e.g. `--labels idea` fails on
+      # workspaces where 'idea' is workspace-scoped, not team-scoped.
+      if [[ -z "$lid" && ${#label_filter[@]} -gt 0 ]]; then
+        lid=$(cmd_list_labels --workspace-scoped | jq -r --arg n "$label_name" '.[] | select(.name == $n) | .id' | head -1)
+      fi
       if [[ -z "$lid" ]]; then
         _die 2 "save-issue: --labels '$label_name' did not resolve to a label id"
       fi

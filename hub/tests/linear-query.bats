@@ -308,7 +308,7 @@ JSON
   [ "$status" -eq 0 ]
   echo "$output" | jq -e 'length == 1'
   echo "$output" | jq -e '.[0].name == "idea"'
-  _get_body | jq -e '.variables.filter.team.null.eq == true'
+  _get_body | jq -e '.variables.filter.team.null == true'
 }
 
 @test "BTS-170 AC-2: list-labels rejects --workspace-scoped + --team-id" {
@@ -331,8 +331,10 @@ JSON
 
 _setup_seq_stub() {
   # Helper: builds an exported curl that returns sequential responses from
-  # numbered files in $RESPONSES_DIR. Tracks call count in $COUNTER.
+  # numbered files in $1. Tracks call count in $COUNTER. Self-contained —
+  # also calls _setup_stub so callers don't have to remember the precondition.
   local responses_dir="$1"
+  _setup_stub
   COUNTER="$BATS_TEST_TMPDIR/seq.count"
   echo 0 > "$COUNTER"
   cat > "$BATS_TEST_TMPDIR/seq-stub.sh" <<EOF
@@ -434,23 +436,21 @@ EOF
   echo "$create_body" | jq -e '.variables.input.labelIds == ["team-label-wins"]'
 }
 
-@test "BTS-170 AC-7: save-issue without team scoping — no fallback fires" {
+@test "BTS-170 AC-7: save-issue update mode (no --team) — fallback does NOT fire" {
+  # Genuinely unscoped path: update mode (--id) doesn't require team_id, so
+  # cmd_save_issue can reach the label loop with an empty label_filter array.
+  # The fallback condition `${#label_filter[@]} -gt 0` keeps fallback gated
+  # behind team scoping; this test asserts the unscoped path stays a single
+  # query (label-lookup + issueUpdate, counter == 2).
   set -e
   _setup_stub
   local responses="$BATS_TEST_TMPDIR/responses"
   mkdir -p "$responses"
-  # No team lookup needed (--team-id implicit-skipped, no --team). Only label
-  # lookup + issueCreate. If a workspace fallback would fire, the test fails
-  # with the unexpected-roundtrip response.
   echo '{"data":{"issueLabels":{"nodes":[{"id":"some-label","name":"idea"}]}}}' > "$responses/1.json"
-  echo '{"data":{"issueCreate":{"success":true,"issue":{"id":"u","identifier":"BTS-305","title":"x"}}}}' > "$responses/2.json"
-  echo '{"errors":[{"message":"fallback should not have fired"}]}' > "$responses/3.json"
+  echo '{"data":{"issueUpdate":{"success":true,"issue":{"id":"u","identifier":"BTS-305","title":"x"}}}}' > "$responses/2.json"
+  echo '{"errors":[{"message":"unscoped path should NOT have triggered a third roundtrip"}]}' > "$responses/3.json"
   _setup_seq_stub "$responses"
-  run bash -c "source '$BATS_TEST_TMPDIR/seq-stub.sh' && bash '$LQ' save-issue --team-id team-uuid --labels idea --title 'x' --description 'y'"
-  # NOTE: --team-id IS team scoping, so this would actually fall back. The
-  # spec calls this AC-7 but the spirit is "the fallback only fires when
-  # team-scoped lookup misses." With a team-scoped match here, we expect 2
-  # roundtrips (label + create), counter == 2.
+  run bash -c "source '$BATS_TEST_TMPDIR/seq-stub.sh' && bash '$LQ' save-issue --id BTS-305 --labels idea --title 'updated'"
   [ "$status" -eq 0 ]
   [ "$(cat "$COUNTER")" = "2" ]
 }

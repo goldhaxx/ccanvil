@@ -297,7 +297,11 @@ cmd_list_labels() {
   # filter precisely.
   local filter='{}'
   if $workspace_scoped; then
-    filter=$(printf '%s' "$filter" | jq '. + {team:{null:{eq:true}}}')
+    # BTS-170: Linear's NullableTeamFilter uses a direct boolean for `null`,
+    # not the BooleanComparator wrapper. `{team:{null:true}}` matches labels
+    # where team is null (workspace-scoped). Verified against live API
+    # 2026-04-26 — `{team:{null:{eq:true}}}` is rejected.
+    filter=$(printf '%s' "$filter" | jq '. + {team:{null:true}}')
   elif [[ -n "$team_id" ]]; then
     filter=$(printf '%s' "$filter" | jq --arg v "$team_id" '. + {team:{id:{eq:$v}}}')
   elif [[ -n "$team" ]]; then
@@ -441,7 +445,8 @@ cmd_save_issue() {
         label_filter=(--team "$team_name")
       fi
       local lid
-      lid=$(cmd_list_labels "${label_filter[@]}" | jq -r --arg n "$label_name" '.[] | select(.name == $n) | .id' | head -1)
+      # Safe-expand for empty label_filter under `set -u` (bash 4.x quirk).
+      lid=$(cmd_list_labels "${label_filter[@]+"${label_filter[@]}"}" | jq -r --arg n "$label_name" '.[] | select(.name == $n) | .id' | head -1)
       # BTS-170: when team-scoping was set but the team-scoped lookup found
       # no label by that name, fall through to a workspace-scoped lookup.
       # Workspace-scoped labels (team:null) are NOT included in the team

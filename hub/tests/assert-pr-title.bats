@@ -94,12 +94,13 @@ EOF
 @test "AC-1: title matches expected → updated:false, no gh pr edit call" {
   set -e
   _write_spec_active "bts-x-test" "Test feature first line."
-  _with_gh_stub "feat(bts-x-test): Test feature first line."
+  # BTS-181: derive-pr-title strips at first period — expected has no trailing dot.
+  _with_gh_stub "feat(bts-x-test): Test feature first line"
 
   PATH="$PROJECT/stub-bin:$PATH" run bash "$SCRIPT" assert-pr-title 100 --project-dir "$PROJECT"
   [ "$status" -eq 0 ]
   echo "$output" | jq -e '.updated == false'
-  echo "$output" | jq -e '.expected == "feat(bts-x-test): Test feature first line."'
+  echo "$output" | jq -e '.expected == "feat(bts-x-test): Test feature first line"'
 
   # gh pr view called, gh pr edit NOT called.
   grep -q "pr view" "$PROJECT/stub-log"
@@ -119,10 +120,11 @@ EOF
   [ "$status" -eq 0 ]
   echo "$output" | jq -e '.updated == true'
   echo "$output" | jq -e '.actual == "feat(auth-system): Auth feature."'
-  echo "$output" | jq -e '.expected == "feat(bts-x-test): Test feature first line."'
+  # BTS-181: derive-pr-title strips at first period.
+  echo "$output" | jq -e '.expected == "feat(bts-x-test): Test feature first line"'
 
   grep -q "pr edit" "$PROJECT/stub-log"
-  grep -q "feat(bts-x-test): Test feature first line." "$PROJECT/stub-log"
+  grep -q "feat(bts-x-test): Test feature first line" "$PROJECT/stub-log"
 }
 
 @test "AC-2: feat(default) placeholder → force-update" {
@@ -179,7 +181,8 @@ EOF
   PATH="$PROJECT/stub-bin:$PATH" run bash "$SCRIPT" assert-pr-title 100 --project-dir "$PROJECT"
   [ "$status" -eq 0 ]
   echo "$output" | jq -e '.updated == true'
-  echo "$output" | jq -e '.expected == "feat(bts-w-archived-feature): Archive feature first line."'
+  # BTS-181: derive-pr-title strips at first period.
+  echo "$output" | jq -e '.expected == "feat(bts-w-archived-feature): Archive feature first line"'
 }
 
 # =========================================================================

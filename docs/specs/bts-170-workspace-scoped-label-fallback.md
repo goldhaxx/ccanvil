@@ -3,7 +3,7 @@
 > Feature: bts-170-workspace-scoped-label-fallback
 > Work: linear:BTS-170
 > Created: 1777170035
-> Status: In Progress
+> Status: Complete
 
 ## Summary
 

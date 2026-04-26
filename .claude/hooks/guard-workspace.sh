@@ -87,6 +87,12 @@ NORMALIZED=$(echo "$COMMAND" | tr -d '"' | tr -d "'")
 
 violation=""
 for token in $NORMALIZED; do
+  # BTS-169: pure-slash tokens (//, ///, ...) are jq's `//` alternative-
+  # default operator. Sequences of 3+ slashes have no filesystem meaning
+  # and no shell interpretation; all are safe to skip before path-shape
+  # detection.
+  [[ "$token" =~ ^/+$ ]] && continue
+
   case "$token" in
     /?*)
       # Absolute path (≥1 char after the slash — bare `/` is ignored)

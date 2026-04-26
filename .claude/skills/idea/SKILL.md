@@ -214,6 +214,18 @@ For projects that pre-date this change, items may still live in the deprecated c
 - Respect the provider resolution. Don't bypass `operations.sh` by calling MCP or local bash directly based on a hunch.
 - The full workflow — capture, list, triage, review, dispatch — is agent-reachable. Never delegate a transition to the Linear UI.
 
+## Safe-markdown for Linear-bound bodies
+
+Linear's server-side normalizer silently mutates one specific markdown shape on save: numbered-list items whose leading bold STARTS with a backticked code-span (`**` followed immediately by `` ` ``) get the bold markers stripped on round-trip, leaving only the code-span and the trailing text. Items where bold contains backticks NOT at the start are preserved.
+
+To avoid the silent rewrite when composing idea bodies bound for Linear, prefer one of these shapes:
+
+- **Codespan-then-text:** `` `code` — text. `` — clean, no bold needed.
+- **Bold-with-late-codespan:** `**Text with `code` later.**` — bold survives because backticks are not at the start.
+- **Avoid:** `**`code` text.**` — bold gets stripped.
+
+Anchored on BTS-125 (repro on 2026-04-26 in test ticket BTS-174). Other normalizations exist (e.g., `-` bullets become `*`) but are cosmetic-only and don't affect rendered output. Round-trip-validation tooling is out of scope; this is a documentation-level guard.
+
 <!-- NODE-SPECIFIC-START -->
 <!-- Add project-specific content below this line. -->
 <!-- Hub content above is updated via /ccanvil-pull. -->

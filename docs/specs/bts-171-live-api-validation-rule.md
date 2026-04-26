@@ -3,7 +3,7 @@
 > Feature: bts-171-live-api-validation-rule
 > Work: linear:BTS-171
 > Created: 1777173845
-> Status: In Progress
+> Status: Complete
 
 ## Summary
 

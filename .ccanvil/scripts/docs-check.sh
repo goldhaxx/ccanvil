@@ -979,9 +979,8 @@ cmd_activate() {
   if git -C "$repo_root" remote get-url origin >/dev/null 2>&1; then
     git -C "$repo_root" push -u origin "$branch_name" 2>/dev/null || true
     if command -v gh >/dev/null 2>&1; then
-      local first_line
-      first_line=$(sed -n '/^## Summary$/,/^## /{ /^## /d; /^$/d; p; }' "$spec_file" | head -1 | sed 's/^[[:space:]]*//')
-      local pr_title="${spec_type}(${feature_id}): ${first_line:-activate feature}"
+      local pr_title
+      pr_title=$(cmd_derive_pr_title "$spec_file")
       local spec_body
       spec_body=$(cat "$spec_file")
       gh pr create --draft \
@@ -2379,6 +2378,47 @@ cmd_refresh_plan_hash() {
 }
 
 # ---------------------------------------------------------------------------
+# cmd_derive_pr_title — BTS-181: derive a deterministic PR title from a spec
+# file in the form `feat(<feature-id>): <truncated-first-summary-line>`.
+# Truncation rules:
+#   - First period in the Summary line strips everything from the period on.
+#   - Remaining suffix is capped at 80 chars (trailing whitespace trimmed).
+#   - Empty Summary section falls back to `activate feature`.
+# Used by cmd_activate (PR creation) and cmd_assert_pr_title (PR title repair).
+# ---------------------------------------------------------------------------
+cmd_derive_pr_title() {
+  local spec_file="${1:-}"
+  if [[ -z "$spec_file" ]]; then
+    echo "ERROR: derive-pr-title: missing <spec-file> argument" >&2
+    return 1
+  fi
+  if [[ ! -f "$spec_file" ]]; then
+    echo "ERROR: derive-pr-title: spec file not found: $spec_file" >&2
+    return 1
+  fi
+
+  local feature_id_meta first_line
+  feature_id_meta=$(grep -m1 '^> Feature:' "$spec_file" | sed -E 's/^> Feature:[[:space:]]*//')
+  first_line=$(sed -n '/^## Summary$/,/^## /{ /^## /d; /^$/d; p; }' "$spec_file" | head -1 | sed 's/^[[:space:]]*//')
+
+  if [[ -z "$first_line" ]]; then
+    echo "feat(${feature_id_meta}): activate feature"
+    return 0
+  fi
+
+  # Period-strip: drop everything from the first '.' onward.
+  local suffix="${first_line%%.*}"
+
+  # 80-char cap, then trim trailing whitespace.
+  if (( ${#suffix} > 80 )); then
+    suffix="${suffix:0:80}"
+  fi
+  suffix="${suffix%"${suffix##*[![:space:]]}"}"
+
+  echo "feat(${feature_id_meta}): ${suffix}"
+}
+
+# ---------------------------------------------------------------------------
 # cmd_assert_pr_title — BTS-178: ensure a draft PR's live title matches the
 # spec-derived expected form (`feat(<feature-id>): <first-summary-line>`).
 # Force-updates via `gh pr edit` when the title is placeholder-shaped (e.g.
@@ -2440,11 +2480,10 @@ cmd_assert_pr_title() {
     fi
   fi
 
-  # Derive expected title: feat(<feature-id>): <first non-blank Summary line>
-  local feature_id_meta first_line
+  # Derive expected title via the BTS-181 substrate primitive.
+  local feature_id_meta expected_title
   feature_id_meta=$(grep -m1 '^> Feature:' "$spec_file" | sed -E 's/^> Feature:[[:space:]]*//')
-  first_line=$(sed -n '/^## Summary$/,/^## /{ /^## /d; /^$/d; p; }' "$spec_file" | head -1 | sed 's/^[[:space:]]*//')
-  local expected_title="feat(${feature_id_meta}): ${first_line:-activate feature}"
+  expected_title=$(cmd_derive_pr_title "$spec_file")
 
   # Read live title.
   local actual_title
@@ -3488,6 +3527,7 @@ case "$cmd" in
   idea-pending-replay) cmd_idea_pending_replay "$@" ;;
   refresh-plan-hash) cmd_refresh_plan_hash "$@" ;;
   assert-pr-title)   cmd_assert_pr_title "$@" ;;
+  derive-pr-title)   cmd_derive_pr_title "$@" ;;
   idea-review-icebox) cmd_idea_review_icebox "$@" ;;
   idea-migrate-state) cmd_idea_migrate_state "$@" ;;
   idea-migrate)      cmd_idea_migrate "$@" ;;

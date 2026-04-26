@@ -56,6 +56,13 @@
 | `permissions-audit.sh promote-review [--settings-dir DIR] [--text]` | BTS-144: list `settings.local.json` entries not in `settings.json` and classify each (DELETE / TRIAGE) for systematic review. Deterministic rules: redundant (covered by broader `Bash(<word>:*)` wildcard) → DELETE, `preset/` dead-path → DELETE, env-prefix bypass with broadly-allowed underlying verb (e.g., `Bash(ALLOW_OUTSIDE_WORKSPACE=1 bash ...)` when `Bash(bash:*)` exists in main) → DELETE, otherwise → TRIAGE. JSON output: `{candidates: [{permission, source, recommendation, reason}], counts: {delete, promote, triage, total}}`. Exit 0 always — read-only review tooling. |
 | `permissions-audit.sh apply --decisions <jsonl> [--settings-dir DIR] [--log FILE]` | BTS-149: atomic mutation substrate consumed by `/permissions-review`. Reads JSONL of `{permission, decision}` records (one per line). Decision verbs: `delete` (remove from `settings.local.json`), `promote` (move to `settings.json`, idempotent), `keep-local` (no-op, counted as skipped), `accept-danger` (write log entry with `accept_danger:true` + 4 required fields). Pre-flight validates all lines before any mutation; unknown decision/missing fields → exit 2 with no mutation. Backup `.bak` files created before mutating; ERR trap restores on any failure (exit 3). Refuses to run if stale `.bak` files exist. Output envelope: `{applied, skipped, errors}`. |
 
+## Security Audit Scripts
+
+| Command | What it does |
+|---------|-------------|
+| `security-audit.sh [--files-only] [--history-only] [--json]` | Scan tracked files and git history for secrets, PII, emails, and dangerous file types. Exit 0 clean, 1 with findings, 2 on bad allowlist. `--files-only` skips history scan; `--history-only` skips file scan; `--json` emits structured findings. |
+| `.security-audit-allowlist` (config) | Project-local allowlist. Two formats (BTS-152): `<file-substring>` (legacy, silences ALL findings in matched files) or `<file>::<category>::<detail-substring>` (per-finding triple — silences only matching category + detail substring in matched files). Empty `<category>` or `<detail-substring>` acts as a wildcard. Empty `<file-substring>` is rejected. Categories: `secret`, `pii`, `email`, `dangerous-file`. Lines starting with `#` and blank lines ignored. Malformed triples (≠ 3 segments) cause a load-time error with line number. |
+
 ## Test Hygiene Scripts
 
 | Command | What it does |

@@ -1,21 +1,38 @@
 # .security-audit-allowlist
 #
-# Substring patterns matched against file paths. One pattern per line.
-# Lines starting with # and blank lines are ignored.
+# Two formats supported (BTS-152):
 #
-# CURRENT MECHANISM IS FILE-LEVEL ONLY — silencing a file silences ALL
-# findings in it, current and future. Per-finding allowlisting (file +
-# category + detail-substring) is captured as BTS-152 and would make
-# this affordance more precise.
+#   1. Legacy file-only:
+#        <file-substring>
+#      Silences ALL findings whose file path contains the substring.
+#      Coarse — current and future findings of any category are masked.
 #
-# Each entry MUST include a comment explaining why the file is allowlisted
-# and what review surface still covers it.
+#   2. Per-finding triple (preferred for surgical scoping):
+#        <file-substring>::<category>::<detail-substring>
+#      Silences only findings matching ALL three: file substring AND
+#      category exact AND detail substring. Empty <category> or
+#      <detail-substring> acts as a wildcard for that segment. Empty
+#      <file-substring> is rejected.
+#      Recognized categories: secret, pii, email, dangerous-file.
+#      Unknown categories are harmless (just won't match any finding).
+#      Triples filter file-scan findings only; history scans (--history-only,
+#      default mode's history pass) ignore triples and silence only via
+#      file-only entries.
+#
+# Lines starting with # and blank lines are ignored. Whitespace is trimmed.
+# Malformed lines cause a load-time error with line number:
+#   - triple with != 3 ::-separated segments
+#   - empty file-substring (would silence everything globally)
+#   - any segment containing '|' (reserved as internal delimiter)
+#
+# Each entry MUST include a comment explaining why the finding is
+# allowlisted and what review surface still covers it.
 
 # settings.json contains absolute path patterns (e.g., Read(//Users/...))
 # that flag as PII because of the username segment. Permissions in this
 # file are independently reviewed via permissions-audit.sh; the security
 # audit's PII scan is redundant for permission entries by design.
-# Origin: BTS-142 autonomy-first permissions rewrite.
-# Per-finding granularity: BTS-152 (when shipped, switch this entry to a
-# detail-substring pattern targeting only PII-in-permission entries).
-.claude/settings.json
+# Origin: BTS-142 autonomy-first permissions rewrite. Tightened to a
+# per-finding pattern in BTS-152 — secret/email/dangerous-file findings
+# in the same file would now still surface.
+.claude/settings.json::pii::Read(//Users/

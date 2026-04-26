@@ -56,24 +56,71 @@ DANGEROUS_EXTENSIONS=(
 
 # Context patterns — these appear in documentation/rules and are OK
 # We exclude matches inside these files from being flagged
-ALLOWLIST_FILES=(
-  'security-audit.sh'              # This script itself
-  'tls-troubleshooting.md'         # Documents cert paths as instructions
-  'hooks-reference.md'             # Documents hook patterns
-  'foundations.md'                 # Research document
-  '.bats'                          # Test fixtures contain fake tokens/secrets by design
+# BTS-152: ALLOWLIST_ENTRIES carries two forms:
+#   "file|<substring>"                 — legacy file-only match (silences ALL findings in matching files)
+#   "triple|<file>|<category>|<detail>" — per-finding match (file substr AND category exact AND detail substr)
+# Each entry is a pipe-delimited string because bash 3.2 (macOS default)
+# lacks associative arrays-of-arrays.
+ALLOWLIST_ENTRIES=(
+  'file|security-audit.sh'              # This script itself
+  'file|tls-troubleshooting.md'         # Documents cert paths as instructions
+  'file|hooks-reference.md'             # Documents hook patterns
+  'file|foundations.md'                 # Research document
+  'file|.bats'                          # Test fixtures contain fake tokens/secrets by design
+  'file|.security-audit-allowlist'      # The allowlist file itself documents patterns to silence
 )
 
-# Load optional project-local allowlist. One substring pattern per line.
+# Load optional project-local allowlist.
+#
+# Two formats supported:
+#   <file-substring>                              — legacy file-only
+#   <file-substring>::<category>::<detail-substr> — per-finding (BTS-152)
+#
+# Empty <category> or <detail-substring> in a triple acts as a wildcard
+# for that segment. Empty <file-substring> is rejected (would silence
+# everything globally). Triple lines must have exactly 3 ::-separated
+# segments; malformed lines exit non-zero with a clear stderr message.
+#
 # Lines starting with '#' and blank lines are ignored; whitespace is trimmed.
-# Semantics match the hardcoded ALLOWLIST_FILES above (substring match on file path).
 PROJECT_ALLOWLIST_FILE=".security-audit-allowlist"
 if [[ -f "$PROJECT_ALLOWLIST_FILE" ]]; then
+  lineno=0
   while IFS= read -r raw_line || [[ -n "$raw_line" ]]; do
+    lineno=$((lineno + 1))
     trimmed="${raw_line#"${raw_line%%[![:space:]]*}"}"
     trimmed="${trimmed%"${trimmed##*[![:space:]]}"}"
     [[ -z "$trimmed" || "${trimmed:0:1}" == "#" ]] && continue
-    ALLOWLIST_FILES+=("$trimmed")
+
+    if [[ "$trimmed" == *"::"* ]]; then
+      # Triple format. Use awk to split on `::` literal.
+      parts=$(printf '%s' "$trimmed" | awk -F'::' '{print NF}')
+      if [[ "$parts" -ne 3 ]]; then
+        echo "ERROR: $PROJECT_ALLOWLIST_FILE:$lineno: malformed triple (expected exactly 3 ::-separated segments, got $parts): $trimmed" >&2
+        exit 2
+      fi
+      file_part=$(printf '%s' "$trimmed" | awk -F'::' '{print $1}')
+      cat_part=$(printf '%s' "$trimmed" | awk -F'::' '{print $2}')
+      det_part=$(printf '%s' "$trimmed" | awk -F'::' '{print $3}')
+      if [[ -z "$file_part" ]]; then
+        echo "ERROR: $PROJECT_ALLOWLIST_FILE:$lineno: empty file-substring is not allowed (would silence all findings): $trimmed" >&2
+        exit 2
+      fi
+      # Reject literal `|` in any segment — the in-memory representation
+      # uses `|` as the field separator (bash 3.2 lacks better options).
+      # Pipes in user input would corrupt the splitter in is_allowlisted.
+      if [[ "$file_part" == *"|"* || "$cat_part" == *"|"* || "$det_part" == *"|"* ]]; then
+        echo "ERROR: $PROJECT_ALLOWLIST_FILE:$lineno: segments must not contain '|' (reserved internal delimiter): $trimmed" >&2
+        exit 2
+      fi
+      ALLOWLIST_ENTRIES+=("triple|$file_part|$cat_part|$det_part")
+    else
+      # Reject literal `|` in legacy file-only entries too (same rationale).
+      if [[ "$trimmed" == *"|"* ]]; then
+        echo "ERROR: $PROJECT_ALLOWLIST_FILE:$lineno: file-substring must not contain '|' (reserved internal delimiter): $trimmed" >&2
+        exit 2
+      fi
+      ALLOWLIST_ENTRIES+=("file|$trimmed")
+    fi
   done < "$PROJECT_ALLOWLIST_FILE"
 fi
 
@@ -96,11 +143,37 @@ add_finding() {
 }
 
 is_allowlisted() {
+  # BTS-152: accept (file, category, detail) for per-finding matching.
+  # Falls back to legacy file-only behavior when only $file is provided
+  # (callers that pre-date the change still work).
   local file="$1"
-  for allowed in "${ALLOWLIST_FILES[@]}"; do
-    if [[ "$file" == *"$allowed"* ]]; then
-      return 0
-    fi
+  local category="${2:-}"
+  local detail="${3:-}"
+
+  for entry in "${ALLOWLIST_ENTRIES[@]}"; do
+    case "$entry" in
+      file\|*)
+        local fpat="${entry#file|}"
+        if [[ "$file" == *"$fpat"* ]]; then
+          return 0
+        fi
+        ;;
+      triple\|*)
+        # Strip leading "triple|" then split the remainder on |.
+        local rest="${entry#triple|}"
+        local fpat="${rest%%|*}"; rest="${rest#"$fpat"|}"
+        local cpat="${rest%%|*}"; rest="${rest#"$cpat"|}"
+        local dpat="$rest"
+
+        # File substring is required (validated at load time).
+        [[ "$file" == *"$fpat"* ]] || continue
+        # Category: empty pattern matches anything.
+        [[ -z "$cpat" || "$category" == "$cpat" ]] || continue
+        # Detail: empty pattern matches anything; otherwise substring match.
+        [[ -z "$dpat" || "$detail" == *"$dpat"* ]] || continue
+        return 0
+        ;;
+    esac
   done
   return 1
 }
@@ -113,11 +186,12 @@ scan_tracked_files_secrets() {
   echo "Scanning tracked files for secrets..." >&2
   for pattern in "${SECRET_PATTERNS[@]}"; do
     while IFS=: read -r file line content; do
-      if ! is_allowlisted "$file"; then
-        # Redact the actual secret value
-        local redacted
-        redacted=$(echo "$content" | sed -E "s/($pattern)/[REDACTED]/g")
-        add_finding "CRITICAL" "secret" "$file:$line" "Secret pattern match: $redacted"
+      # Redact the actual secret value
+      local redacted detail
+      redacted=$(echo "$content" | sed -E "s/($pattern)/[REDACTED]/g")
+      detail="Secret pattern match: $redacted"
+      if ! is_allowlisted "$file" "secret" "$detail"; then
+        add_finding "CRITICAL" "secret" "$file:$line" "$detail"
       fi
     done < <(git ls-files -z | xargs -0 grep -nE "$pattern" 2>/dev/null || true)
   done
@@ -127,8 +201,9 @@ scan_tracked_files_pii() {
   echo "Scanning tracked files for PII..." >&2
   for pattern in "${PII_PATTERNS[@]}"; do
     while IFS=: read -r file line content; do
-      if ! is_allowlisted "$file"; then
-        add_finding "HIGH" "pii" "$file:$line" "Absolute path with username: $content"
+      local detail="Absolute path with username: $content"
+      if ! is_allowlisted "$file" "pii" "$detail"; then
+        add_finding "HIGH" "pii" "$file:$line" "$detail"
       fi
     done < <(git ls-files -z | xargs -0 grep -nF "$pattern" 2>/dev/null || true)
   done
@@ -138,10 +213,11 @@ scan_tracked_files_emails() {
   echo "Scanning tracked files for email addresses..." >&2
   # Match email-like patterns, excluding noreply and example.com
   while IFS=: read -r file line content; do
-    if ! is_allowlisted "$file"; then
+    local detail="Email address found: $content"
+    if ! is_allowlisted "$file" "email" "$detail"; then
       # Skip noreply addresses and example domains
       if ! echo "$content" | grep -qE 'noreply@|@example\.(com|org|net)|@users\.noreply'; then
-        add_finding "MEDIUM" "email" "$file:$line" "Email address found: $content"
+        add_finding "MEDIUM" "email" "$file:$line" "$detail"
       fi
     fi
   done < <(git ls-files -z | xargs -0 grep -nE '[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}' 2>/dev/null || true)
@@ -151,7 +227,10 @@ scan_dangerous_files() {
   echo "Scanning for dangerous file types..." >&2
   for pattern in "${DANGEROUS_EXTENSIONS[@]}"; do
     while IFS= read -r file; do
-      add_finding "CRITICAL" "dangerous-file" "$file" "Sensitive file type tracked in git"
+      local detail="Sensitive file type tracked in git"
+      if ! is_allowlisted "$file" "dangerous-file" "$detail"; then
+        add_finding "CRITICAL" "dangerous-file" "$file" "$detail"
+      fi
     done < <(git ls-files | grep -E "$pattern" 2>/dev/null || true)
   done
 }
@@ -185,14 +264,24 @@ scan_git_history_pii() {
 scan_git_history_secrets() {
   echo "Scanning git history for secrets..." >&2
 
-  # Build pathspec exclusions from ALLOWLIST_FILES so the audit script's
-  # own pattern definitions (and other documentation containing example
-  # tokens) don't trigger false positives. Without this, -S matches the
-  # literal regex strings inside SECRET_PATTERNS when the script itself
-  # appears in a commit diff.
+  # Build pathspec exclusions from file-form ALLOWLIST_ENTRIES so the audit
+  # script's own pattern definitions (and other documentation containing
+  # example tokens) don't trigger false positives. Without this, -S matches
+  # the literal regex strings inside SECRET_PATTERNS when the script itself
+  # appears in a commit diff. BTS-152: triple-form entries do not affect
+  # history scanning — the history pickaxe operates at the file/diff level
+  # and emits per-commit findings without populating the detail/category
+  # fields a triple would match against. Triples filter file-scan findings
+  # only; if you need to silence a finding in history, use a file-only
+  # entry. Documented in .security-audit-allowlist header.
   local pathspec_args=('.')
-  for allowed in "${ALLOWLIST_FILES[@]}"; do
-    pathspec_args+=(":(exclude,glob)**${allowed}*")
+  for entry in "${ALLOWLIST_ENTRIES[@]}"; do
+    case "$entry" in
+      file\|*)
+        local fpat="${entry#file|}"
+        pathspec_args+=(":(exclude,glob)**${fpat}*")
+        ;;
+    esac
   done
 
   for pattern in "${SECRET_PATTERNS[@]}"; do

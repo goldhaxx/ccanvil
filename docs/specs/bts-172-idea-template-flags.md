@@ -3,7 +3,7 @@
 > Feature: bts-172-idea-template-flags
 > Work: linear:BTS-172
 > Created: 1777179996
-> Status: In Progress
+> Status: Complete
 
 ## Summary
 

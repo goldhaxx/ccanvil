@@ -44,6 +44,10 @@ Subcommands:
   get-document <id-or-slug>           Fetch one Document by UUID or slug. Returns
                                       {id, title, content, slugId, url, updatedAt, createdAt,
                                        updatedBy, creator, project, issue}.
+  save-document [flags]               Create or update a Document. Flags: --id, --title, --content,
+                                      --issue-id, --project-id, --initiative-id, --trashed,
+                                      --input-json - (stdin JSON; CLI flags override on collision).
+                                      Auto-detects mode by id presence (in flag or stdin).
 
 Environment:
   LINEAR_API_KEY        Required for every subcommand except --help.
@@ -594,6 +598,7 @@ main() {
     save-issue)   cmd_save_issue   "$@" ;;
     resolve-document-id) cmd_resolve_document_id "$@" ;;
     get-document) cmd_get_document "$@" ;;
+    save-document) cmd_save_document "$@" ;;
     *)
       _die 2 "Unknown subcommand: $subcommand. Run 'linear-query.sh --help' for usage."
       ;;
@@ -665,6 +670,110 @@ cmd_get_document() {
     project: (.project // null),
     issue: (.issue // null)
   }'
+}
+
+cmd_save_document() {
+  _require_api_key
+
+  local id="" title="" content=""
+  local issue_id="" project_id="" initiative_id=""
+  local trashed="" input_json=""
+
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --id)             id="$2";             shift 2 ;;
+      --title)          title="$2";          shift 2 ;;
+      --content)        content="$2";        shift 2 ;;
+      --issue-id)       issue_id="$2";       shift 2 ;;
+      --project-id)     project_id="$2";     shift 2 ;;
+      --initiative-id)  initiative_id="$2";  shift 2 ;;
+      --trashed)        trashed="$2";        shift 2 ;;
+      --input-json)     input_json="$2";     shift 2 ;;
+      *) _die 2 "save-document: unknown flag: $1" ;;
+    esac
+  done
+
+  # Stdin-JSON seed (BTS-166 pattern). CLI flags layer on top.
+  local stdin_input='{}'
+  if [[ -n "$input_json" ]]; then
+    if [[ "$input_json" == "-" ]]; then
+      stdin_input=$(cat)
+    else
+      _die 2 "save-document: --input-json currently supports only '-' (stdin)"
+    fi
+    if ! printf '%s' "$stdin_input" | jq -e 'type == "object"' >/dev/null 2>&1; then
+      _die 2 "save-document: --input-json - did not receive a valid JSON object on stdin"
+    fi
+  fi
+
+  # Promote stdin .id into $id so mode-detection works for stdin-only callers.
+  if [[ -z "$id" ]]; then
+    id=$(printf '%s' "$stdin_input" | jq -r '.id // ""')
+  fi
+
+  local input
+  input=$(printf '%s' "$stdin_input" | jq 'del(.id)')   # id is a path arg, not an input field
+  if [[ -n "$title" ]]; then
+    input=$(printf '%s' "$input" | jq --arg v "$title" '. + {title:$v}')
+  fi
+  if [[ -n "$content" ]]; then
+    input=$(printf '%s' "$input" | jq --arg v "$content" '. + {content:$v}')
+  fi
+  if [[ -n "$issue_id" ]]; then
+    input=$(printf '%s' "$input" | jq --arg v "$issue_id" '. + {issueId:$v}')
+  fi
+  if [[ -n "$project_id" ]]; then
+    input=$(printf '%s' "$input" | jq --arg v "$project_id" '. + {projectId:$v}')
+  fi
+  if [[ -n "$initiative_id" ]]; then
+    input=$(printf '%s' "$input" | jq --arg v "$initiative_id" '. + {initiativeId:$v}')
+  fi
+  if [[ -n "$trashed" ]]; then
+    input=$(printf '%s' "$input" | jq --argjson v "$trashed" '. + {trashed:$v}')
+  fi
+
+  if [[ -z "$id" ]]; then
+    # Create. Title required; exactly one parent (issueId | projectId | initiativeId).
+    if [[ -z "$(echo "$input" | jq -r '.title // ""')" ]]; then
+      _die 2 "save-document create requires --title"
+    fi
+    local parents
+    parents=$(echo "$input" | jq '[.issueId, .projectId, .initiativeId] | map(select(. != null and . != "")) | length')
+    if [[ "$parents" -ne 1 ]]; then
+      _die 2 "save-document create requires exactly one parent: --issue-id, --project-id, or --initiative-id"
+    fi
+
+    local query='mutation DocumentCreate($input: DocumentCreateInput!) {
+      documentCreate(input: $input) {
+        success
+        document { id title content updatedAt }
+      }
+    }'
+    local variables
+    variables=$(jq -n --argjson i "$input" '{input:$i}')
+    _post_graphql "$query" "$variables" | jq '.documentCreate.document | {
+      id: .id,
+      title: .title,
+      content: .content,
+      updatedAt: .updatedAt
+    }'
+  else
+    # Update. Path arg = id; body = remaining input.
+    local query='mutation DocumentUpdate($id: String!, $input: DocumentUpdateInput!) {
+      documentUpdate(id: $id, input: $input) {
+        success
+        document { id title content updatedAt }
+      }
+    }'
+    local variables
+    variables=$(jq -n --arg id "$id" --argjson i "$input" '{id:$id, input:$i}')
+    _post_graphql "$query" "$variables" | jq '.documentUpdate.document | {
+      id: .id,
+      title: .title,
+      content: .content,
+      updatedAt: .updatedAt
+    }'
+  fi
 }
 
 main "$@"

@@ -139,3 +139,88 @@ JSON
   [ "$status" -eq 3 ]
   [[ "$stderr" =~ "Document not found" ]]
 }
+
+# =========================================================================
+# Step 3: save-document — create (no id) or update (id) via --input-json -
+# =========================================================================
+
+@test "BTS-204 Step 3: save-document without id triggers documentCreate mutation" {
+  set -e
+  _setup_stub
+  cat > "$LINEAR_STUB_RESPONSE" <<'JSON'
+{"data":{"documentCreate":{"success":true,"document":{
+  "id":"new-uuid","title":"Spec: BTS-204","content":"body","updatedAt":"2026-04-26T20:00:00.000Z"
+}}}}
+JSON
+  body_json='{"title":"Spec: BTS-204","content":"body","issueId":"issue-1"}'
+  run bash -c "source '$STUB_FIXTURE' && echo '$body_json' | bash '$LQ' save-document --input-json -"
+  [ "$status" -eq 0 ]
+  echo "$output" | jq -e '.id == "new-uuid"'
+  echo "$output" | jq -e '.title == "Spec: BTS-204"'
+  echo "$output" | jq -e '.updatedAt == "2026-04-26T20:00:00.000Z"'
+  body=$(_get_body)
+  echo "$body" | jq -e '.query | test("documentCreate")'
+  echo "$body" | jq -e '.variables.input.title == "Spec: BTS-204"'
+  echo "$body" | jq -e '.variables.input.issueId == "issue-1"'
+}
+
+@test "BTS-204 Step 3: save-document with id triggers documentUpdate mutation" {
+  set -e
+  _setup_stub
+  cat > "$LINEAR_STUB_RESPONSE" <<'JSON'
+{"data":{"documentUpdate":{"success":true,"document":{
+  "id":"existing-uuid","title":"Spec: BTS-204","content":"updated","updatedAt":"2026-04-26T21:00:00.000Z"
+}}}}
+JSON
+  body_json='{"id":"existing-uuid","content":"updated"}'
+  run bash -c "source '$STUB_FIXTURE' && echo '$body_json' | bash '$LQ' save-document --input-json -"
+  [ "$status" -eq 0 ]
+  echo "$output" | jq -e '.id == "existing-uuid"'
+  echo "$output" | jq -e '.updatedAt == "2026-04-26T21:00:00.000Z"'
+  body=$(_get_body)
+  echo "$body" | jq -e '.query | test("documentUpdate")'
+  echo "$body" | jq -e '.variables.id == "existing-uuid"'
+  echo "$body" | jq -e '.variables.input.content == "updated"'
+  # update input must NOT carry the id field (it's a path arg, not input field)
+  echo "$body" | jq -e '.variables.input.id == null'
+}
+
+@test "BTS-204 Step 3: save-document --content flag layers on top of stdin" {
+  set -e
+  _setup_stub
+  cat > "$LINEAR_STUB_RESPONSE" <<'JSON'
+{"data":{"documentCreate":{"success":true,"document":{"id":"x","title":"t","content":"c","updatedAt":"now"}}}}
+JSON
+  body_json='{"title":"t","content":"old","issueId":"i"}'
+  run bash -c "source '$STUB_FIXTURE' && echo '$body_json' | bash '$LQ' save-document --input-json - --content 'flag-wins'"
+  [ "$status" -eq 0 ]
+  body=$(_get_body)
+  echo "$body" | jq -e '.variables.input.content == "flag-wins"'
+}
+
+@test "BTS-204 Step 3: save-document create requires title" {
+  _setup_stub
+  body_json='{"content":"orphan"}'
+  run --separate-stderr bash -c "source '$STUB_FIXTURE' && echo '$body_json' | bash '$LQ' save-document --input-json -"
+  [ "$status" -eq 2 ]
+  [[ "$stderr" =~ "title" ]]
+}
+
+@test "BTS-204 Step 3: save-document create requires a parent (issueId or projectId)" {
+  _setup_stub
+  body_json='{"title":"orphan","content":"x"}'
+  run --separate-stderr bash -c "source '$STUB_FIXTURE' && echo '$body_json' | bash '$LQ' save-document --input-json -"
+  [ "$status" -eq 2 ]
+  [[ "$stderr" =~ "parent" ]]
+}
+
+@test "BTS-204 Step 3: save-document surfaces GraphQL errors as exit 3" {
+  _setup_stub
+  cat > "$LINEAR_STUB_RESPONSE" <<'JSON'
+{"errors":[{"message":"Document parent not found"}]}
+JSON
+  body_json='{"title":"t","content":"c","issueId":"missing"}'
+  run --separate-stderr bash -c "source '$STUB_FIXTURE' && echo '$body_json' | bash '$LQ' save-document --input-json -"
+  [ "$status" -eq 3 ]
+  [[ "$stderr" =~ "parent not found" ]]
+}

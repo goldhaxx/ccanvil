@@ -839,6 +839,111 @@ linear_mcp_adapter() {
           "contract":{"output":$output}
         }'
       ;;
+    # ---------------------------------------------------------------------
+    # SSOT-Linear: route spec/plan/stasis lifecycle artifacts to Linear
+    # Documents (BTS-204). Each verb resolves to a linear-query.sh
+    # get-document or save-document invocation. Doc IDs are deterministic
+    # uuid5-style derivations from {namespace, kind, ticket}.
+    # ---------------------------------------------------------------------
+    spec.read|plan.read)
+      local kind="${op%%.*}"
+      if [[ -z "$op_args" ]]; then
+        echo "ERROR: $op (linear-routed) requires a ticket id argument (e.g. operations.sh resolve $op BTS-204)" >&2
+        exit 1
+      fi
+      local doc_id
+      doc_id=$(bash "$(dirname "${BASH_SOURCE[0]}")/linear-query.sh" resolve-document-id --kind "$kind" --ticket "$op_args")
+      output_contract='["id","title","content","updatedAt"]'
+      jq -n --arg cmd_id "$doc_id" --argjson output "$output_contract" \
+        --arg kind "$kind" --arg ticket "$op_args" \
+        '{
+          provider: "linear",
+          mechanism: "http",
+          invocation: {
+            command: ("bash .ccanvil/scripts/linear-query.sh get-document " + ($cmd_id | @sh)),
+            endpoint: "https://api.linear.app/graphql",
+            auth_env: "LINEAR_API_KEY"
+          },
+          contract: { output: $output, kind: $kind, ticket: $ticket, doc_id: $cmd_id, parent_kind: "issue" }
+        }'
+      ;;
+    spec.write|plan.write)
+      local kind="${op%%.*}"
+      if [[ -z "$op_args" ]]; then
+        echo "ERROR: $op (linear-routed) requires a ticket id argument (e.g. operations.sh resolve $op BTS-204)" >&2
+        exit 1
+      fi
+      local doc_id
+      doc_id=$(bash "$(dirname "${BASH_SOURCE[0]}")/linear-query.sh" resolve-document-id --kind "$kind" --ticket "$op_args")
+      output_contract='["id","title","content","updatedAt"]'
+      # The resolved command takes its full payload via --input-json - on stdin.
+      # Caller pipes {title, content, issueId} (or includes id for update mode).
+      jq -n --arg cmd_id "$doc_id" --argjson output "$output_contract" \
+        --arg kind "$kind" --arg ticket "$op_args" \
+        '{
+          provider: "linear",
+          mechanism: "http",
+          invocation: {
+            command: "bash .ccanvil/scripts/linear-query.sh save-document --input-json -",
+            endpoint: "https://api.linear.app/graphql",
+            auth_env: "LINEAR_API_KEY"
+          },
+          contract: { output: $output, kind: $kind, ticket: $ticket, doc_id: $cmd_id, parent_kind: "issue" }
+        }'
+      ;;
+    stasis.read|stasis.write)
+      # stasis takes a kind discriminator: "feature" or "session".
+      # OP_ARGS = kind, OP_ARG2 = BTS-N (required for feature, omitted for session).
+      local stasis_kind="${op_args:-feature}"
+      case "$stasis_kind" in
+        feature|session) ;;
+        *)
+          echo "ERROR: $op kind '$stasis_kind' is invalid. Pass 'feature' or 'session' as the first arg." >&2
+          exit 1
+          ;;
+      esac
+      local resolve_kind ticket parent_kind project_id
+      project_id=$(echo "$provider_config" | jq -r '.project_id // ""')
+      if [[ "$stasis_kind" == "feature" ]]; then
+        if [[ -z "$OP_ARG2" ]]; then
+          echo "ERROR: $op feature kind requires a ticket id (e.g. operations.sh resolve $op feature BTS-204)" >&2
+          exit 1
+        fi
+        resolve_kind="feature-stasis"
+        ticket="$OP_ARG2"
+        parent_kind="issue"
+      else
+        if [[ -z "$project_id" ]]; then
+          echo "ERROR: $op session kind requires integrations.providers.linear.project_id to be configured" >&2
+          exit 1
+        fi
+        resolve_kind="session-stasis"
+        ticket="$project_id"
+        parent_kind="project"
+      fi
+      local doc_id
+      doc_id=$(bash "$(dirname "${BASH_SOURCE[0]}")/linear-query.sh" resolve-document-id --kind "$resolve_kind" --ticket "$ticket")
+      output_contract='["id","title","content","updatedAt"]'
+      local cmd_str
+      if [[ "${op##*.}" == "read" ]]; then
+        cmd_str="bash .ccanvil/scripts/linear-query.sh get-document $(printf '%s' "$doc_id" | jq -Rr @sh)"
+      else
+        cmd_str="bash .ccanvil/scripts/linear-query.sh save-document --input-json -"
+      fi
+      jq -n --arg cmd "$cmd_str" --argjson output "$output_contract" \
+        --arg kind "$stasis_kind" --arg ticket "$ticket" \
+        --arg doc_id "$doc_id" --arg parent_kind "$parent_kind" \
+        '{
+          provider: "linear",
+          mechanism: "http",
+          invocation: {
+            command: $cmd,
+            endpoint: "https://api.linear.app/graphql",
+            auth_env: "LINEAR_API_KEY"
+          },
+          contract: { output: $output, kind: $kind, ticket: $ticket, doc_id: $doc_id, parent_kind: $parent_kind }
+        }'
+      ;;
     *)
       # Unsupported operation for this provider — fall back to local
       local_adapter "$op"

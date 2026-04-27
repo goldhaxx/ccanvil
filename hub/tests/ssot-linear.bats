@@ -363,3 +363,140 @@ JSON
   run --separate-stderr bash "$LQ" document-history
   [ "$status" -eq 2 ]
 }
+
+# =========================================================================
+# Step 6+7: operations.sh routing for spec/plan/stasis
+# =========================================================================
+
+OPS="$BATS_TEST_DIRNAME/../../.ccanvil/scripts/operations.sh"
+
+_make_local_fx() {
+  local fx="$BATS_TEST_TMPDIR/local-fx"
+  mkdir -p "$fx/.claude"
+  echo '{}' > "$fx/.claude/ccanvil.json"
+  echo "$fx"
+}
+
+_make_linear_fx() {
+  local fx="$BATS_TEST_TMPDIR/linear-fx"
+  mkdir -p "$fx/.claude"
+  cat > "$fx/.claude/ccanvil.json" <<'JSON'
+{
+  "integrations": {
+    "providers": {
+      "linear": {
+        "mechanism": "http",
+        "project": "ccanvil",
+        "project_id": "test-project-uuid",
+        "team": "Test Team",
+        "state_ids": {"backlog":"backlog-state-id"}
+      }
+    }
+  }
+}
+JSON
+  cat > "$fx/.claude/ccanvil.local.json" <<'JSON'
+{
+  "integrations": {
+    "routing": {
+      "spec": "linear",
+      "plan": "linear",
+      "stasis": "linear"
+    }
+  }
+}
+JSON
+  echo "$fx"
+}
+
+@test "BTS-204 Step 6: spec.read on local-routed node returns bash mechanism (unchanged)" {
+  fx=$(_make_local_fx)
+  run bash "$OPS" resolve spec.read --project-dir "$fx"
+  [ "$status" -eq 0 ]
+  echo "$output" | jq -e '.provider == "local"'
+  echo "$output" | jq -e '.mechanism == "bash"'
+  echo "$output" | jq -e '.invocation.command == "cat docs/spec.md"'
+}
+
+@test "BTS-204 Step 7: spec.read on linear-routed node returns http get-document" {
+  fx=$(_make_linear_fx)
+  run bash "$OPS" resolve spec.read BTS-204 --project-dir "$fx"
+  [ "$status" -eq 0 ]
+  echo "$output" | jq -e '.provider == "linear"'
+  echo "$output" | jq -e '.mechanism == "http"'
+  echo "$output" | jq -e '.invocation.command | test("linear-query.sh get-document")'
+  # The doc id is derived deterministically from --kind spec --ticket BTS-204
+  expected_uuid=$(bash "$LQ" resolve-document-id --kind spec --ticket BTS-204)
+  echo "$output" | jq -e --arg u "$expected_uuid" '.invocation.command | contains($u)'
+}
+
+@test "BTS-204 Step 7: spec.write on linear-routed node returns http save-document" {
+  fx=$(_make_linear_fx)
+  run bash "$OPS" resolve spec.write BTS-204 --project-dir "$fx"
+  [ "$status" -eq 0 ]
+  echo "$output" | jq -e '.mechanism == "http"'
+  echo "$output" | jq -e '.invocation.command | test("linear-query.sh save-document")'
+  echo "$output" | jq -e '.invocation.command | test("--input-json -")'
+}
+
+@test "BTS-204 Step 7: plan.read/write linear-routed dispatch" {
+  fx=$(_make_linear_fx)
+  for verb in plan.read plan.write; do
+    run bash "$OPS" resolve "$verb" BTS-204 --project-dir "$fx"
+    [ "$status" -eq 0 ]
+    echo "$output" | jq -e '.mechanism == "http"'
+  done
+  expected_uuid=$(bash "$LQ" resolve-document-id --kind plan --ticket BTS-204)
+  run bash "$OPS" resolve plan.read BTS-204 --project-dir "$fx"
+  echo "$output" | jq -e --arg u "$expected_uuid" '.invocation.command | contains($u)'
+}
+
+@test "BTS-204 Step 7: stasis.read feature kind → issue-parented Document" {
+  fx=$(_make_linear_fx)
+  run bash "$OPS" resolve stasis.read feature BTS-204 --project-dir "$fx"
+  [ "$status" -eq 0 ]
+  echo "$output" | jq -e '.mechanism == "http"'
+  expected_uuid=$(bash "$LQ" resolve-document-id --kind feature-stasis --ticket BTS-204)
+  echo "$output" | jq -e --arg u "$expected_uuid" '.invocation.command | contains($u)'
+}
+
+@test "BTS-204 Step 7: stasis.read session kind → project-parented Document" {
+  fx=$(_make_linear_fx)
+  run bash "$OPS" resolve stasis.read session --project-dir "$fx"
+  [ "$status" -eq 0 ]
+  echo "$output" | jq -e '.mechanism == "http"'
+  expected_uuid=$(bash "$LQ" resolve-document-id --kind session-stasis --ticket test-project-uuid)
+  echo "$output" | jq -e --arg u "$expected_uuid" '.invocation.command | contains($u)'
+}
+
+@test "BTS-204 Step 7: stasis.write feature on linear → save-document with --issue-id" {
+  fx=$(_make_linear_fx)
+  run bash "$OPS" resolve stasis.write feature BTS-204 --project-dir "$fx"
+  [ "$status" -eq 0 ]
+  echo "$output" | jq -e '.invocation.command | test("save-document")'
+  # The skill will pipe input-json with title + content + issueId. The resolver
+  # surfaces the parent kind via the contract so the skill knows which to set.
+  echo "$output" | jq -e '.contract.parent_kind == "issue"'
+}
+
+@test "BTS-204 Step 7: stasis.write session on linear → save-document with --project-id" {
+  fx=$(_make_linear_fx)
+  run bash "$OPS" resolve stasis.write session --project-dir "$fx"
+  [ "$status" -eq 0 ]
+  echo "$output" | jq -e '.invocation.command | test("save-document")'
+  echo "$output" | jq -e '.contract.parent_kind == "project"'
+}
+
+@test "BTS-204 Step 7: spec.read on linear-routed without ticket arg errors loudly" {
+  fx=$(_make_linear_fx)
+  run --separate-stderr bash "$OPS" resolve spec.read --project-dir "$fx"
+  [ "$status" -ne 0 ]
+  [[ "$stderr" =~ "ticket" ]] || [[ "$stderr" =~ "BTS" ]]
+}
+
+@test "BTS-204 Step 7: stasis.read with unknown kind errors loudly" {
+  fx=$(_make_linear_fx)
+  run --separate-stderr bash "$OPS" resolve stasis.read bogus --project-dir "$fx"
+  [ "$status" -ne 0 ]
+  [[ "$stderr" =~ "kind" ]] || [[ "$stderr" =~ "feature" ]] || [[ "$stderr" =~ "session" ]]
+}

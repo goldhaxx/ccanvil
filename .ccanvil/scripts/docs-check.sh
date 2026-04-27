@@ -1067,6 +1067,29 @@ cmd_activate() {
     fi
   fi
 
+  # BTS-213: when spec is Linear-routed, mirror the just-committed In-Progress
+  # spec content into the Linear Document via cmd_artifact_write. This keeps
+  # the Linear-side content and metadata (Status: In Progress) in sync with
+  # the local archive — closing the post-/spec, post-activate window where
+  # lifecycle-state would otherwise read Linear and find nothing.
+  #
+  # Pass --project-dir explicitly: cmd_artifact_write must use the same
+  # project root we resolved the route with, otherwise its internal
+  # _lifecycle_route call would fall back to "." and silently hit the local
+  # branch on non-cwd invocations.
+  #
+  # WARN-on-failure (not exit-on-failure): branch + push + draft-PR are
+  # already done; bailing here would leave a half-state worse than a noisy
+  # success. Operator can retry via the printed recipe.
+  local project_dir
+  project_dir=$(cd "$docs_dir/.." 2>/dev/null && pwd) || project_dir="."
+  if [[ "$(_lifecycle_route spec "$project_dir")" == "linear" ]]; then
+    if ! cmd_artifact_write --kind spec --feature "$feature_id" --project-dir "$project_dir" < "$docs_dir/spec.md" >/dev/null; then
+      echo "WARN: activate completed locally but Linear spec dispatch failed." >&2
+      echo "Retry: bash .ccanvil/scripts/docs-check.sh artifact-write --kind spec --feature $feature_id --project-dir $project_dir < $docs_dir/spec.md" >&2
+    fi
+  fi
+
   # BTS-136: emit AUTO-TRANSITION marker for the linked Linear issue. The
   # /spec or /activate caller scans stdout and dispatches the MCP transition.
   # Silent for legacy specs (no Work:), local-provider, or unknown providers.
@@ -4085,6 +4108,28 @@ cmd_ssot_migrate() {
 # Skills call these instead of hardcoded file IO. Routing decision +
 # upsert orchestration live in one place; skill prose stays terse.
 
+# cmd_route_of — public wrapper over `_lifecycle_route`. Exposes the routing
+# decision so skill prose (e.g. /spec) can branch on `linear` vs `local`
+# without reaching into private helpers. BTS-213.
+# Usage:
+#   docs-check.sh route-of <spec|plan|stasis> [--project-dir <dir>]
+# Outputs "linear" or "local" on stdout. Exit 2 on missing/unknown kind.
+cmd_route_of() {
+  local kind="" project_dir="."
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --project-dir) project_dir="${2:-.}"; shift 2 ;;
+      spec|plan|stasis) kind="$1"; shift ;;
+      *) shift ;;
+    esac
+  done
+  if [[ -z "$kind" ]]; then
+    echo "Usage: route-of <spec|plan|stasis> [--project-dir <dir>]" >&2
+    return 2
+  fi
+  _lifecycle_route "$kind" "$project_dir"
+}
+
 # cmd_artifact_read — read spec/plan/stasis content from the routed source.
 # Args:
 #   --kind <spec|plan|stasis>
@@ -4092,18 +4137,19 @@ cmd_ssot_migrate() {
 #   --stasis-kind <feature|session>  defaults to "feature"
 # Output: artifact content on stdout (markdown). Exit 0 on found, 2 on missing.
 cmd_artifact_read() {
-  local kind="" feature="" stasis_kind="feature"
+  local kind="" feature="" stasis_kind="feature" project_dir="."
   while [[ $# -gt 0 ]]; do
     case "$1" in
       --kind)         kind="$2";        shift 2 ;;
       --feature)      feature="$2";     shift 2 ;;
       --stasis-kind)  stasis_kind="$2"; shift 2 ;;
+      --project-dir)  project_dir="${2:-.}"; shift 2 ;;
       *) shift ;;
     esac
   done
   [[ -z "$kind" ]] && { echo "ERROR: artifact-read --kind is required" >&2; return 2; }
 
-  local route project_dir="."
+  local route
   route=$(_lifecycle_route "$kind" "$project_dir")
 
   if [[ "$route" != "linear" ]]; then
@@ -4163,18 +4209,19 @@ cmd_artifact_read() {
 # Reads content from stdin. For Linear, performs upsert via document-updated-at
 # pre-check, then save-document with --create-with-id on first write.
 cmd_artifact_write() {
-  local kind="" feature="" stasis_kind="feature"
+  local kind="" feature="" stasis_kind="feature" project_dir="."
   while [[ $# -gt 0 ]]; do
     case "$1" in
       --kind)         kind="$2";        shift 2 ;;
       --feature)      feature="$2";     shift 2 ;;
       --stasis-kind)  stasis_kind="$2"; shift 2 ;;
+      --project-dir)  project_dir="${2:-.}"; shift 2 ;;
       *) shift ;;
     esac
   done
   [[ -z "$kind" ]] && { echo "ERROR: artifact-write --kind is required" >&2; return 2; }
 
-  local content project_dir="."
+  local content
   content=$(cat)
 
   local route
@@ -4504,6 +4551,7 @@ case "$cmd" in
   lifecycle-state)   cmd_lifecycle_state "$@" ;;
   artifact-read)     cmd_artifact_read "$@" ;;
   artifact-write)    cmd_artifact_write "$@" ;;
+  route-of)          cmd_route_of "$@" ;;
   ssot-migrate)      cmd_ssot_migrate "$@" ;;
   session-info)      cmd_session_info "$@" ;;
   *)

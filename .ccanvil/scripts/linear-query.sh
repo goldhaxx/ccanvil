@@ -50,6 +50,14 @@ Subcommands:
                                       Auto-detects mode by id presence (in flag or stdin).
   document-updated-at <id-or-slug>    Cheap projection: returns {id, updatedAt, updatedBy}.
                                       Used for concurrent-edit pre-checks (rate-limit hygiene).
+  trash-document <id-or-slug>         Soft-delete via documentDelete. Returns {success}.
+                                      Linear has no hard-delete in the public API.
+  list-documents [flags]              List Documents. Flags: --project, --issue, --initiative,
+                                      --limit. Returns array of {id, title, slugId, updatedAt,
+                                      createdAt}.
+  document-history <id-or-slug>       Returns content snapshot history as
+                                      [{id, snapshotAt, actor}]. Used for concurrent-edit
+                                      diff surfacing.
 
 Environment:
   LINEAR_API_KEY        Required for every subcommand except --help.
@@ -602,6 +610,9 @@ main() {
     get-document) cmd_get_document "$@" ;;
     save-document) cmd_save_document "$@" ;;
     document-updated-at) cmd_document_updated_at "$@" ;;
+    trash-document) cmd_trash_document "$@" ;;
+    list-documents) cmd_list_documents "$@" ;;
+    document-history) cmd_document_history "$@" ;;
     *)
       _die 2 "Unknown subcommand: $subcommand. Run 'linear-query.sh --help' for usage."
       ;;
@@ -801,6 +812,94 @@ cmd_document_updated_at() {
     updatedAt: .updatedAt,
     updatedBy: (.updatedBy // null)
   }'
+}
+
+cmd_trash_document() {
+  _require_api_key
+  if [[ $# -lt 1 ]]; then
+    _die 2 "trash-document requires an id or slug"
+  fi
+  local id="$1"
+
+  local variables
+  variables=$(jq -nc --arg id "$id" '{id:$id}')
+
+  local query='mutation DocumentDelete($id: String!) {
+    documentDelete(id: $id) { success }
+  }'
+
+  _post_graphql "$query" "$variables" | jq '.documentDelete | {success: .success}'
+}
+
+cmd_list_documents() {
+  _require_api_key
+  local project_id="" issue_id="" initiative_id=""
+  local limit="50"
+
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --project)        project_id="$2";    shift 2 ;;
+      --issue)          issue_id="$2";      shift 2 ;;
+      --initiative)     initiative_id="$2"; shift 2 ;;
+      --limit)          limit="$2";         shift 2 ;;
+      *) _die 2 "list-documents: unknown flag: $1" ;;
+    esac
+  done
+
+  local filter='{}'
+  if [[ -n "$project_id" ]]; then
+    filter=$(printf '%s' "$filter" | jq --arg v "$project_id" '. + {project:{id:{eq:$v}}}')
+  fi
+  if [[ -n "$issue_id" ]]; then
+    filter=$(printf '%s' "$filter" | jq --arg v "$issue_id" '. + {issue:{id:{eq:$v}}}')
+  fi
+  if [[ -n "$initiative_id" ]]; then
+    filter=$(printf '%s' "$filter" | jq --arg v "$initiative_id" '. + {initiative:{id:{eq:$v}}}')
+  fi
+
+  local variables
+  variables=$(jq -n --argjson f "$filter" --argjson l "$limit" '{filter:$f, first:$l}')
+
+  local query='query ($filter: DocumentFilter, $first: Int) {
+    documents(filter: $filter, first: $first) {
+      nodes { id title slugId updatedAt createdAt }
+    }
+  }'
+
+  _post_graphql "$query" "$variables" | jq '[.documents.nodes[] | {
+    id: .id,
+    title: .title,
+    slugId: .slugId,
+    updatedAt: .updatedAt,
+    createdAt: .createdAt
+  }]'
+}
+
+cmd_document_history() {
+  _require_api_key
+  if [[ $# -lt 1 ]]; then
+    _die 2 "document-history requires an id or slug"
+  fi
+  local id="$1"
+
+  local variables
+  variables=$(jq -nc --arg id "$id" '{id:$id}')
+
+  local query='query ($id: String!) {
+    documentContentHistory(id: $id) {
+      history {
+        id
+        contentDataSnapshotAt
+        actor { id name }
+      }
+    }
+  }'
+
+  _post_graphql "$query" "$variables" | jq '[.documentContentHistory.history[] | {
+    id: .id,
+    snapshotAt: .contentDataSnapshotAt,
+    actor: (.actor // null)
+  }]'
 }
 
 main "$@"

@@ -259,3 +259,106 @@ JSON
   run --separate-stderr bash "$LQ" document-updated-at
   [ "$status" -eq 2 ]
 }
+
+# =========================================================================
+# Step 5a: trash-document — soft delete via documentDelete
+# =========================================================================
+
+@test "BTS-204 Step 5a: trash-document calls documentDelete and returns success" {
+  set -e
+  _setup_stub
+  cat > "$LINEAR_STUB_RESPONSE" <<'JSON'
+{"data":{"documentDelete":{"success":true}}}
+JSON
+  run bash -c "source '$STUB_FIXTURE' && bash '$LQ' trash-document doc-id-1"
+  [ "$status" -eq 0 ]
+  echo "$output" | jq -e '.success == true'
+  body=$(_get_body)
+  echo "$body" | jq -e '.query | test("documentDelete")'
+  echo "$body" | jq -e '.variables.id == "doc-id-1"'
+}
+
+@test "BTS-204 Step 5a: trash-document requires id" {
+  run --separate-stderr bash "$LQ" trash-document
+  [ "$status" -eq 2 ]
+}
+
+# =========================================================================
+# Step 5b: list-documents — filter by --project, --issue, --initiative
+# =========================================================================
+
+@test "BTS-204 Step 5b: list-documents returns canonical array shape" {
+  set -e
+  _setup_stub
+  cat > "$LINEAR_STUB_RESPONSE" <<'JSON'
+{"data":{"documents":{"nodes":[
+  {"id":"d1","title":"Spec: BTS-204","slugId":"spec-204","updatedAt":"t1","createdAt":"t0"},
+  {"id":"d2","title":"Plan: BTS-204","slugId":"plan-204","updatedAt":"t2","createdAt":"t0"}
+]}}}
+JSON
+  run bash -c "source '$STUB_FIXTURE' && bash '$LQ' list-documents"
+  [ "$status" -eq 0 ]
+  echo "$output" | jq -e 'length == 2'
+  echo "$output" | jq -e '.[0].id == "d1" and .[0].title == "Spec: BTS-204"'
+}
+
+@test "BTS-204 Step 5b: list-documents --project filters by project" {
+  set -e
+  _setup_stub
+  cat > "$LINEAR_STUB_RESPONSE" <<'JSON'
+{"data":{"documents":{"nodes":[]}}}
+JSON
+  run bash -c "source '$STUB_FIXTURE' && bash '$LQ' list-documents --project proj-1"
+  [ "$status" -eq 0 ]
+  body=$(_get_body)
+  echo "$body" | jq -e '.variables.filter.project.id.eq == "proj-1"'
+}
+
+@test "BTS-204 Step 5b: list-documents --issue filters by issue" {
+  set -e
+  _setup_stub
+  cat > "$LINEAR_STUB_RESPONSE" <<'JSON'
+{"data":{"documents":{"nodes":[]}}}
+JSON
+  run bash -c "source '$STUB_FIXTURE' && bash '$LQ' list-documents --issue issue-1"
+  [ "$status" -eq 0 ]
+  body=$(_get_body)
+  echo "$body" | jq -e '.variables.filter.issue.id.eq == "issue-1"'
+}
+
+@test "BTS-204 Step 5b: list-documents --limit overrides default first" {
+  set -e
+  _setup_stub
+  cat > "$LINEAR_STUB_RESPONSE" <<'JSON'
+{"data":{"documents":{"nodes":[]}}}
+JSON
+  run bash -c "source '$STUB_FIXTURE' && bash '$LQ' list-documents --limit 5"
+  [ "$status" -eq 0 ]
+  body=$(_get_body)
+  echo "$body" | jq -e '.variables.first == 5'
+}
+
+# =========================================================================
+# Step 5c: document-history — content version snapshots
+# =========================================================================
+
+@test "BTS-204 Step 5c: document-history returns canonical array shape" {
+  set -e
+  _setup_stub
+  cat > "$LINEAR_STUB_RESPONSE" <<'JSON'
+{"data":{"documentContentHistory":{"history":[
+  {"id":"h1","contentDataSnapshotAt":"2026-04-26T20:00:00.000Z","actor":{"id":"u1","name":"alice"}},
+  {"id":"h2","contentDataSnapshotAt":"2026-04-26T19:00:00.000Z","actor":null}
+]}}}
+JSON
+  run bash -c "source '$STUB_FIXTURE' && bash '$LQ' document-history doc-1"
+  [ "$status" -eq 0 ]
+  echo "$output" | jq -e 'length == 2'
+  echo "$output" | jq -e '.[0].id == "h1"'
+  echo "$output" | jq -e '.[0].snapshotAt == "2026-04-26T20:00:00.000Z"'
+}
+
+@test "BTS-204 Step 5c: document-history requires id" {
+  run --separate-stderr bash "$LQ" document-history
+  [ "$status" -eq 2 ]
+}

@@ -38,6 +38,9 @@ Subcommands:
   save-issue   [flags]                Create or update an issue. Flags: --id, --title, --description,
                                       --state, --priority, --labels, --project, --team, --parent-id,
                                       --duplicate-of.
+  resolve-document-id [flags]         Derive a deterministic UUID for a ccanvil lifecycle Document.
+                                      Flags: --kind {spec|plan|feature-stasis|session-stasis},
+                                             --ticket <BTS-N>. Pure compute (no API call).
 
 Environment:
   LINEAR_API_KEY        Required for every subcommand except --help.
@@ -586,10 +589,43 @@ main() {
     list-teams)    cmd_list_teams    "$@" ;;
     list-projects) cmd_list_projects "$@" ;;
     save-issue)   cmd_save_issue   "$@" ;;
+    resolve-document-id) cmd_resolve_document_id "$@" ;;
     *)
       _die 2 "Unknown subcommand: $subcommand. Run 'linear-query.sh --help' for usage."
       ;;
   esac
+}
+
+# -----------------------------------------------------------------------------
+# BTS-204: lifecycle-Document UUID namespace + deterministic ID derivation.
+# Stable namespace UUID v4, pinned forever — changing it breaks every existing
+# document mapping. Don't.
+# -----------------------------------------------------------------------------
+BTS_NS="5b8e4a8e-4f3c-4d2a-9c1e-bf204550b91d"
+
+cmd_resolve_document_id() {
+  local kind="" ticket=""
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --kind)   kind="${2:-}";   shift 2 ;;
+      --ticket) ticket="${2:-}"; shift 2 ;;
+      *) _die 2 "resolve-document-id: unknown flag: $1" ;;
+    esac
+  done
+
+  [[ -z "$kind" ]]   && _die 2 "resolve-document-id: --kind is required"
+  [[ -z "$ticket" ]] && _die 2 "resolve-document-id: --ticket is required"
+
+  case "$kind" in
+    spec|plan|feature-stasis|session-stasis) ;;
+    *) _die 2 "resolve-document-id: unknown kind '$kind' (must be one of: spec, plan, feature-stasis, session-stasis)" ;;
+  esac
+
+  local input hash
+  input="${BTS_NS}:${kind}:${ticket}"
+  hash=$(printf '%s' "$input" | shasum -a 256 | awk '{print $1}')
+  printf '%s-%s-%s-%s-%s\n' \
+    "${hash:0:8}" "${hash:8:4}" "${hash:12:4}" "${hash:16:4}" "${hash:20:12}"
 }
 
 main "$@"

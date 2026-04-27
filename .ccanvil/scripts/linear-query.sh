@@ -41,6 +41,9 @@ Subcommands:
   resolve-document-id [flags]         Derive a deterministic UUID for a ccanvil lifecycle Document.
                                       Flags: --kind {spec|plan|feature-stasis|session-stasis},
                                              --ticket <BTS-N>. Pure compute (no API call).
+  get-document <id-or-slug>           Fetch one Document by UUID or slug. Returns
+                                      {id, title, content, slugId, url, updatedAt, createdAt,
+                                       updatedBy, creator, project, issue}.
 
 Environment:
   LINEAR_API_KEY        Required for every subcommand except --help.
@@ -590,6 +593,7 @@ main() {
     list-projects) cmd_list_projects "$@" ;;
     save-issue)   cmd_save_issue   "$@" ;;
     resolve-document-id) cmd_resolve_document_id "$@" ;;
+    get-document) cmd_get_document "$@" ;;
     *)
       _die 2 "Unknown subcommand: $subcommand. Run 'linear-query.sh --help' for usage."
       ;;
@@ -626,6 +630,41 @@ cmd_resolve_document_id() {
   hash=$(printf '%s' "$input" | shasum -a 256 | awk '{print $1}')
   printf '%s-%s-%s-%s-%s\n' \
     "${hash:0:8}" "${hash:8:4}" "${hash:12:4}" "${hash:16:4}" "${hash:20:12}"
+}
+
+cmd_get_document() {
+  _require_api_key
+  if [[ $# -lt 1 ]]; then
+    _die 2 "get-document requires an id or slug (e.g., 5b8e4a8e-... or spec-bts-204)"
+  fi
+  local id="$1"
+
+  local variables
+  variables=$(jq -nc --arg id "$id" '{id:$id}')
+
+  local query='query ($id: String!) {
+    document(id: $id) {
+      id title content slugId url updatedAt createdAt
+      updatedBy { id name }
+      creator { id name }
+      project { id }
+      issue { id identifier }
+    }
+  }'
+
+  _post_graphql "$query" "$variables" | jq '.document | {
+    id: .id,
+    title: .title,
+    content: .content,
+    slugId: .slugId,
+    url: .url,
+    updatedAt: .updatedAt,
+    createdAt: .createdAt,
+    updatedBy: (.updatedBy // null),
+    creator: (.creator // null),
+    project: (.project // null),
+    issue: (.issue // null)
+  }'
 }
 
 main "$@"

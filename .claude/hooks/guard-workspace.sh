@@ -101,7 +101,16 @@ for token in $NORMALIZED; do
   # cannot disambiguate /idea (slash-command) from /etc (real path) —
   # both are short alphabetic-leading single-segment tokens. The
   # filesystem-rooted allowlist is the only deterministic path.
-  if [[ "$token" =~ ^/([a-zA-Z][a-zA-Z0-9_-]{0,29})$ ]]; then
+  #
+  # BTS-210: tolerate a trailing run of prose punctuation on the
+  # slash-command match. Set: ] ) . , ; : ! ? > " ' ` (closing/sentence-
+  # terminating chars). Without this, prose like `/stasis).` or `/idea,`
+  # falls through the allowlist check (regex anchored at $) and gets
+  # blocked by the path scan. The capture group still extracts only
+  # the slash-command name; trailing punct is OUTSIDE the capture.
+  # `]` must be first inside the char class to be treated literally.
+  slash_command_trailing_punct=']).,;:!?>"'"'"'`'
+  if [[ "$token" =~ ^/([a-zA-Z][a-zA-Z0-9_-]{0,29})[${slash_command_trailing_punct}]*$ ]]; then
     candidate="${BASH_REMATCH[1]}"
     if [[ -z "${SLASH_COMMANDS+x}" ]]; then
       SLASH_COMMANDS=" "

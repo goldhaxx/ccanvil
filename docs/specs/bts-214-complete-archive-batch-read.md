@@ -3,7 +3,7 @@
 > Feature: bts-214-complete-archive-batch-read
 > Work: linear:BTS-214
 > Created: 1777269303
-> Status: In Progress
+> Status: Complete
 
 ## Summary
 

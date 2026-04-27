@@ -4008,14 +4008,30 @@ _complete_archive_linear() {
     return 0
   fi
 
-  local docs_json
-  if ! docs_json=$(bash "$script_dir/linear-query.sh" list-documents --issue "$issue_uuid" --with-content --limit 50 2>/dev/null); then
+  local docs_json list_limit=50
+  if ! docs_json=$(bash "$script_dir/linear-query.sh" list-documents --issue "$issue_uuid" --with-content --limit "$list_limit" 2>/dev/null); then
     echo "WARN: archive step skipped — list-documents failed for $feature_id" >&2
     return 0
   fi
 
+  # /review WARN-2: silent-truncation guard. ccanvil currently parents at
+  # most 3 Documents per issue (spec/plan/feature-stasis), but if a future
+  # lifecycle kind pushes past `list_limit`, we'd silently miss the
+  # overflow. Surface a WARN at zero API cost — no pagination logic
+  # needed today.
+  local doc_count
+  doc_count=$(printf '%s' "$docs_json" | jq 'length')
+  if [[ "$doc_count" -ge "$list_limit" ]]; then
+    echo "WARN: list-documents returned $doc_count results (limit=$list_limit) — possible truncation; some Documents may not be archived" >&2
+  fi
+
   # Phase 3: archive + trash each present Document. Match by id-equality
   # against the planned UUID (NOT title prefix — robust to title renames).
+  # /review WARN-1: separate archive (content-gated) from trash (match-gated).
+  # If the Document was created with empty content (e.g. operator cleared
+  # the body in Linear before /complete), we still trash it — otherwise it
+  # leaks as a "zombie Document" in Linear's project. Legacy behavior
+  # silently left those alive; this fix closes that latent class of bug.
   local i=0
   while [[ $i -lt ${#planned_kinds[@]} ]]; do
     local k="${planned_kinds[$i]}" id="${planned_ids[$i]}" dest="${planned_dests[$i]}"
@@ -4025,9 +4041,11 @@ _complete_archive_linear() {
       content=$(printf '%s' "$node" | jq -r '.content // empty')
       if [[ -n "$content" ]]; then
         printf '%s\n' "$content" > "$dest"
-        bash "$script_dir/linear-query.sh" trash-document "$id" >/dev/null 2>&1 || true
         echo "Archived ${k} → $dest" >&2
+      else
+        echo "Archive: skipped ${k} write — Document had empty content; trashing anyway" >&2
       fi
+      bash "$script_dir/linear-query.sh" trash-document "$id" >/dev/null 2>&1 || true
     fi
     i=$((i + 1))
   done

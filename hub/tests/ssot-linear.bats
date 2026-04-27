@@ -1252,6 +1252,162 @@ SHELL
   grep -q "Status: Complete" "$fx/docs/specs/bts-err-feat.md"
 }
 
+@test "BTS-214 WARN-1: empty-content Document is still trashed (no zombie)" {
+  # Reviewer concern: legacy guard skipped both archive AND trash on empty
+  # content, leaving the Linear Document alive forever. Fix: trash always
+  # fires when the planned UUID matches a list response node, regardless
+  # of content. Stub returns one matching node with content=""; assert
+  # that trash-document is called for it (curl count == 3 = get-issue +
+  # list + trash).
+  set -e
+  _setup_stub
+  fx="$BATS_TEST_TMPDIR/bts-214-zombie-fx"
+  mkdir -p "$fx/.ccanvil/state" "$fx/.claude" "$fx/docs/specs"
+  cat > "$fx/.claude/ccanvil.json" <<'JSON'
+{
+  "integrations": {
+    "providers": {"linear": {"mechanism": "http", "project_id": "p"}},
+    "routing": {"spec": "linear", "plan": "linear", "stasis": "linear"}
+  }
+}
+JSON
+  cat > "$fx/docs/specs/bts-zomb-feat.md" <<'MD'
+# Feature: Zombie
+> Feature: bts-zomb-feat
+> Status: In Progress
+MD
+  cd "$fx"
+  git init -q . && git config user.email "t@t" && git config user.name "t"
+  git add -A && git commit -q -m "init"
+
+  spec_id=$(bash "$LQ" resolve-document-id --kind spec --ticket bts-zomb-feat)
+
+  STUB_FIXTURE="$BATS_TEST_TMPDIR/bts-214-zombie-stub.sh"
+  cat > "$STUB_FIXTURE" <<SHELL
+curl() {
+  local n
+  n=\$(cat "\$BATS_TEST_TMPDIR/bts-214-zcnt" 2>/dev/null || echo 0)
+  n=\$((n + 1)); echo "\$n" > "\$BATS_TEST_TMPDIR/bts-214-zcnt"
+  case "\$n" in
+    1) echo '{"data":{"issue":{"id":"issue-uuid","identifier":"BTS-x","title":"t","priority":2,"createdAt":"t0","updatedAt":"t1","description":"d","state":{"name":"x","type":"x","id":"s"},"labels":{"nodes":[]}}}}' ;;
+    2) echo '{"data":{"documents":{"nodes":[{"id":"$spec_id","title":"x","content":"","slugId":"s","updatedAt":"t","createdAt":"t"}]}}}' ;;
+    *) echo '{"data":{"documentDelete":{"success":true}}}' ;;
+  esac
+  return 0
+}
+export -f curl
+SHELL
+  echo 0 > "$BATS_TEST_TMPDIR/bts-214-zcnt"
+  run bash -c "source '$STUB_FIXTURE' && bash '$DC' complete bts-zomb-feat '$fx/docs'"
+  [ "$status" -eq 0 ]
+  # 1 get-issue + 1 list + 1 trash = 3 calls (trash fired despite empty content).
+  [ "$(cat "$BATS_TEST_TMPDIR/bts-214-zcnt")" = "3" ]
+  # No archive file written — content was empty.
+  ! ls "$fx/docs/sessions/" 2>/dev/null | grep -q "bts-zomb-feat-spec.md" || \
+    [ ! -f "$fx/docs/sessions/$(ls $fx/docs/sessions/ | grep bts-zomb-feat-spec.md)" ]
+}
+
+@test "BTS-214 WARN-2: list-documents result at limit emits truncation WARN" {
+  # Reviewer concern: silent data-loss ceiling at --limit 50. A future
+  # lifecycle kind that pushes past 50 would miss overflow. This test
+  # uses a small dummy fixture asserting WARN surfaces when the result
+  # length hits the limit (50). We can't easily fake 50 nodes, so we
+  # instead probe the code path by testing the doc_count >= list_limit
+  # branch via a stub returning an over-the-limit result count via
+  # synthetic generation.
+  set -e
+  _setup_stub
+  fx="$BATS_TEST_TMPDIR/bts-214-trunc-fx"
+  mkdir -p "$fx/.ccanvil/state" "$fx/.claude" "$fx/docs/specs"
+  cat > "$fx/.claude/ccanvil.json" <<'JSON'
+{
+  "integrations": {
+    "providers": {"linear": {"mechanism": "http", "project_id": "p"}},
+    "routing": {"spec": "linear", "plan": "linear", "stasis": "linear"}
+  }
+}
+JSON
+  cat > "$fx/docs/specs/bts-trunc-feat.md" <<'MD'
+# Feature: Trunc
+> Feature: bts-trunc-feat
+> Status: In Progress
+MD
+  cd "$fx"
+  git init -q . && git config user.email "t@t" && git config user.name "t"
+  git add -A && git commit -q -m "init"
+
+  # Generate 50 dummy nodes for the list-documents response — write to a
+  # file so the stub can `cat` rather than interpolating into a heredoc
+  # (heredoc-quoting breaks on inner JSON quotes).
+  jq -nc '{data:{documents:{nodes:[range(0;50) | {id:("dummy-\(.)"), title:"t", content:"c", slugId:"s", updatedAt:"t", createdAt:"t"}]}}}' > "$BATS_TEST_TMPDIR/bts-214-trunc-list.json"
+  STUB_FIXTURE="$BATS_TEST_TMPDIR/bts-214-trunc-stub.sh"
+  cat > "$STUB_FIXTURE" <<SHELL
+curl() {
+  local n
+  n=\$(cat "\$BATS_TEST_TMPDIR/bts-214-tcnt" 2>/dev/null || echo 0)
+  n=\$((n + 1)); echo "\$n" > "\$BATS_TEST_TMPDIR/bts-214-tcnt"
+  case "\$n" in
+    1) echo '{"data":{"issue":{"id":"issue-uuid","identifier":"BTS-x","title":"t","priority":2,"createdAt":"t0","updatedAt":"t1","description":"d","state":{"name":"x","type":"x","id":"s"},"labels":{"nodes":[]}}}}' ;;
+    2) cat "\$BATS_TEST_TMPDIR/bts-214-trunc-list.json" ;;
+    *) echo '{"data":{"documentDelete":{"success":true}}}' ;;
+  esac
+  return 0
+}
+export -f curl
+SHELL
+  echo 0 > "$BATS_TEST_TMPDIR/bts-214-tcnt"
+  run --separate-stderr bash -c "source '$STUB_FIXTURE' && bash '$DC' complete bts-trunc-feat '$fx/docs'"
+  [ "$status" -eq 0 ]
+  [[ "$stderr" =~ "possible truncation" ]] || [[ "$stderr" =~ truncation ]]
+}
+
+@test "BTS-214 INFO: get-issue failure falls through to WARN, cmd_complete still succeeds" {
+  # Reviewer concern: AC-6 covers list-documents failure but not get-issue
+  # failure. This test covers the get-issue early-return path explicitly.
+  set -e
+  _setup_stub
+  fx="$BATS_TEST_TMPDIR/bts-214-issuerr-fx"
+  mkdir -p "$fx/.ccanvil/state" "$fx/.claude" "$fx/docs/specs"
+  cat > "$fx/.claude/ccanvil.json" <<'JSON'
+{
+  "integrations": {
+    "providers": {"linear": {"mechanism": "http", "project_id": "p"}},
+    "routing": {"spec": "linear", "plan": "linear", "stasis": "linear"}
+  }
+}
+JSON
+  cat > "$fx/docs/specs/bts-issuerr-feat.md" <<'MD'
+# Feature: IssueErr
+> Feature: bts-issuerr-feat
+> Status: In Progress
+MD
+  cd "$fx"
+  git init -q . && git config user.email "t@t" && git config user.name "t"
+  git add -A && git commit -q -m "init"
+
+  # Stub: get-issue (call #1) returns errors → issue_uuid="" → WARN +
+  # return 0. No further calls should fire.
+  STUB_FIXTURE="$BATS_TEST_TMPDIR/bts-214-issuerr-stub.sh"
+  cat > "$STUB_FIXTURE" <<'SHELL'
+curl() {
+  local n
+  n=$(cat "$BATS_TEST_TMPDIR/bts-214-icnt" 2>/dev/null || echo 0)
+  n=$((n + 1)); echo "$n" > "$BATS_TEST_TMPDIR/bts-214-icnt"
+  echo '{"errors":[{"message":"Issue not found"}]}'
+  return 0
+}
+export -f curl
+SHELL
+  echo 0 > "$BATS_TEST_TMPDIR/bts-214-icnt"
+  run --separate-stderr bash -c "source '$STUB_FIXTURE' && bash '$DC' complete bts-issuerr-feat '$fx/docs'"
+  [ "$status" -eq 0 ]
+  # Only the get-issue call should have fired — list-documents skipped.
+  [ "$(cat "$BATS_TEST_TMPDIR/bts-214-icnt")" = "1" ]
+  [[ "$stderr" =~ "could not resolve issue UUID" ]]
+  # Spec status still flipped to Complete despite Linear error.
+  grep -q "Status: Complete" "$fx/docs/specs/bts-issuerr-feat.md"
+}
+
 @test "BTS-214 AC-7: pure-local /complete fires zero curl calls" {
   set -e
   fx="$BATS_TEST_TMPDIR/bts-214-local-fx"

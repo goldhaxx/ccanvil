@@ -3,7 +3,7 @@
 > Feature: bts-219-live-api-diagnostic-surfacing
 > Work: linear:BTS-219
 > Created: 1777318789
-> Status: In Progress
+> Status: Complete
 
 ## Summary
 

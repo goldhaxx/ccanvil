@@ -129,6 +129,20 @@ EOF
   [ "$status" -eq 0 ]
   iso=$(jq -r '.iso' < "$fx/.ccanvil/state/session-boundary")
   [[ "$iso" == *"+00:00" ]]
+  tz=$(jq -r '.tz' < "$fx/.ccanvil/state/session-boundary")
+  [ "$tz" = "UTC" ]
+}
+
+@test "AC-7: TZ env always wins over /etc/localtime + timedatectl" {
+  # Even on a host where /etc/localtime is a non-IANA copy (Docker), the TZ
+  # env override should produce the requested zone in the boundary tz field.
+  set -e
+  fx="$TMPDIR_BATS"
+  mkdir -p "$fx/.ccanvil"
+  TZ="America/New_York" CLAUDE_PROJECT_DIR="$fx" run bash "$HOOK"
+  [ "$status" -eq 0 ]
+  tz=$(jq -r '.tz' < "$fx/.ccanvil/state/session-boundary")
+  [ "$tz" = "America/New_York" ]
 }
 
 # =========================================================================

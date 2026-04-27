@@ -49,10 +49,23 @@ echo "$counter" > "$tmp_counter" 2>/dev/null && \
 epoch=$(date +%s)
 # BSD date emits offset as -0700; insert the colon to match RFC 3339.
 iso=$(date '+%Y-%m-%dT%H:%M:%S%z' | sed -E 's/([+-][0-9]{2})([0-9]{2})$/\1:\2/')
+tz=""
 if [[ -n "${TZ:-}" ]]; then
   tz="$TZ"
-elif link=$(readlink /etc/localtime 2>/dev/null); then
+elif link=$(readlink /etc/localtime 2>/dev/null) && [[ -n "$link" ]]; then
+  # macOS: /var/db/timezone/zoneinfo/America/Los_Angeles
+  # Linux: /usr/share/zoneinfo/America/Los_Angeles
   tz="${link##*/zoneinfo/}"
+elif command -v timedatectl >/dev/null 2>&1; then
+  # Linux + systemd — handles non-symlink /etc/localtime (Docker, WSL).
+  tz=$(timedatectl show -p Timezone --value 2>/dev/null || echo "")
+fi
+# Last-resort fallback: zone abbreviation from `date` (e.g., "PDT", "EST").
+# Not IANA but informative; preferred over a blanket "UTC" lie when the
+# above derivations fail. The iso string carries the numeric offset so the
+# timestamp is unambiguous even when tz is an abbreviation.
+if [[ -z "$tz" ]]; then
+  tz=$(date '+%Z' 2>/dev/null || echo "UTC")
 fi
 tz="${tz:-UTC}"
 

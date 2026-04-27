@@ -3888,6 +3888,46 @@ _has_any_linear_route() {
   echo "false"
 }
 
+# _normalize_feature_to_ticket — extract the canonical Linear ticket ID
+# (e.g., "BTS-217") from either form an internal caller might pass:
+#
+#   * a bare ticket id like "BTS-217" → returned as-is
+#   * a kebab feature_id like "bts-217-flip-linear-routing" → upper-slug
+#     extracted ("BTS-217")
+#
+# /spec convention is feature_id = <lower-slug>-<kebab-name> where
+# <lower-slug> = lowercase(<TEAM>-<N>). When that shape doesn't match
+# (e.g., legacy specs without slug prefix), the input is returned
+# verbatim so existing callers continue to work.
+#
+# This exists because cmd_artifact_write, cmd_artifact_read, and
+# _complete_archive_linear all do Linear lookups (get-issue,
+# resolve-document-id) on the ticket id, but cmd_activate and the /spec
+# skill prose pass feature_id (kebab) to those entrypoints. Without
+# normalization, get-issue cannot find the issue and resolve-document-id
+# derives a different UUID than write/read would have produced.
+_normalize_feature_to_ticket() {
+  local input="$1"
+  # Already a canonical ticket id (TEAM-N): return as-is.
+  if [[ "$input" =~ ^[A-Z]+-[0-9]+$ ]]; then
+    printf '%s\n' "$input"
+    return 0
+  fi
+  # Kebab feature_id: extract leading <lower-slug>-<digits>, uppercase.
+  # Use `tr` not `${var^^}` for bash 3.2 portability — bats invocations on
+  # macOS use /bin/bash which is 3.2 even when /opt/homebrew/bin/bash is
+  # available via PATH.
+  if [[ "$input" =~ ^([a-z]+)-([0-9]+) ]]; then
+    local team_upper num
+    team_upper=$(printf '%s' "${BASH_REMATCH[1]}" | tr '[:lower:]' '[:upper:]')
+    num="${BASH_REMATCH[2]}"
+    printf '%s\n' "${team_upper}-${num}"
+    return 0
+  fi
+  # Anything else (legacy, no-slug spec): pass through verbatim.
+  printf '%s\n' "$input"
+}
+
 # _active_feature_id — derive the active feature id (e.g., "BTS-204") from
 # context. Order of precedence:
 #   1. LIFECYCLE_FEATURE_ID_OVERRIDE env var (test-only path)
@@ -3937,9 +3977,12 @@ _artifact_present_linear() {
     stasis) resolve_kind="feature-stasis" ;;
     *)      echo "false"; return 0 ;;
   esac
-  local script_dir doc_id
+  local script_dir doc_id ticket_id
   script_dir="$(dirname "${BASH_SOURCE[0]}")"
-  doc_id=$(bash "$script_dir/linear-query.sh" resolve-document-id --kind "$resolve_kind" --ticket "$feature_id" 2>/dev/null)
+  # BTS-217: normalize feature_id (kebab) → BTS-N for deterministic
+  # doc_id derivation symmetric with cmd_artifact_write.
+  ticket_id=$(_normalize_feature_to_ticket "$feature_id")
+  doc_id=$(bash "$script_dir/linear-query.sh" resolve-document-id --kind "$resolve_kind" --ticket "$ticket_id" 2>/dev/null)
   if [[ -z "$doc_id" ]]; then
     echo "false"; return 0
   fi
@@ -3959,6 +4002,13 @@ _complete_archive_linear() {
   epoch=$(date +%s)
   sessions_dir="$project_dir/docs/sessions"
   mkdir -p "$sessions_dir"
+
+  # BTS-217: normalize feature_id (e.g., "bts-217-flip-linear-routing") to
+  # the canonical Linear ticket id ("BTS-217") for all api.linear.app
+  # lookups. Filename construction below still uses feature_id (the kebab
+  # form) so archive paths read like docs/sessions/<epoch>-bts-217-...md.
+  local ticket_id
+  ticket_id=$(_normalize_feature_to_ticket "$feature_id")
 
   # BTS-214: batch-read all lifecycle Documents parented to the issue in
   # ONE list-documents call (was 3 sequential get-document calls). Trashes
@@ -3984,7 +4034,13 @@ _complete_archive_linear() {
       stasis) resolve_kind="feature-stasis" ;;
     esac
     local expected_id
-    expected_id=$(bash "$script_dir/linear-query.sh" resolve-document-id --kind "$resolve_kind" --ticket "$feature_id")
+    # BTS-217: use ticket-id (BTS-N) for resolve-document-id, NOT feature_id.
+    # The write-side (cmd_artifact_write) derives the doc_id from --feature
+    # which the /spec convention sends as either form; we normalize to the
+    # canonical TEAM-N shape so write and read agree on the deterministic
+    # UUID. Without this, the archive computes a different UUID than what
+    # was written and finds nothing to archive.
+    expected_id=$(bash "$script_dir/linear-query.sh" resolve-document-id --kind "$resolve_kind" --ticket "$ticket_id")
     [[ -z "$expected_id" ]] && continue
     planned_kinds+=("$kind")
     planned_ids+=("$expected_id")
@@ -3999,12 +4055,14 @@ _complete_archive_linear() {
   # The script runs under `set -euo pipefail`, so the get-issue pipeline
   # must be wrapped in `if` form to allow non-zero exit (Linear error)
   # to fall through to the WARN path without killing cmd_complete.
+  # BTS-217: ticket_id (BTS-N) is the Linear-recognized form; passing
+  # feature_id (kebab) results in get-issue returning empty.
   local issue_uuid="" issue_response=""
-  if issue_response=$(bash "$script_dir/linear-query.sh" get-issue "$feature_id" 2>/dev/null); then
+  if issue_response=$(bash "$script_dir/linear-query.sh" get-issue "$ticket_id" 2>/dev/null); then
     issue_uuid=$(printf '%s' "$issue_response" | jq -r '.uuid // empty')
   fi
   if [[ -z "$issue_uuid" ]]; then
-    echo "WARN: archive step skipped — could not resolve issue UUID for $feature_id" >&2
+    echo "WARN: archive step skipped — could not resolve issue UUID for $feature_id (ticket=$ticket_id)" >&2
     return 0
   fi
 
@@ -4233,18 +4291,27 @@ cmd_artifact_read() {
   fi
 
   # Linear route. Need feature_id (or project context for session-stasis).
-  local script_dir resolve_kind ticket
+  # BTS-217: normalize --feature to canonical Linear ticket id (BTS-N) so
+  # the deterministic doc_id matches what cmd_artifact_write produces
+  # regardless of whether the caller passed kebab feature_id or canonical
+  # ticket id.
+  local script_dir resolve_kind ticket feature_ticket
   script_dir="$(dirname "${BASH_SOURCE[0]}")"
+  if [[ -n "$feature" ]]; then
+    feature_ticket=$(_normalize_feature_to_ticket "$feature")
+  else
+    feature_ticket=""
+  fi
   case "$kind" in
-    spec)   resolve_kind="spec";   ticket="$feature" ;;
-    plan)   resolve_kind="plan";   ticket="$feature" ;;
+    spec)   resolve_kind="spec";   ticket="$feature_ticket" ;;
+    plan)   resolve_kind="plan";   ticket="$feature_ticket" ;;
     stasis)
       if [[ "$stasis_kind" == "session" ]]; then
         resolve_kind="session-stasis"
         ticket=$(_session_stasis_ticket "$project_dir")
       else
         resolve_kind="feature-stasis"
-        ticket="$feature"
+        ticket="$feature_ticket"
       fi
       ;;
   esac
@@ -4309,9 +4376,20 @@ cmd_artifact_write() {
   # Linear route — upsert.
   local script_dir resolve_kind ticket parent_field parent_value title
   script_dir="$(dirname "${BASH_SOURCE[0]}")"
+  # BTS-217: normalize --feature input to canonical Linear ticket id.
+  # Callers (cmd_activate, /spec skill prose) pass kebab feature_id like
+  # "bts-217-flip-linear-routing"; manual operator calls pass "BTS-217".
+  # Both must produce the same ticket lookup + deterministic doc_id.
+  local feature_ticket
+  if [[ -n "$feature" ]]; then
+    feature_ticket=$(_normalize_feature_to_ticket "$feature")
+  else
+    feature_ticket=""
+  fi
+
   case "$kind" in
-    spec)   resolve_kind="spec";   ticket="$feature"; title="Spec: $feature";   parent_field="issueId" ;;
-    plan)   resolve_kind="plan";   ticket="$feature"; title="Plan: $feature";   parent_field="issueId" ;;
+    spec)   resolve_kind="spec";   ticket="$feature_ticket"; title="Spec: $feature_ticket";   parent_field="issueId" ;;
+    plan)   resolve_kind="plan";   ticket="$feature_ticket"; title="Plan: $feature_ticket";   parent_field="issueId" ;;
     stasis)
       if [[ "$stasis_kind" == "session" ]]; then
         resolve_kind="session-stasis"
@@ -4320,8 +4398,8 @@ cmd_artifact_write() {
         parent_field="projectId"
       else
         resolve_kind="feature-stasis"
-        ticket="$feature"
-        title="Stasis: $feature"
+        ticket="$feature_ticket"
+        title="Stasis: $feature_ticket"
         parent_field="issueId"
       fi
       ;;
@@ -4329,8 +4407,8 @@ cmd_artifact_write() {
   [[ -z "$ticket" ]] && { echo "ERROR: artifact-write $kind requires --feature" >&2; return 2; }
 
   if [[ "$parent_field" == "issueId" ]]; then
-    parent_value=$(bash "$script_dir/linear-query.sh" get-issue "$feature" 2>/dev/null | jq -r '.uuid // empty')
-    [[ -z "$parent_value" ]] && { echo "ERROR: artifact-write could not resolve issue UUID for $feature" >&2; return 3; }
+    parent_value=$(bash "$script_dir/linear-query.sh" get-issue "$feature_ticket" 2>/dev/null | jq -r '.uuid // empty')
+    [[ -z "$parent_value" ]] && { echo "ERROR: artifact-write could not resolve issue UUID for $feature_ticket (input: $feature)" >&2; return 3; }
   else
     parent_value=$(_session_stasis_ticket "$project_dir")
     [[ -z "$parent_value" ]] && { echo "ERROR: artifact-write project_id missing in provider config" >&2; return 3; }

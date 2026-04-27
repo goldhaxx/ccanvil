@@ -3,7 +3,7 @@
 > Feature: bts-212-uniform-flag-parsing
 > Work: linear:BTS-212
 > Created: 1777315706
-> Status: In Progress
+> Status: Complete
 
 ## Summary
 

@@ -1115,6 +1115,17 @@ cmd_complete() {
   # Update status to Complete
   update_metadata_status "$spec_file" "Complete"
 
+  # BTS-204 Step 14: when any artifact is Linear-routed, delegate to the
+  # archive helper (reads from Linear, writes git-tracked history into the
+  # session archive directory, then trashes the Linear Documents). On
+  # pure-local nodes this is a no-op — cmd_archive_stasis at /stasis time
+  # already archives stasis; spec/plan stay in their original location.
+  local project_dir
+  project_dir=$(cd "$docs_dir/.." 2>/dev/null && pwd) || project_dir="."
+  if [[ "$(_has_any_linear_route "$project_dir")" == "true" ]]; then
+    _complete_archive_linear "$feature_id" "$project_dir"
+  fi
+
   # Clear assumptions.md if it exists
   local assumptions_file="$docs_dir/assumptions.md"
   if [[ -f "$assumptions_file" ]]; then
@@ -3817,6 +3828,460 @@ cmd_evidence_scan_session() {
 # pr-open / pr-merged states exist in the graph but are not emitted yet
 # (deferred to Session-2 — would require a gh subprocess for detection).
 # ---------------------------------------------------------------------------
+# BTS-204 Step 8: storage-abstraction helpers for lifecycle-state.
+# When routing.<kind> is "linear", artifact presence is determined by
+# Linear (Document existence at the deterministic uuid5), not filesystem.
+
+# _lifecycle_route — read integrations.routing.<kind> from merged config.
+# Returns "linear" or "local". Defaults to "local" when key absent.
+_lifecycle_route() {
+  local kind="$1" project_dir="${2:-.}"
+  local hub_file="$project_dir/.claude/ccanvil.json"
+  local local_file="$project_dir/.claude/ccanvil.local.json"
+  local route="local"
+  for f in "$hub_file" "$local_file"; do
+    if [[ -f "$f" ]]; then
+      local r
+      r=$(jq -r --arg k "$kind" '.integrations.routing[$k] // empty' "$f" 2>/dev/null)
+      [[ -n "$r" ]] && route="$r"
+    fi
+  done
+  echo "$route"
+}
+
+# _has_any_linear_route — quick fast-path check. Returns "true" iff at least
+# one of spec/plan/stasis routes to linear in the merged config. Used to
+# skip ALL Linear querying on pure-local nodes (preserves existing behavior
+# byte-for-byte; no network calls, no auth probing, no env-var sniffing).
+_has_any_linear_route() {
+  local project_dir="${1:-.}"
+  local kind
+  for kind in spec plan stasis; do
+    if [[ "$(_lifecycle_route "$kind" "$project_dir")" == "linear" ]]; then
+      echo "true"
+      return 0
+    fi
+  done
+  echo "false"
+}
+
+# _active_feature_id — derive the active feature id (e.g., "BTS-204") from
+# context. Order of precedence:
+#   1. LIFECYCLE_FEATURE_ID_OVERRIDE env var (test-only path)
+#   2. docs/spec.md `> Work:` metadata (when present, e.g., legacy mid-migration)
+#   3. git branch name (claude/<type>/bts-204-foo → BTS-204)
+# Returns empty string when none resolves.
+_active_feature_id() {
+  local project_dir="${1:-.}"
+  if [[ -n "${LIFECYCLE_FEATURE_ID_OVERRIDE:-}" ]]; then
+    echo "$LIFECYCLE_FEATURE_ID_OVERRIDE"
+    return 0
+  fi
+  if [[ -f "$project_dir/docs/spec.md" ]]; then
+    # Strip "> Work: " prefix, then strip an explicit provider prefix like
+    # "linear:" or "local:". Ticket IDs themselves are uppercase (e.g.,
+    # BTS-204), so they cannot match `^[a-z]+:` and remain untouched.
+    local work
+    work=$(grep -E '^> Work:' "$project_dir/docs/spec.md" 2>/dev/null | head -1 | sed -E 's/^> Work:[[:space:]]*//; s/^[a-z]+://')
+    if [[ -n "$work" ]]; then
+      echo "$work"
+      return 0
+    fi
+  fi
+  local branch
+  branch=$(git -C "$project_dir" branch --show-current 2>/dev/null) || true
+  if [[ "$branch" == claude/*/* ]]; then
+    local fid="${branch##*/}"
+    if [[ "$fid" =~ ^([a-zA-Z]+-[0-9]+) ]]; then
+      printf '%s\n' "${BASH_REMATCH[1]}" | tr '[:lower:]' '[:upper:]'
+      return 0
+    fi
+  fi
+  echo ""
+}
+
+# _artifact_present_linear — query Linear via document-updated-at to determine
+# if the lifecycle Document for <kind, feature_id> exists. Returns "true" or
+# "false". Network errors, missing API key, or stub-down all map to "false"
+# so the lifecycle stays usable in degraded conditions (Linear-unreachable
+# is reported by other paths — this helper just answers presence).
+_artifact_present_linear() {
+  local kind="$1" feature_id="$2"
+  local resolve_kind
+  case "$kind" in
+    spec)   resolve_kind="spec" ;;
+    plan)   resolve_kind="plan" ;;
+    stasis) resolve_kind="feature-stasis" ;;
+    *)      echo "false"; return 0 ;;
+  esac
+  local script_dir doc_id
+  script_dir="$(dirname "${BASH_SOURCE[0]}")"
+  doc_id=$(bash "$script_dir/linear-query.sh" resolve-document-id --kind "$resolve_kind" --ticket "$feature_id" 2>/dev/null)
+  if [[ -z "$doc_id" ]]; then
+    echo "false"; return 0
+  fi
+  if bash "$script_dir/linear-query.sh" document-updated-at "$doc_id" >/dev/null 2>&1; then
+    echo "true"
+  else
+    echo "false"
+  fi
+}
+
+# BTS-204 Step 14: archive Linear-stored lifecycle artifacts to docs/sessions/
+# at /complete time, then trash the Linear Documents. Forward-only history.
+_complete_archive_linear() {
+  local feature_id="$1" project_dir="${2:-.}"
+  local script_dir epoch sessions_dir
+  script_dir="$(dirname "${BASH_SOURCE[0]}")"
+  epoch=$(date +%s)
+  sessions_dir="$project_dir/docs/sessions"
+  mkdir -p "$sessions_dir"
+
+  local kind
+  for kind in spec plan stasis; do
+    local route
+    route=$(_lifecycle_route "$kind" "$project_dir")
+    [[ "$route" != "linear" ]] && continue
+
+    local resolve_kind ticket
+    case "$kind" in
+      spec)   resolve_kind="spec";          ticket="$feature_id" ;;
+      plan)   resolve_kind="plan";          ticket="$feature_id" ;;
+      stasis) resolve_kind="feature-stasis"; ticket="$feature_id" ;;
+    esac
+    local doc_id content
+    doc_id=$(bash "$script_dir/linear-query.sh" resolve-document-id --kind "$resolve_kind" --ticket "$ticket")
+    content=$(bash "$script_dir/linear-query.sh" get-document "$doc_id" 2>/dev/null | jq -r '.content // empty')
+    if [[ -n "$content" ]]; then
+      local dest="$sessions_dir/${epoch}-${feature_id}-${kind}.md"
+      printf '%s\n' "$content" > "$dest"
+      bash "$script_dir/linear-query.sh" trash-document "$doc_id" >/dev/null 2>&1 || true
+      echo "Archived ${kind} → $dest" >&2
+    fi
+  done
+}
+
+# BTS-204 Phase 7: document-cache for concurrent-edit safety.
+# Stores {<doc_id>: {updatedAt}} at .ccanvil/state/document-cache.json.
+# Atomic writes via mktemp+mv. Cache file is gitignored (regenerable state).
+_doc_cache_path() {
+  echo "${1:-.}/.ccanvil/state/document-cache.json"
+}
+
+_doc_cache_get_updated_at() {
+  local doc_id="$1" project_dir="${2:-.}"
+  local cache_path
+  cache_path=$(_doc_cache_path "$project_dir")
+  [[ -f "$cache_path" ]] || { echo ""; return 0; }
+  jq -r --arg id "$doc_id" '.[$id].updatedAt // empty' "$cache_path" 2>/dev/null
+}
+
+_doc_cache_set_updated_at() {
+  local doc_id="$1" updated_at="$2" project_dir="${3:-.}"
+  local cache_path tmp
+  cache_path=$(_doc_cache_path "$project_dir")
+  mkdir -p "$(dirname "$cache_path")"
+  tmp=$(mktemp "${cache_path}.XXXXXX")
+  if [[ -f "$cache_path" ]]; then
+    jq --arg id "$doc_id" --arg ts "$updated_at" \
+      '.[$id] = {updatedAt: $ts}' "$cache_path" > "$tmp"
+  else
+    jq -n --arg id "$doc_id" --arg ts "$updated_at" \
+      '{($id): {updatedAt: $ts}}' > "$tmp"
+  fi
+  mv "$tmp" "$cache_path"
+}
+
+# Returns 0 if write is safe (cache absent OR remote updatedAt matches cache).
+# Returns 1 if remote updatedAt has advanced past cache (concurrent edit detected).
+_doc_concurrent_edit_check() {
+  local doc_id="$1" project_dir="${2:-.}"
+  local script_dir cached remote
+  script_dir="$(dirname "${BASH_SOURCE[0]}")"
+  cached=$(_doc_cache_get_updated_at "$doc_id" "$project_dir")
+  [[ -z "$cached" ]] && return 0   # No cache yet — first write; safe.
+  remote=$(bash "$script_dir/linear-query.sh" document-updated-at "$doc_id" 2>/dev/null | jq -r '.updatedAt // empty')
+  [[ -z "$remote" ]] && return 0   # Document missing remote (will create); safe.
+  if [[ "$remote" != "$cached" ]]; then
+    return 1
+  fi
+  return 0
+}
+
+# BTS-204 Phase 6: ssot-migrate — operator-driven, idempotent migration of
+# lifecycle artifacts between local files and Linear Documents. Bidirectional.
+# Never auto-triggered. Per AC-12.
+cmd_ssot_migrate() {
+  local direction="" feature=""
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --to)       direction="$2"; shift 2 ;;
+      --feature)  feature="$2";   shift 2 ;;
+      *) shift ;;
+    esac
+  done
+  case "$direction" in
+    linear|local) ;;
+    *) echo "ERROR: ssot-migrate requires --to {linear|local}" >&2; return 2 ;;
+  esac
+  if [[ -z "$feature" ]]; then
+    echo "ERROR: ssot-migrate requires --feature <BTS-N> (or feature-id)" >&2
+    return 2
+  fi
+
+  local project_dir="."
+  local migrated=0 skipped=0 errors=0
+  local kind
+
+  if [[ "$direction" == "linear" ]]; then
+    # Local → Linear: for each artifact whose route is linear, read the
+    # local file, write it via artifact-write (which upserts to Linear),
+    # then remove the local file on success.
+    for kind in spec plan stasis; do
+      [[ "$(_lifecycle_route "$kind" "$project_dir")" != "linear" ]] && continue
+      local local_path
+      case "$kind" in
+        spec)   local_path="$project_dir/docs/spec.md" ;;
+        plan)   local_path="$project_dir/docs/plan.md" ;;
+        stasis) local_path="$project_dir/docs/stasis.md" ;;
+      esac
+      if [[ ! -f "$local_path" ]]; then
+        skipped=$((skipped + 1))
+        continue
+      fi
+      if cmd_artifact_write --kind "$kind" --feature "$feature" < "$local_path" >/dev/null 2>&1; then
+        rm -f "$local_path"
+        migrated=$((migrated + 1))
+      else
+        errors=$((errors + 1))
+      fi
+    done
+  else
+    # Linear → local: read from Linear via artifact-read, materialize files.
+    # Linear Documents are NOT trashed (operator may want to flip back).
+    for kind in spec plan stasis; do
+      [[ "$(_lifecycle_route "$kind" "$project_dir")" != "linear" ]] && continue
+      local content target
+      case "$kind" in
+        spec)   target="$project_dir/docs/spec.md" ;;
+        plan)   target="$project_dir/docs/plan.md" ;;
+        stasis) target="$project_dir/docs/stasis.md" ;;
+      esac
+      content=$(cmd_artifact_read --kind "$kind" --feature "$feature" 2>/dev/null) || { skipped=$((skipped + 1)); continue; }
+      if [[ -z "$content" ]]; then
+        skipped=$((skipped + 1))
+        continue
+      fi
+      printf '%s' "$content" > "$target"
+      migrated=$((migrated + 1))
+    done
+  fi
+
+  jq -n --arg dir "$direction" --argjson m "$migrated" --argjson s "$skipped" --argjson e "$errors" \
+    '{direction:$dir, migrated:$m, skipped:$s, errors:$e}'
+}
+
+# BTS-204 Phase 4: provider-aware artifact read/write compound primitives.
+# Skills call these instead of hardcoded file IO. Routing decision +
+# upsert orchestration live in one place; skill prose stays terse.
+
+# cmd_artifact_read — read spec/plan/stasis content from the routed source.
+# Args:
+#   --kind <spec|plan|stasis>
+#   --feature <BTS-N>           required when http-routed (or --stasis-kind feature)
+#   --stasis-kind <feature|session>  defaults to "feature"
+# Output: artifact content on stdout (markdown). Exit 0 on found, 2 on missing.
+cmd_artifact_read() {
+  local kind="" feature="" stasis_kind="feature"
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --kind)         kind="$2";        shift 2 ;;
+      --feature)      feature="$2";     shift 2 ;;
+      --stasis-kind)  stasis_kind="$2"; shift 2 ;;
+      *) shift ;;
+    esac
+  done
+  [[ -z "$kind" ]] && { echo "ERROR: artifact-read --kind is required" >&2; return 2; }
+
+  local route project_dir="."
+  route=$(_lifecycle_route "$kind" "$project_dir")
+
+  if [[ "$route" != "linear" ]]; then
+    local target
+    case "$kind" in
+      spec)   target="docs/spec.md" ;;
+      plan)   target="docs/plan.md" ;;
+      stasis) target="docs/stasis.md" ;;
+      *) echo "ERROR: artifact-read unknown kind '$kind'" >&2; return 2 ;;
+    esac
+    [[ ! -f "$target" ]] && return 2
+    cat "$target"
+    return 0
+  fi
+
+  # Linear route. Need feature_id (or project context for session-stasis).
+  local script_dir resolve_kind ticket
+  script_dir="$(dirname "${BASH_SOURCE[0]}")"
+  case "$kind" in
+    spec)   resolve_kind="spec";   ticket="$feature" ;;
+    plan)   resolve_kind="plan";   ticket="$feature" ;;
+    stasis)
+      if [[ "$stasis_kind" == "session" ]]; then
+        resolve_kind="session-stasis"
+        ticket=$(_session_stasis_ticket "$project_dir")
+      else
+        resolve_kind="feature-stasis"
+        ticket="$feature"
+      fi
+      ;;
+  esac
+  [[ -z "$ticket" ]] && { echo "ERROR: artifact-read $kind requires a ticket (use --feature)" >&2; return 2; }
+
+  local doc_id
+  doc_id=$(bash "$script_dir/linear-query.sh" resolve-document-id --kind "$resolve_kind" --ticket "$ticket")
+  # W-2 fix: surface GraphQL errors instead of swallowing them. Skills calling
+  # artifact-read need to distinguish "not found" (route legitimately empty)
+  # from "auth/network failure" (substrate problem).
+  local err
+  err=$(mktemp); local content rc
+  content=$(bash "$script_dir/linear-query.sh" get-document "$doc_id" 2>"$err"); rc=$?
+  if [[ $rc -ne 0 ]]; then
+    cat "$err" >&2
+    rm -f "$err"
+    # Distinguish not-found from real errors. linear-query.sh emits "Entity not
+    # found: Document" for missing; everything else is a substrate problem.
+    if grep -q "Entity not found" "$err" 2>/dev/null || grep -q "Entity not found" <<<"$err"; then
+      return 2
+    fi
+    return 3
+  fi
+  rm -f "$err"
+  printf '%s\n' "$content" | jq -r '.content // empty'
+}
+
+# cmd_artifact_write — write artifact content to the routed destination.
+# Reads content from stdin. For Linear, performs upsert via document-updated-at
+# pre-check, then save-document with --create-with-id on first write.
+cmd_artifact_write() {
+  local kind="" feature="" stasis_kind="feature"
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --kind)         kind="$2";        shift 2 ;;
+      --feature)      feature="$2";     shift 2 ;;
+      --stasis-kind)  stasis_kind="$2"; shift 2 ;;
+      *) shift ;;
+    esac
+  done
+  [[ -z "$kind" ]] && { echo "ERROR: artifact-write --kind is required" >&2; return 2; }
+
+  local content project_dir="."
+  content=$(cat)
+
+  local route
+  route=$(_lifecycle_route "$kind" "$project_dir")
+
+  if [[ "$route" != "linear" ]]; then
+    local target
+    case "$kind" in
+      spec)   target="docs/spec.md" ;;
+      plan)   target="docs/plan.md" ;;
+      stasis) target="docs/stasis.md" ;;
+      *) echo "ERROR: artifact-write unknown kind '$kind'" >&2; return 2 ;;
+    esac
+    printf '%s' "$content" > "$target"
+    return 0
+  fi
+
+  # Linear route — upsert.
+  local script_dir resolve_kind ticket parent_field parent_value title
+  script_dir="$(dirname "${BASH_SOURCE[0]}")"
+  case "$kind" in
+    spec)   resolve_kind="spec";   ticket="$feature"; title="Spec: $feature";   parent_field="issueId" ;;
+    plan)   resolve_kind="plan";   ticket="$feature"; title="Plan: $feature";   parent_field="issueId" ;;
+    stasis)
+      if [[ "$stasis_kind" == "session" ]]; then
+        resolve_kind="session-stasis"
+        ticket=$(_session_stasis_ticket "$project_dir")
+        title="Session State"
+        parent_field="projectId"
+      else
+        resolve_kind="feature-stasis"
+        ticket="$feature"
+        title="Stasis: $feature"
+        parent_field="issueId"
+      fi
+      ;;
+  esac
+  [[ -z "$ticket" ]] && { echo "ERROR: artifact-write $kind requires --feature" >&2; return 2; }
+
+  if [[ "$parent_field" == "issueId" ]]; then
+    parent_value=$(bash "$script_dir/linear-query.sh" get-issue "$feature" 2>/dev/null | jq -r '.uuid // empty')
+    [[ -z "$parent_value" ]] && { echo "ERROR: artifact-write could not resolve issue UUID for $feature" >&2; return 3; }
+  else
+    parent_value=$(_session_stasis_ticket "$project_dir")
+    [[ -z "$parent_value" ]] && { echo "ERROR: artifact-write project_id missing in provider config" >&2; return 3; }
+  fi
+
+  local doc_id
+  doc_id=$(bash "$script_dir/linear-query.sh" resolve-document-id --kind "$resolve_kind" --ticket "$ticket")
+
+  # BTS-204 Step 19: pre-write concurrent-edit check (AC-8).
+  # If the cache has a known updatedAt and Linear's current updatedAt has
+  # advanced past it, refuse the write — surface document-history hint.
+  # When ALLOW_CONCURRENT_EDIT_OVERRIDE=1, skip the check (operator escape).
+  if [[ "${ALLOW_CONCURRENT_EDIT_OVERRIDE:-0}" != "1" ]]; then
+    if ! _doc_concurrent_edit_check "$doc_id" "$project_dir"; then
+      cat >&2 <<EOF
+ERROR: concurrent edit detected on Linear Document $doc_id.
+The remote updatedAt has advanced past the cached value.
+Run: bash .ccanvil/scripts/linear-query.sh document-history $doc_id
+to see what changed. Set ALLOW_CONCURRENT_EDIT_OVERRIDE=1 to force-write.
+
+NOTE: this check is not atomic with the write — sub-second races still
+exist. Override only when you've reviewed the divergence and the remote
+edit is acceptable to discard. Multi-agent atomicity is out of scope.
+EOF
+      return 4
+    fi
+  fi
+
+  local result
+  if bash "$script_dir/linear-query.sh" document-updated-at "$doc_id" >/dev/null 2>&1; then
+    # Update path
+    result=$(jq -n --arg id "$doc_id" --arg content "$content" '{id:$id, content:$content}' \
+      | bash "$script_dir/linear-query.sh" save-document --input-json -) || return $?
+  else
+    # Create path with caller-supplied UUID
+    result=$(jq -n --arg id "$doc_id" --arg title "$title" --arg content "$content" \
+      --arg parent_field "$parent_field" --arg parent "$parent_value" \
+      '{id:$id, title:$title, content:$content} + ({} + (if $parent_field == "issueId" then {issueId:$parent} else {projectId:$parent} end))' \
+      | bash "$script_dir/linear-query.sh" save-document --create-with-id --input-json -) || return $?
+  fi
+  echo "$result"
+  # Cache the new updatedAt for next concurrent-edit check.
+  local new_ts
+  new_ts=$(printf '%s' "$result" | jq -r '.updatedAt // empty')
+  if [[ -n "$new_ts" ]]; then
+    _doc_cache_set_updated_at "$doc_id" "$new_ts" "$project_dir"
+  fi
+}
+
+# _session_stasis_ticket — read project_id from merged config; used as the
+# deterministic "ticket" key for session-stasis Document UUID derivation.
+_session_stasis_ticket() {
+  local project_dir="${1:-.}"
+  local hub_file="$project_dir/.claude/ccanvil.json"
+  local local_file="$project_dir/.claude/ccanvil.local.json"
+  for f in "$hub_file" "$local_file"; do
+    if [[ -f "$f" ]]; then
+      local pid
+      pid=$(jq -r '.integrations.providers.linear.project_id // empty' "$f" 2>/dev/null)
+      [[ -n "$pid" ]] && { echo "$pid"; return 0; }
+    fi
+  done
+  echo ""
+}
+
 cmd_lifecycle_state() {
   local project_dir="."
   while [[ $# -gt 0 ]]; do
@@ -3846,6 +4311,28 @@ cmd_lifecycle_state() {
   plan_exists=$(echo "$validate_json" | jq -r '.status.plan.exists')
   stasis_exists=$(echo "$validate_json" | jq -r '.status.stasis.exists')
   stasis_kind=$(echo "$validate_json" | jq -r '.status.stasis.kind // empty')
+
+  # BTS-204 Step 8: when any lifecycle artifact is routed to Linear, override
+  # the filesystem-based exists flags using Linear-side presence checks. The
+  # fast-path skips this entirely on pure-local nodes (zero network cost).
+  if [[ "$(_has_any_linear_route "$project_dir")" == "true" ]]; then
+    local feat
+    feat=$(_active_feature_id "$project_dir")
+    if [[ -n "$feat" ]]; then
+      local kind
+      for kind in spec plan stasis; do
+        if [[ "$(_lifecycle_route "$kind" "$project_dir")" == "linear" ]]; then
+          local present
+          present=$(_artifact_present_linear "$kind" "$feat")
+          case "$kind" in
+            spec)   spec_exists="$present"   ;;
+            plan)   plan_exists="$present"   ;;
+            stasis) stasis_exists="$present" ;;
+          esac
+        fi
+      done
+    fi
+  fi
 
   # post-compact freshness: marker_ts >= stasis.last_updated means compact
   # has run at or after the current stasis was written. Mirrors the marker
@@ -4015,6 +4502,9 @@ case "$cmd" in
   remote-presence)   cmd_remote_presence "$@" ;;
   evidence-scan-session) cmd_evidence_scan_session "$@" ;;
   lifecycle-state)   cmd_lifecycle_state "$@" ;;
+  artifact-read)     cmd_artifact_read "$@" ;;
+  artifact-write)    cmd_artifact_write "$@" ;;
+  ssot-migrate)      cmd_ssot_migrate "$@" ;;
   session-info)      cmd_session_info "$@" ;;
   *)
     echo "Usage: docs-check.sh {status|validate|recommend|audit-session|config-get|list-specs|activate|complete|pr-cleanup|land|idea-add|idea-list|idea-count|idea-update|idea-sync|idea-pending-replay|refresh-plan-hash|idea-migrate|idea-setup|idea-upgrade|title-from-body|legacy-refs-scan|stamp-spec|idea-pending-append|idea-pending-validate|remote-presence} [args...]" >&2

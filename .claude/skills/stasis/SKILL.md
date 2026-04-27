@@ -51,9 +51,29 @@ The validator excludes `Kind: session` stasis from feature alignment, so the old
 
 Inherit `> Work:` when feature-kind by reading `bash .ccanvil/scripts/docs-check.sh status` and copying `.spec.work` verbatim.
 
-## Synthesis — write docs/stasis.md
+## Synthesis — write the stasis snapshot
 
-Copy `.ccanvil/templates/stasis.md` to `docs/stasis.md` and fill each section:
+**BTS-204: provider-aware write.** Compose the full stasis content from
+`.ccanvil/templates/stasis.md` as the structural template, then write via
+the routing-aware primitive:
+
+```bash
+# Feature-kind:
+<rendered stasis content> | bash .ccanvil/scripts/docs-check.sh \
+  artifact-write --kind stasis --stasis-kind feature --feature <BTS-N>
+
+# Session-kind (no --feature; uses provider config's project_id):
+<rendered stasis content> | bash .ccanvil/scripts/docs-check.sh \
+  artifact-write --kind stasis --stasis-kind session
+```
+
+On local-routed nodes this writes `docs/stasis.md` (existing behavior).
+On Linear-routed nodes (`integrations.routing.stasis=linear`) this upserts
+the stasis Linear Document — issue-parented for feature-kind, project-parented
+for session-kind. Cross-session history continues to live in `docs/sessions/`
+archives via the BTS-22 archive substrate (unchanged).
+
+Fill each section:
 
 ### ## Accomplished
 What was completed this session. Use git log + file changes as the factual spine, your own session memory for the narrative.
@@ -171,7 +191,12 @@ If none: "No candidates this session."
 
 ## Commit the snapshot
 
-12. Stage and commit `docs/stasis.md`:
+12. **Commit the live snapshot.** On local-routed nodes, stage and commit
+    `docs/stasis.md`. On Linear-routed nodes (`integrations.routing.stasis=linear`),
+    the canonical write went to Linear at the artifact-write step above —
+    skip the `git add docs/stasis.md` (file does not exist) and commit only
+    the `docs/sessions/` archive at step 12a. Detect via:
+    `route=$(jq -r '.integrations.routing.stasis // "local"' .claude/ccanvil.json .claude/ccanvil.local.json 2>/dev/null | grep -v '^$' | tail -1)`
     ```bash
     ALLOW_MAIN=1 git add docs/stasis.md
     ALLOW_MAIN=1 git -c commit.gpgsign=false commit -m "docs: stasis <feature-id>"

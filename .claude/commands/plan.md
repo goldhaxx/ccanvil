@@ -4,11 +4,22 @@ Create an implementation plan for the feature described in the user's message (o
 
 0. **BTS-20: lifecycle-state pre-flight.** Run `bash .ccanvil/scripts/docs-check.sh lifecycle-state --project-dir .` and read `.state`. /plan is legal only when state is `spec-activated` (drafting first plan) or `plan-written` (re-planning after spec edit). On any other state — `no-active-spec`, `session-wrap`, `blocked`, `uninitialized` — STOP with the envelope's `.blockers[]` (when populated) or a clear message naming the current state and the legal entry conditions. This fails fast instead of /plan reading `docs/spec.md` silently and erroring late on missing content.
 1. Read `.ccanvil/templates/plan.md` for the plan format guide.
-2. If `docs/spec.md` has content (not just the placeholder comment), read it for acceptance criteria.
-3. Extract the `feature_id` from spec.md's metadata (the `> Feature:` line).
-4. Compute the spec's content hash: run `.ccanvil/scripts/docs-check.sh status` and read `.spec.content_hash` from the JSON output.
+2. **Read the active spec via the provider-aware primitive (BTS-204).** Run
+   `bash .ccanvil/scripts/docs-check.sh artifact-read --kind spec --feature <FEATURE_ID>`.
+   On local-routed nodes this reads `docs/spec.md`; on Linear-routed nodes
+   (`integrations.routing.spec=linear`) this reads the Linear Document.
+   Use the active feature id (from branch name `claude/<type>/<feature-id>` or
+   from the spec's `> Work:` metadata) as `<FEATURE_ID>` — pass `BTS-N` for
+   Linear-routed projects.
+3. Extract the `feature_id` from the spec's metadata (the `> Feature:` line) read in Step 2.
+4. Compute the spec's content hash: run `.ccanvil/scripts/docs-check.sh status` and read `.spec.content_hash` from the JSON output. (Local-routed only — Linear-routed plans store their own hash via the Linear Document update flow; see BTS-204 plan for follow-up substrate.)
 5. Analyze the codebase to identify affected files and existing patterns.
-6. Write a plan to `docs/plan.md` following the template format. In the metadata blockquote, include:
+6. **Write the plan via the provider-aware primitive (BTS-204).** Compose
+   the full plan content (with metadata header), then pipe it to:
+   `bash .ccanvil/scripts/docs-check.sh artifact-write --kind plan --feature <FEATURE_ID>`.
+   On local-routed nodes this writes `docs/plan.md`; on Linear-routed nodes
+   this upserts the plan Linear Document parented to the feature's issue.
+   Metadata header must include:
    - `> Feature: <feature_id>` (copied from spec)
    - `> Created: <epoch>` (using `date +%s`)
    - `> Spec hash: <hash>` (from step 4)

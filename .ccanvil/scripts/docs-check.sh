@@ -3958,6 +3958,79 @@ _complete_archive_linear() {
   done
 }
 
+# BTS-204 Phase 6: ssot-migrate — operator-driven, idempotent migration of
+# lifecycle artifacts between local files and Linear Documents. Bidirectional.
+# Never auto-triggered. Per AC-12.
+cmd_ssot_migrate() {
+  local direction="" feature=""
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --to)       direction="$2"; shift 2 ;;
+      --feature)  feature="$2";   shift 2 ;;
+      *) shift ;;
+    esac
+  done
+  case "$direction" in
+    linear|local) ;;
+    *) echo "ERROR: ssot-migrate requires --to {linear|local}" >&2; return 2 ;;
+  esac
+  if [[ -z "$feature" ]]; then
+    echo "ERROR: ssot-migrate requires --feature <BTS-N> (or feature-id)" >&2
+    return 2
+  fi
+
+  local project_dir="."
+  local migrated=0 skipped=0 errors=0
+  local kind
+
+  if [[ "$direction" == "linear" ]]; then
+    # Local → Linear: for each artifact whose route is linear, read the
+    # local file, write it via artifact-write (which upserts to Linear),
+    # then remove the local file on success.
+    for kind in spec plan stasis; do
+      [[ "$(_lifecycle_route "$kind" "$project_dir")" != "linear" ]] && continue
+      local local_path
+      case "$kind" in
+        spec)   local_path="$project_dir/docs/spec.md" ;;
+        plan)   local_path="$project_dir/docs/plan.md" ;;
+        stasis) local_path="$project_dir/docs/stasis.md" ;;
+      esac
+      if [[ ! -f "$local_path" ]]; then
+        skipped=$((skipped + 1))
+        continue
+      fi
+      if cat "$local_path" | cmd_artifact_write --kind "$kind" --feature "$feature" >/dev/null 2>&1; then
+        rm -f "$local_path"
+        migrated=$((migrated + 1))
+      else
+        errors=$((errors + 1))
+      fi
+    done
+  else
+    # Linear → local: read from Linear via artifact-read, materialize files.
+    # Linear Documents are NOT trashed (operator may want to flip back).
+    for kind in spec plan stasis; do
+      [[ "$(_lifecycle_route "$kind" "$project_dir")" != "linear" ]] && continue
+      local content target
+      case "$kind" in
+        spec)   target="$project_dir/docs/spec.md" ;;
+        plan)   target="$project_dir/docs/plan.md" ;;
+        stasis) target="$project_dir/docs/stasis.md" ;;
+      esac
+      content=$(cmd_artifact_read --kind "$kind" --feature "$feature" 2>/dev/null) || { skipped=$((skipped + 1)); continue; }
+      if [[ -z "$content" ]]; then
+        skipped=$((skipped + 1))
+        continue
+      fi
+      printf '%s' "$content" > "$target"
+      migrated=$((migrated + 1))
+    done
+  fi
+
+  jq -n --arg dir "$direction" --argjson m "$migrated" --argjson s "$skipped" --argjson e "$errors" \
+    '{direction:$dir, migrated:$m, skipped:$s, errors:$e}'
+}
+
 # BTS-204 Phase 4: provider-aware artifact read/write compound primitives.
 # Skills call these instead of hardcoded file IO. Routing decision +
 # upsert orchestration live in one place; skill prose stays terse.
@@ -4338,6 +4411,7 @@ case "$cmd" in
   lifecycle-state)   cmd_lifecycle_state "$@" ;;
   artifact-read)     cmd_artifact_read "$@" ;;
   artifact-write)    cmd_artifact_write "$@" ;;
+  ssot-migrate)      cmd_ssot_migrate "$@" ;;
   session-info)      cmd_session_info "$@" ;;
   *)
     echo "Usage: docs-check.sh {status|validate|recommend|audit-session|config-get|list-specs|activate|complete|pr-cleanup|land|idea-add|idea-list|idea-count|idea-update|idea-sync|idea-pending-replay|refresh-plan-hash|idea-migrate|idea-setup|idea-upgrade|title-from-body|legacy-refs-scan|stamp-spec|idea-pending-append|idea-pending-validate|remote-presence} [args...]" >&2

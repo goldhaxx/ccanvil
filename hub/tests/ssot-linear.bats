@@ -660,6 +660,36 @@ SHELL
   grep -qF 'artifact-read --kind spec' "$BATS_TEST_DIRNAME/../../.claude/commands/pr.md"
 }
 
+@test "BTS-204 Phase 6: ssot-migrate --to linear errors without --feature" {
+  fx=$(_make_linear_lifecycle_fx)
+  run --separate-stderr bash "$DC" ssot-migrate --to linear
+  [ "$status" -ne 0 ]
+  [[ "$stderr" =~ "feature" ]]
+}
+
+@test "BTS-204 Phase 6: ssot-migrate validates direction" {
+  fx=$(_make_linear_lifecycle_fx)
+  run --separate-stderr bash "$DC" ssot-migrate --to bogus --feature BTS-1
+  [ "$status" -ne 0 ]
+  [[ "$stderr" =~ "linear" ]] || [[ "$stderr" =~ "local" ]]
+}
+
+@test "BTS-204 Phase 6: ssot-migrate --to local with no Linear docs reports skipped" {
+  set -e
+  _setup_stub
+  fx=$(_make_linear_lifecycle_fx)
+  cd "$fx"
+  # Stub: every read returns "not found" → all skipped
+  cat > "$LINEAR_STUB_RESPONSE" <<'JSON'
+{"errors":[{"message":"Entity not found: Document"}]}
+JSON
+  run bash -c "source '$STUB_FIXTURE' && bash '$DC' ssot-migrate --to local --feature BTS-204"
+  [ "$status" -eq 0 ]
+  echo "$output" | jq -e '.direction == "local"'
+  echo "$output" | jq -e '.skipped >= 1'
+  echo "$output" | jq -e '.migrated == 0'
+}
+
 @test "BTS-204 Phase 5 Step 14: cmd_complete archives + trashes Linear documents" {
   set -e
   _setup_stub

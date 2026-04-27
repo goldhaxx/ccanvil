@@ -170,15 +170,19 @@ OPERATIONS="$REPO_ROOT/.ccanvil/scripts/operations.sh"
   grep -q 'stasis\.write' "$OPERATIONS"
 }
 
-@test "operations.sh resolve stasis.read returns JSON invocation" {
-  run bash "$OPERATIONS" resolve stasis.read
+@test "operations.sh resolve stasis.read returns JSON invocation (local-routed)" {
+  # BTS-217: scope to a config-less temp dir so the resolver defaults to
+  # local routing. Without --project-dir, the test inherits the hub's own
+  # config which may have routing.stasis=linear (post-BTS-217 flip),
+  # silently re-routing to the http path and demanding kind+ticket args.
+  run bash "$OPERATIONS" resolve stasis.read --project-dir "$BATS_TEST_TMPDIR"
   [ "$status" -eq 0 ]
   cmd=$(echo "$output" | jq -r '.invocation.command')
   [[ "$cmd" == *"docs/stasis.md"* ]]
 }
 
-@test "operations.sh resolve stasis.write returns JSON invocation" {
-  run bash "$OPERATIONS" resolve stasis.write
+@test "operations.sh resolve stasis.write returns JSON invocation (local-routed)" {
+  run bash "$OPERATIONS" resolve stasis.write --project-dir "$BATS_TEST_TMPDIR"
   [ "$status" -eq 0 ]
   cmd=$(echo "$output" | jq -r '.invocation.command')
   [[ "$cmd" == *"templates/stasis.md"* ]]

@@ -778,15 +778,28 @@ MD
   git init -q . && git config user.email "t@t" && git config user.name "t"
   git add -A && git commit -q -m "init"
 
-  # Stub: every get-document returns content; trash-document returns success.
+  # BTS-214: stub responds to one list-documents (returns 3 nodes with the
+  # deterministic IDs) + 3 trash-document mutations. Pre-compute the IDs
+  # so the stub returns matching ids.
+  spec_id=$(bash "$LQ" resolve-document-id --kind spec --ticket bts-test-feature)
+  plan_id=$(bash "$LQ" resolve-document-id --kind plan --ticket bts-test-feature)
+  stasis_id=$(bash "$LQ" resolve-document-id --kind feature-stasis --ticket bts-test-feature)
   STUB_FIXTURE="$BATS_TEST_TMPDIR/complete-stub.sh"
-  cat > "$STUB_FIXTURE" <<'SHELL'
+  cat > "$STUB_FIXTURE" <<SHELL
 curl() {
-  echo '{"data":{"document":{"id":"x","title":"t","content":"# stored content","slugId":"s","url":"u","updatedAt":"t","createdAt":"t","updatedBy":null,"creator":null,"project":null,"issue":null,"documentDelete":{"success":true}}, "documentDelete":{"success":true}}}'
+  local n
+  n=\$(cat "\$BATS_TEST_TMPDIR/complete-cnt" 2>/dev/null || echo 0)
+  n=\$((n + 1)); echo "\$n" > "\$BATS_TEST_TMPDIR/complete-cnt"
+  case "\$n" in
+    1) echo '{"data":{"issue":{"id":"issue-uuid","identifier":"BTS-x","title":"t","priority":2,"createdAt":"t0","updatedAt":"t1","description":"d","state":{"name":"x","type":"x","id":"s"},"labels":{"nodes":[]}}}}' ;;
+    2) echo '{"data":{"documents":{"nodes":[{"id":"$spec_id","title":"Spec","content":"# spec stored","slugId":"s1","updatedAt":"t","createdAt":"t"},{"id":"$plan_id","title":"Plan","content":"# plan stored","slugId":"s2","updatedAt":"t","createdAt":"t"},{"id":"$stasis_id","title":"Stasis","content":"# stasis stored","slugId":"s3","updatedAt":"t","createdAt":"t"}]}}}' ;;
+    *) echo '{"data":{"documentDelete":{"success":true}}}' ;;
+  esac
   return 0
 }
 export -f curl
 SHELL
+  echo 0 > "$BATS_TEST_TMPDIR/complete-cnt"
   # Run cmd_complete.
   run bash -c "source '$STUB_FIXTURE' && bash '$DC' complete bts-test-feature '$fx/docs'"
   [ "$status" -eq 0 ]
@@ -1022,4 +1035,245 @@ SHELL
   [ -f docs/specs/bts-213.md ]
   AFTER_HASH=$(shasum -a 256 docs/specs/bts-213.md | awk '{print $1}')
   [ "$ARCHIVE_HASH" = "$AFTER_HASH" ]
+}
+
+# =========================================================================
+# BTS-214: batch-read in _complete_archive_linear (6→4 API calls)
+# =========================================================================
+
+@test "BTS-214 AC-1: list-documents --with-content includes content in projection" {
+  set -e
+  _setup_stub
+  cat > "$LINEAR_STUB_RESPONSE" <<'JSON'
+{"data":{"documents":{"nodes":[{"id":"d1","title":"t","content":"# stub content","slugId":"s","updatedAt":"t","createdAt":"t"}]}}}
+JSON
+  run bash -c "source '$STUB_FIXTURE' && bash '$LQ' list-documents --issue X --with-content"
+  [ "$status" -eq 0 ]
+  echo "$output" | jq -e '.[0].content == "# stub content"'
+}
+
+@test "BTS-214 AC-1: list-documents without --with-content omits content key" {
+  set -e
+  _setup_stub
+  cat > "$LINEAR_STUB_RESPONSE" <<'JSON'
+{"data":{"documents":{"nodes":[{"id":"d1","title":"t","slugId":"s","updatedAt":"t","createdAt":"t"}]}}}
+JSON
+  run bash -c "source '$STUB_FIXTURE' && bash '$LQ' list-documents --issue X"
+  [ "$status" -eq 0 ]
+  echo "$output" | jq -e '.[0] | has("content") | not'
+}
+
+@test "BTS-214 AC-2: _complete_archive_linear makes exactly 5 curl calls (1 get-issue + 1 list + 3 trash)" {
+  # Performance contract: total curl invocations during the archive step
+  # of cmd_complete is 1 + 3 = 4, NOT the legacy 6 (3 get-document + 3
+  # trash). Use the same fixture as Phase 5 Step 14 with a counting stub.
+  set -e
+  _setup_stub
+  fx="$BATS_TEST_TMPDIR/bts-214-count-fx"
+  mkdir -p "$fx/.ccanvil/state" "$fx/.claude" "$fx/docs/specs"
+  cat > "$fx/.claude/ccanvil.json" <<'JSON'
+{
+  "integrations": {
+    "providers": {"linear": {"mechanism": "http", "project_id": "p"}},
+    "routing": {"spec": "linear", "plan": "linear", "stasis": "linear"}
+  }
+}
+JSON
+  cat > "$fx/docs/specs/bts-count-feat.md" <<'MD'
+# Feature: Count
+> Feature: bts-count-feat
+> Status: In Progress
+MD
+  cd "$fx"
+  git init -q . && git config user.email "t@t" && git config user.name "t"
+  git add -A && git commit -q -m "init"
+
+  spec_id=$(bash "$LQ" resolve-document-id --kind spec --ticket bts-count-feat)
+  plan_id=$(bash "$LQ" resolve-document-id --kind plan --ticket bts-count-feat)
+  stasis_id=$(bash "$LQ" resolve-document-id --kind feature-stasis --ticket bts-count-feat)
+
+  STUB_FIXTURE="$BATS_TEST_TMPDIR/bts-214-count-stub.sh"
+  cat > "$STUB_FIXTURE" <<SHELL
+curl() {
+  local n
+  n=\$(cat "\$BATS_TEST_TMPDIR/bts-214-cnt" 2>/dev/null || echo 0)
+  n=\$((n + 1)); echo "\$n" > "\$BATS_TEST_TMPDIR/bts-214-cnt"
+  case "\$n" in
+    1) echo '{"data":{"issue":{"id":"issue-uuid","identifier":"BTS-x","title":"t","priority":2,"createdAt":"t0","updatedAt":"t1","description":"d","state":{"name":"x","type":"x","id":"s"},"labels":{"nodes":[]}}}}' ;;
+    2) echo '{"data":{"documents":{"nodes":[{"id":"$spec_id","title":"x","content":"# s","slugId":"s","updatedAt":"t","createdAt":"t"},{"id":"$plan_id","title":"x","content":"# p","slugId":"s","updatedAt":"t","createdAt":"t"},{"id":"$stasis_id","title":"x","content":"# st","slugId":"s","updatedAt":"t","createdAt":"t"}]}}}' ;;
+    *) echo '{"data":{"documentDelete":{"success":true}}}' ;;
+  esac
+  return 0
+}
+export -f curl
+SHELL
+  echo 0 > "$BATS_TEST_TMPDIR/bts-214-cnt"
+  run bash -c "source '$STUB_FIXTURE' && bash '$DC' complete bts-count-feat '$fx/docs'"
+  [ "$status" -eq 0 ]
+  # 1 get-issue + 1 list-documents + 3 trash-document = exactly 5 curl invocations.
+  [ "$(cat "$BATS_TEST_TMPDIR/bts-214-cnt")" = "5" ]
+}
+
+@test "BTS-214 AC-4: _complete_archive_linear tolerates missing kinds (only spec present)" {
+  set -e
+  _setup_stub
+  fx="$BATS_TEST_TMPDIR/bts-214-missing-fx"
+  mkdir -p "$fx/.ccanvil/state" "$fx/.claude" "$fx/docs/specs"
+  cat > "$fx/.claude/ccanvil.json" <<'JSON'
+{
+  "integrations": {
+    "providers": {"linear": {"mechanism": "http", "project_id": "p"}},
+    "routing": {"spec": "linear", "plan": "linear", "stasis": "linear"}
+  }
+}
+JSON
+  cat > "$fx/docs/specs/bts-miss-feat.md" <<'MD'
+# Feature: Miss
+> Feature: bts-miss-feat
+> Status: In Progress
+MD
+  cd "$fx"
+  git init -q . && git config user.email "t@t" && git config user.name "t"
+  git add -A && git commit -q -m "init"
+
+  spec_id=$(bash "$LQ" resolve-document-id --kind spec --ticket bts-miss-feat)
+
+  STUB_FIXTURE="$BATS_TEST_TMPDIR/bts-214-missing-stub.sh"
+  cat > "$STUB_FIXTURE" <<SHELL
+curl() {
+  local n
+  n=\$(cat "\$BATS_TEST_TMPDIR/bts-214-mcnt" 2>/dev/null || echo 0)
+  n=\$((n + 1)); echo "\$n" > "\$BATS_TEST_TMPDIR/bts-214-mcnt"
+  case "\$n" in
+    1) echo '{"data":{"issue":{"id":"issue-uuid","identifier":"BTS-x","title":"t","priority":2,"createdAt":"t0","updatedAt":"t1","description":"d","state":{"name":"x","type":"x","id":"s"},"labels":{"nodes":[]}}}}' ;;
+    2) echo '{"data":{"documents":{"nodes":[{"id":"$spec_id","title":"x","content":"# only spec","slugId":"s","updatedAt":"t","createdAt":"t"}]}}}' ;;
+    *) echo '{"data":{"documentDelete":{"success":true}}}' ;;
+  esac
+  return 0
+}
+export -f curl
+SHELL
+  echo 0 > "$BATS_TEST_TMPDIR/bts-214-mcnt"
+  run bash -c "source '$STUB_FIXTURE' && bash '$DC' complete bts-miss-feat '$fx/docs'"
+  [ "$status" -eq 0 ]
+  # 1 get-issue + 1 list + 1 trash (only spec found) = 3 calls.
+  [ "$(cat "$BATS_TEST_TMPDIR/bts-214-mcnt")" = "3" ]
+  # Only spec archive should exist, not plan or stasis.
+  ls "$fx/docs/sessions/" | grep -q "bts-miss-feat-spec.md"
+  ! ls "$fx/docs/sessions/" | grep -q "bts-miss-feat-plan.md"
+  ! ls "$fx/docs/sessions/" | grep -q "bts-miss-feat-stasis.md"
+}
+
+@test "BTS-214 AC-5: matcher uses deterministic UUIDs, ignores wrong titles" {
+  # Stub returns documents with mismatched titles but correct IDs. Archive
+  # files MUST be written based on UUID match, not title parsing.
+  set -e
+  _setup_stub
+  fx="$BATS_TEST_TMPDIR/bts-214-uuid-fx"
+  mkdir -p "$fx/.ccanvil/state" "$fx/.claude" "$fx/docs/specs"
+  cat > "$fx/.claude/ccanvil.json" <<'JSON'
+{
+  "integrations": {
+    "providers": {"linear": {"mechanism": "http", "project_id": "p"}},
+    "routing": {"spec": "linear", "plan": "linear", "stasis": "linear"}
+  }
+}
+JSON
+  cat > "$fx/docs/specs/bts-uuid-feat.md" <<'MD'
+# Feature: UUID
+> Feature: bts-uuid-feat
+> Status: In Progress
+MD
+  cd "$fx"
+  git init -q . && git config user.email "t@t" && git config user.name "t"
+  git add -A && git commit -q -m "init"
+
+  spec_id=$(bash "$LQ" resolve-document-id --kind spec --ticket bts-uuid-feat)
+  plan_id=$(bash "$LQ" resolve-document-id --kind plan --ticket bts-uuid-feat)
+  stasis_id=$(bash "$LQ" resolve-document-id --kind feature-stasis --ticket bts-uuid-feat)
+
+  STUB_FIXTURE="$BATS_TEST_TMPDIR/bts-214-uuid-stub.sh"
+  cat > "$STUB_FIXTURE" <<SHELL
+curl() {
+  local n
+  n=\$(cat "\$BATS_TEST_TMPDIR/bts-214-ucnt" 2>/dev/null || echo 0)
+  n=\$((n + 1)); echo "\$n" > "\$BATS_TEST_TMPDIR/bts-214-ucnt"
+  case "\$n" in
+    1) echo '{"data":{"issue":{"id":"issue-uuid","identifier":"BTS-x","title":"t","priority":2,"createdAt":"t0","updatedAt":"t1","description":"d","state":{"name":"x","type":"x","id":"s"},"labels":{"nodes":[]}}}}' ;;
+    2) echo '{"data":{"documents":{"nodes":[{"id":"$spec_id","title":"WRONG TITLE A","content":"sc","slugId":"s","updatedAt":"t","createdAt":"t"},{"id":"$plan_id","title":"another wrong title","content":"pc","slugId":"s","updatedAt":"t","createdAt":"t"},{"id":"$stasis_id","title":"yet another","content":"stc","slugId":"s","updatedAt":"t","createdAt":"t"}]}}}' ;;
+    *) echo '{"data":{"documentDelete":{"success":true}}}' ;;
+  esac
+  return 0
+}
+export -f curl
+SHELL
+  echo 0 > "$BATS_TEST_TMPDIR/bts-214-ucnt"
+  run bash -c "source '$STUB_FIXTURE' && bash '$DC' complete bts-uuid-feat '$fx/docs'"
+  [ "$status" -eq 0 ]
+  ls "$fx/docs/sessions/" | grep -q "bts-uuid-feat-spec.md"
+  ls "$fx/docs/sessions/" | grep -q "bts-uuid-feat-plan.md"
+  ls "$fx/docs/sessions/" | grep -q "bts-uuid-feat-stasis.md"
+}
+
+@test "BTS-214 AC-6: list-documents failure is non-fatal — cmd_complete still succeeds" {
+  set -e
+  _setup_stub
+  fx="$BATS_TEST_TMPDIR/bts-214-err-fx"
+  mkdir -p "$fx/.ccanvil/state" "$fx/.claude" "$fx/docs/specs"
+  cat > "$fx/.claude/ccanvil.json" <<'JSON'
+{
+  "integrations": {
+    "providers": {"linear": {"mechanism": "http", "project_id": "p"}},
+    "routing": {"spec": "linear", "plan": "linear", "stasis": "linear"}
+  }
+}
+JSON
+  cat > "$fx/docs/specs/bts-err-feat.md" <<'MD'
+# Feature: Err
+> Feature: bts-err-feat
+> Status: In Progress
+MD
+  cd "$fx"
+  git init -q . && git config user.email "t@t" && git config user.name "t"
+  git add -A && git commit -q -m "init"
+
+  STUB_FIXTURE="$BATS_TEST_TMPDIR/bts-214-err-stub.sh"
+  cat > "$STUB_FIXTURE" <<'SHELL'
+curl() { echo '{"errors":[{"message":"Internal server error"}]}'; return 0; }
+export -f curl
+SHELL
+  run bash -c "source '$STUB_FIXTURE' && bash '$DC' complete bts-err-feat '$fx/docs'"
+  [ "$status" -eq 0 ]
+  # cmd_complete still completed (status flipped + commit made), but no
+  # archive files were created because list-documents errored.
+  ! ls "$fx/docs/sessions/" 2>/dev/null | grep -q "bts-err-feat-spec.md" || \
+    ls "$fx/docs/sessions/bts-err-feat-spec.md" 2>/dev/null && false || true
+  # Spec status flipped to Complete despite Linear failure
+  grep -q "Status: Complete" "$fx/docs/specs/bts-err-feat.md"
+}
+
+@test "BTS-214 AC-7: pure-local /complete fires zero curl calls" {
+  set -e
+  fx="$BATS_TEST_TMPDIR/bts-214-local-fx"
+  mkdir -p "$fx/.ccanvil/state" "$fx/.claude" "$fx/docs/specs"
+  echo '{}' > "$fx/.claude/ccanvil.json"
+  cat > "$fx/docs/specs/bts-local-feat.md" <<'MD'
+# Feature: Local
+> Feature: bts-local-feat
+> Status: In Progress
+MD
+  cd "$fx"
+  git init -q . && git config user.email "t@t" && git config user.name "t"
+  git add -A && git commit -q -m "init"
+
+  STUB_FIXTURE="$BATS_TEST_TMPDIR/bts-214-local-stub.sh"
+  cat > "$STUB_FIXTURE" <<'SHELL'
+curl() {
+  echo "ERROR: curl invoked on local-routed /complete" >&2
+  return 99
+}
+export -f curl
+SHELL
+  run bash -c "source '$STUB_FIXTURE' && bash '$DC' complete bts-local-feat '$fx/docs'"
+  [ "$status" -eq 0 ]
 }

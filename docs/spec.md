@@ -1,4 +1,4 @@
-# Feature: Batch-read in _complete_archive_linear (6→4 API calls)
+# Feature: Batch-read in _complete_archive_linear (6→5 API calls)
 
 > Feature: bts-214-complete-archive-batch-read
 > Work: linear:BTS-214
@@ -11,8 +11,16 @@ Cut `/complete` Linear-routed latency by replacing the 3 sequential
 `get-document` calls inside `_complete_archive_linear` with one
 `list-documents --issue <issueId> --with-content` call. The 3 `trash-document`
 mutations stay serial (Linear's GraphQL doesn't expose mutation batching).
-Net: 4 API calls instead of 6 per `/complete`. Same archive output bytes;
-zero behavior change on local-routed nodes.
+Net: 5 API calls instead of 6 per `/complete` (1 get-issue lookup + 1
+list-documents + 3 trash). Same archive output bytes; zero behavior change
+on local-routed nodes.
+
+**Why not 4 (`list-documents --ids` filter)?** Live-validated against
+`api.linear.app/graphql`: `DocumentFilter` rejects `{id:{in:[...]}}` with
+"Argument Validation Error" — Linear's filter shape doesn't expose the
+`in` modifier on `id`. The cheapest valid filter is `{issue:{id:{eq:UUID}}}`,
+which requires looking up the issue UUID first. Saves 1 call (~200ms),
+not 2.
 
 ## Job To Be Done
 
@@ -27,12 +35,12 @@ zero behavior change on local-routed nodes.
       `content` field on each Document; the JSON shape gains a `content`
       key per node. Without the flag, the existing shape (`{id, title,
       slugId, updatedAt, createdAt}`) is byte-identical.
-- [ ] **AC-2:** `_complete_archive_linear` makes exactly 1 read API call
-      regardless of how many lifecycle artifact kinds are routed to Linear.
-      Verified via stub-counter assertion: a `/complete` flow on a fixture
-      with all three kinds (spec/plan/stasis) routed to Linear and all
-      three Documents present results in 4 curl invocations total
-      (1 list + 3 trash), not 6.
+- [ ] **AC-2:** `_complete_archive_linear` makes exactly 1
+      `list-documents` call regardless of how many lifecycle artifact
+      kinds are routed to Linear. Verified via stub-counter assertion: a
+      `/complete` flow on a fixture with all three kinds (spec/plan/stasis)
+      routed to Linear and all three Documents present results in 5 curl
+      invocations total (1 get-issue + 1 list-documents + 3 trash), not 6.
 - [ ] **AC-3:** When `_complete_archive_linear` runs against the existing
       stub fixture (BTS-204 Phase 5 Step 14), the resulting archive files
       under `docs/sessions/<epoch>-<feat>-{spec,plan,stasis}.md` have the

@@ -651,8 +651,24 @@ cmd_resolve_document_id() {
   local input hash
   input="${BTS_NS}:${kind}:${ticket}"
   hash=$(printf '%s' "$input" | shasum -a 256 | awk '{print $1}')
+
+  # BTS-216: force RFC 4122 v4-shaped version + variant nibbles. Linear's
+  # GraphQL validator (`class-validator` isUuid('4')) accepts ONLY UUID v4
+  # — v3/v5 are live-rejected with `"id must be a UUID"`. Live-validated
+  # against api.linear.app/graphql on 2026-04-27 with hand-crafted control
+  # UUIDs: `aaaaaaaa-bbbb-4ccc-8ddd-...` succeeded, `5ccc` variant failed.
+  #
+  # Substituting the version nibble with literal '4' (UUID v4 — random)
+  # and variant with '8' (10xx) makes every output a structurally-valid
+  # RFC 4122 v4-shaped UUID while keeping the derivation deterministic.
+  # Note: this is "v4-shaped" not actually-v4 (which would require RNG);
+  # we deterministically derive from SHA-256 of "<NS>:<kind>:<ticket>"
+  # and force the version/variant nibbles. The validator checks shape,
+  # not entropy. Stable across re-runs because we substitute with constants.
+  local time_hi="4${hash:13:3}"        # version field (high nibble of byte 6) → 4
+  local clock_seq_hi="8${hash:17:3}"   # variant field (high nibble of byte 8) → 10xx
   printf '%s-%s-%s-%s-%s\n' \
-    "${hash:0:8}" "${hash:8:4}" "${hash:12:4}" "${hash:16:4}" "${hash:20:12}"
+    "${hash:0:8}" "${hash:8:4}" "$time_hi" "$clock_seq_hi" "${hash:20:12}"
 }
 
 cmd_get_document() {

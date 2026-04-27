@@ -247,7 +247,7 @@ The skill itself uses the http substrate exclusively for issue creation (resolve
 | `linear-query.sh trash-document <id>` | BTS-204: soft-delete via documentDelete. Linear has no hard-delete in public API. |
 | `linear-query.sh list-documents [--project <id>] [--issue <id>] [--initiative <id>] [--limit N] [--with-content]` | BTS-204: list Documents filtered by parent. Returns array of `{id, title, slugId, updatedAt, createdAt}`. BTS-214: `--with-content` adds `content` to each node — used by `_complete_archive_linear` to batch-read all 3 lifecycle Documents in one call. **Live-validated caveat:** `DocumentFilter` rejects `{id:{in:[...]}}` ("Argument Validation Error") — `id`-list filtering is not supported by Linear's API; use `--issue <uuid>` instead. |
 | `linear-query.sh document-history <id>` | BTS-204: content snapshot history. Returns `[{id, snapshotAt, actorIds}]`. |
-| `linear-query.sh resolve-document-id --kind {spec\|plan\|feature-stasis\|session-stasis} --ticket <BTS-N>` | BTS-204: deterministic UUID derivation from {namespace, kind, ticket}. Pure compute — no API call. Idempotency for create-or-update writes relies on this. |
+| `linear-query.sh resolve-document-id --kind {spec\|plan\|feature-stasis\|session-stasis} --ticket <BTS-N>` | BTS-204: deterministic UUID derivation from {namespace, kind, ticket}. Pure compute — no API call. Idempotency for create-or-update writes relies on this. **BTS-216:** output is RFC 4122 v4-shaped (version nibble forced to `4`, variant nibble forced to `8`). Linear's `class-validator` `isUuid('4')` accepts ONLY v4; v3/v5 are rejected with `"id must be a UUID"`. Live-validated against api.linear.app/graphql. |
 
 <!-- NODE-SPECIFIC-START -->
 <!-- Add project-specific content below this line. -->

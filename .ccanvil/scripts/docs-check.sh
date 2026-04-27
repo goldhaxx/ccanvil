@@ -3913,6 +3913,164 @@ _artifact_present_linear() {
   fi
 }
 
+# BTS-204 Phase 4: provider-aware artifact read/write compound primitives.
+# Skills call these instead of hardcoded file IO. Routing decision +
+# upsert orchestration live in one place; skill prose stays terse.
+
+# cmd_artifact_read — read spec/plan/stasis content from the routed source.
+# Args:
+#   --kind <spec|plan|stasis>
+#   --feature <BTS-N>           required when http-routed (or --stasis-kind feature)
+#   --stasis-kind <feature|session>  defaults to "feature"
+# Output: artifact content on stdout (markdown). Exit 0 on found, 2 on missing.
+cmd_artifact_read() {
+  local kind="" feature="" stasis_kind="feature"
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --kind)         kind="$2";        shift 2 ;;
+      --feature)      feature="$2";     shift 2 ;;
+      --stasis-kind)  stasis_kind="$2"; shift 2 ;;
+      *) shift ;;
+    esac
+  done
+  [[ -z "$kind" ]] && { echo "ERROR: artifact-read --kind is required" >&2; return 2; }
+
+  local route project_dir="."
+  route=$(_lifecycle_route "$kind" "$project_dir")
+
+  if [[ "$route" != "linear" ]]; then
+    local target
+    case "$kind" in
+      spec)   target="docs/spec.md" ;;
+      plan)   target="docs/plan.md" ;;
+      stasis) target="docs/stasis.md" ;;
+      *) echo "ERROR: artifact-read unknown kind '$kind'" >&2; return 2 ;;
+    esac
+    [[ ! -f "$target" ]] && return 2
+    cat "$target"
+    return 0
+  fi
+
+  # Linear route. Need feature_id (or project context for session-stasis).
+  local script_dir resolve_kind ticket
+  script_dir="$(dirname "${BASH_SOURCE[0]}")"
+  case "$kind" in
+    spec)   resolve_kind="spec";   ticket="$feature" ;;
+    plan)   resolve_kind="plan";   ticket="$feature" ;;
+    stasis)
+      if [[ "$stasis_kind" == "session" ]]; then
+        resolve_kind="session-stasis"
+        ticket=$(_session_stasis_ticket "$project_dir")
+      else
+        resolve_kind="feature-stasis"
+        ticket="$feature"
+      fi
+      ;;
+  esac
+  [[ -z "$ticket" ]] && { echo "ERROR: artifact-read $kind requires a ticket (use --feature)" >&2; return 2; }
+
+  local doc_id
+  doc_id=$(bash "$script_dir/linear-query.sh" resolve-document-id --kind "$resolve_kind" --ticket "$ticket")
+  bash "$script_dir/linear-query.sh" get-document "$doc_id" 2>/dev/null | jq -r '.content // empty'
+  local rc=${PIPESTATUS[0]}
+  return "$rc"
+}
+
+# cmd_artifact_write — write artifact content to the routed destination.
+# Reads content from stdin. For Linear, performs upsert via document-updated-at
+# pre-check, then save-document with --create-with-id on first write.
+cmd_artifact_write() {
+  local kind="" feature="" stasis_kind="feature"
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --kind)         kind="$2";        shift 2 ;;
+      --feature)      feature="$2";     shift 2 ;;
+      --stasis-kind)  stasis_kind="$2"; shift 2 ;;
+      *) shift ;;
+    esac
+  done
+  [[ -z "$kind" ]] && { echo "ERROR: artifact-write --kind is required" >&2; return 2; }
+
+  local content project_dir="."
+  content=$(cat)
+
+  local route
+  route=$(_lifecycle_route "$kind" "$project_dir")
+
+  if [[ "$route" != "linear" ]]; then
+    local target
+    case "$kind" in
+      spec)   target="docs/spec.md" ;;
+      plan)   target="docs/plan.md" ;;
+      stasis) target="docs/stasis.md" ;;
+      *) echo "ERROR: artifact-write unknown kind '$kind'" >&2; return 2 ;;
+    esac
+    printf '%s' "$content" > "$target"
+    return 0
+  fi
+
+  # Linear route — upsert.
+  local script_dir resolve_kind ticket parent_field parent_value title
+  script_dir="$(dirname "${BASH_SOURCE[0]}")"
+  case "$kind" in
+    spec)   resolve_kind="spec";   ticket="$feature"; title="Spec: $feature";   parent_field="issueId" ;;
+    plan)   resolve_kind="plan";   ticket="$feature"; title="Plan: $feature";   parent_field="issueId" ;;
+    stasis)
+      if [[ "$stasis_kind" == "session" ]]; then
+        resolve_kind="session-stasis"
+        ticket=$(_session_stasis_ticket "$project_dir")
+        title="Session State"
+        parent_field="projectId"
+      else
+        resolve_kind="feature-stasis"
+        ticket="$feature"
+        title="Stasis: $feature"
+        parent_field="issueId"
+      fi
+      ;;
+  esac
+  [[ -z "$ticket" ]] && { echo "ERROR: artifact-write $kind requires --feature" >&2; return 2; }
+
+  if [[ "$parent_field" == "issueId" ]]; then
+    parent_value=$(bash "$script_dir/linear-query.sh" get-issue "$feature" 2>/dev/null | jq -r '.uuid // empty')
+    [[ -z "$parent_value" ]] && { echo "ERROR: artifact-write could not resolve issue UUID for $feature" >&2; return 3; }
+  else
+    parent_value=$(_session_stasis_ticket "$project_dir")
+    [[ -z "$parent_value" ]] && { echo "ERROR: artifact-write project_id missing in provider config" >&2; return 3; }
+  fi
+
+  local doc_id
+  doc_id=$(bash "$script_dir/linear-query.sh" resolve-document-id --kind "$resolve_kind" --ticket "$ticket")
+
+  if bash "$script_dir/linear-query.sh" document-updated-at "$doc_id" >/dev/null 2>&1; then
+    # Update path
+    jq -n --arg id "$doc_id" --arg content "$content" '{id:$id, content:$content}' \
+      | bash "$script_dir/linear-query.sh" save-document --input-json -
+  else
+    # Create path with caller-supplied UUID
+    jq -n --arg id "$doc_id" --arg title "$title" --arg content "$content" \
+      --arg parent_field "$parent_field" --arg parent "$parent_value" \
+      '{id:$id, title:$title, content:$content} + ({} + (if $parent_field == "issueId" then {issueId:$parent} else {projectId:$parent} end))' \
+      | bash "$script_dir/linear-query.sh" save-document --create-with-id --input-json -
+  fi
+}
+
+# _session_stasis_ticket — read project_id from merged config; used as the
+# deterministic "ticket" key for session-stasis Document UUID derivation.
+_session_stasis_ticket() {
+  local project_dir="${1:-.}"
+  local hub_file="$project_dir/.claude/ccanvil.json"
+  local local_file="$project_dir/.claude/ccanvil.local.json"
+  for f in "$hub_file" "$local_file"; do
+    if [[ -f "$f" ]]; then
+      local pid
+      pid=$(jq -r '.integrations.providers.linear.project_id // empty' "$f" 2>/dev/null)
+      [[ -n "$pid" ]] && { echo "$pid"; return 0; }
+    fi
+  done
+  echo ""
+}
+
 cmd_lifecycle_state() {
   local project_dir="."
   while [[ $# -gt 0 ]]; do
@@ -4133,6 +4291,8 @@ case "$cmd" in
   remote-presence)   cmd_remote_presence "$@" ;;
   evidence-scan-session) cmd_evidence_scan_session "$@" ;;
   lifecycle-state)   cmd_lifecycle_state "$@" ;;
+  artifact-read)     cmd_artifact_read "$@" ;;
+  artifact-write)    cmd_artifact_write "$@" ;;
   session-info)      cmd_session_info "$@" ;;
   *)
     echo "Usage: docs-check.sh {status|validate|recommend|audit-session|config-get|list-specs|activate|complete|pr-cleanup|land|idea-add|idea-list|idea-count|idea-update|idea-sync|idea-pending-replay|refresh-plan-hash|idea-migrate|idea-setup|idea-upgrade|title-from-body|legacy-refs-scan|stamp-spec|idea-pending-append|idea-pending-validate|remote-presence} [args...]" >&2

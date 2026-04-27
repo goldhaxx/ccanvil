@@ -597,6 +597,101 @@ SHELL
   echo "$output" | jq -e '.state == "spec-activated"'
 }
 
+# =========================================================================
+# Phase 4: artifact-read / artifact-write compound primitives
+# =========================================================================
+
+@test "BTS-204 Phase 4: artifact-write spec on local route writes docs/spec.md" {
+  set -e
+  fx=$(_make_local_lifecycle_fx)
+  cd "$fx"
+  echo "# spec content" | bash "$DC" artifact-write --kind spec --feature BTS-204
+  [ -f docs/spec.md ]
+  grep -qF "# spec content" docs/spec.md
+}
+
+@test "BTS-204 Phase 4: artifact-read spec on local route reads docs/spec.md" {
+  set -e
+  fx=$(_make_local_lifecycle_fx)
+  cd "$fx"
+  mkdir -p docs
+  echo "# read me" > docs/spec.md
+  run bash "$DC" artifact-read --kind spec --feature BTS-204
+  [ "$status" -eq 0 ]
+  [[ "$output" =~ "# read me" ]]
+}
+
+@test "BTS-204 Phase 4: artifact-read on local route returns 2 when file missing" {
+  set -e
+  fx=$(_make_local_lifecycle_fx)
+  cd "$fx"
+  run bash "$DC" artifact-read --kind spec --feature BTS-204
+  [ "$status" -eq 2 ]
+}
+
+# --- skill-prose drift-guards ---
+
+@test "BTS-204 Phase 4: /plan skill prose dispatches via artifact-read --kind spec" {
+  grep -qF 'artifact-read --kind spec' "$BATS_TEST_DIRNAME/../../.claude/commands/plan.md"
+}
+
+@test "BTS-204 Phase 4: /plan skill prose dispatches via artifact-write --kind plan" {
+  grep -qF 'artifact-write --kind plan' "$BATS_TEST_DIRNAME/../../.claude/commands/plan.md"
+}
+
+@test "BTS-204 Phase 4: /stasis skill prose dispatches via artifact-write --kind stasis" {
+  grep -qF 'artifact-write --kind stasis' "$BATS_TEST_DIRNAME/../../.claude/skills/stasis/SKILL.md"
+}
+
+@test "BTS-204 Phase 4: /stasis skill prose mentions both feature and session stasis kinds" {
+  grep -qF 'stasis-kind feature' "$BATS_TEST_DIRNAME/../../.claude/skills/stasis/SKILL.md"
+  grep -qF 'stasis-kind session' "$BATS_TEST_DIRNAME/../../.claude/skills/stasis/SKILL.md"
+}
+
+@test "BTS-204 Phase 4: /recall skill prose dispatches via artifact-read --kind stasis" {
+  grep -qF 'artifact-read --kind stasis' "$BATS_TEST_DIRNAME/../../.claude/skills/recall/SKILL.md"
+}
+
+@test "BTS-204 Phase 4: /recall skill prose dispatches via artifact-read --kind spec" {
+  grep -qF 'artifact-read --kind spec' "$BATS_TEST_DIRNAME/../../.claude/skills/recall/SKILL.md"
+}
+
+@test "BTS-204 Phase 4: artifact-write linear-routed dispatches to save-document" {
+  set -e
+  _setup_stub
+  fx=$(_make_linear_lifecycle_fx)
+  cd "$fx"
+  # Multi-stub: get-issue UUID lookup → returns issue uuid
+  #             document-updated-at on derived UUID → not found (404 → create path)
+  #             documentCreate → success
+  STUB_FIXTURE="$BATS_TEST_TMPDIR/multi-stub-write.sh"
+  cat > "$STUB_FIXTURE" <<'SHELL'
+curl() {
+  local body
+  body=$(awk '/^[{]/{flag=1} flag' "$LINEAR_STUB_CAPTURE" 2>/dev/null || cat)
+  echo "$@" "<<BODY>>" >> "$LINEAR_STUB_CAPTURE"
+  while IFS= read -r line; do echo "$line" >> "$LINEAR_STUB_CAPTURE"; done
+  # Pick response by call count
+  local n
+  n=$(cat "$BATS_TEST_TMPDIR/call-count" 2>/dev/null || echo 0)
+  n=$((n + 1))
+  echo "$n" > "$BATS_TEST_TMPDIR/call-count"
+  case "$n" in
+    1) echo '{"data":{"issue":{"id":"issue-uuid-x","identifier":"BTS-204","title":"t","priority":2,"createdAt":"t0","updatedAt":"t1","description":"d","state":{"name":"In Progress","type":"started","id":"s"},"labels":{"nodes":[]}}}}' ;;
+    2) echo '{"errors":[{"message":"Entity not found: Document"}]}' ;;
+    3) echo '{"data":{"documentCreate":{"success":true,"document":{"id":"new-doc-uuid","title":"Spec: BTS-204","content":"# spec content","updatedAt":"t2"}}}}' ;;
+    *) echo '{"data":{}}' ;;
+  esac
+  return 0
+}
+export -f curl
+SHELL
+  echo 0 > "$BATS_TEST_TMPDIR/call-count"
+  run bash -c "source '$STUB_FIXTURE' && echo '# spec content' | bash '$DC' artifact-write --kind spec --feature BTS-204"
+  [ "$status" -eq 0 ]
+  echo "$output" | jq -e '.id == "new-doc-uuid"'
+}
+
 @test "BTS-204 Step 8: lifecycle-state without any 'linear' routing skips Linear entirely" {
   # Critical regression check: when ALL routing keys are local/absent, the
   # lifecycle-state derivation must NOT reach for Linear (no API calls,

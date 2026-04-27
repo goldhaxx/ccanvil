@@ -27,11 +27,20 @@ Report counts by status (Draft, Ready, In Progress, Complete) — or by Linear s
 
 0e. **BTS-206: session counter + boundary.** Run `bash .ccanvil/scripts/docs-check.sh session-info --project-dir .` and capture `.counter`, `.iso`. Used in the briefing's session line below.
 
-1. Read `docs/stasis.md` if it exists — this contains the last session's progress and next steps.
+1. **Read the active stasis via the provider-aware primitive (BTS-204).** Run
+   `bash .ccanvil/scripts/docs-check.sh artifact-read --kind stasis` for
+   feature-kind, or with `--stasis-kind session` for session-kind. On
+   local-routed nodes this reads `docs/stasis.md`; on Linear-routed nodes
+   (`integrations.routing.stasis=linear`) this reads the corresponding
+   Linear Document. Equivalent to `cat docs/stasis.md` on the local path.
 2. Run `git log --oneline -10` to see recent commits.
 3. Run `git diff --stat` to see any uncommitted changes.
 4. Run `git diff --cached --stat` to see any staged changes.
-5. Read `docs/spec.md` if it exists — this is the current feature specification.
+5. **Read the active spec via the provider-aware primitive (BTS-204).** Run
+   `bash .ccanvil/scripts/docs-check.sh artifact-read --kind spec --feature <FEATURE_ID>`.
+   On local-routed nodes this reads `docs/spec.md`; on Linear-routed nodes
+   it reads the spec Linear Document. Use the active feature id from branch
+   name when prompted.
 
 6. If `docs/stasis.md` has a `## Determinism Review` section with candidates_found > 0, read it and prepare to surface those items.
 6a. **Cross-session history (BTS-22):** read up to the 3 most-recent archived stasis files via the `sessions-list` substrate primitive — replaces the prior git-archeology approach (`git show HEAD~1:docs/stasis.md`).

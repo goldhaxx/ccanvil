@@ -255,7 +255,7 @@ cmd_get_issue() {
 
   local query='query ($id: String!) {
     issue(id: $id) {
-      identifier title priority createdAt updatedAt description
+      id identifier title priority createdAt updatedAt description
       state { name type id }
       labels { nodes { name } }
     }
@@ -263,6 +263,7 @@ cmd_get_issue() {
 
   _post_graphql "$query" "$variables" | jq '.issue | {
     id: .identifier,
+    uuid: .id,
     title: .title,
     status: .state.name,
     statusType: .state.type,
@@ -692,6 +693,11 @@ cmd_save_document() {
   local id="" title="" content=""
   local issue_id="" project_id="" initiative_id=""
   local trashed="" input_json=""
+  # BTS-204: --create-with-id forces documentCreate even when stdin .id is
+  # set, treating that id as DocumentCreateInput.id (caller-supplied UUID
+  # for idempotent first-write). Without this flag, stdin .id triggers
+  # documentUpdate (existing behavior preserved for back-compat).
+  local create_with_id=0
 
   while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -703,6 +709,7 @@ cmd_save_document() {
       --initiative-id)  initiative_id="$2";  shift 2 ;;
       --trashed)        trashed="$2";        shift 2 ;;
       --input-json)     input_json="$2";     shift 2 ;;
+      --create-with-id) create_with_id=1;    shift   ;;
       *) _die 2 "save-document: unknown flag: $1" ;;
     esac
   done
@@ -721,12 +728,19 @@ cmd_save_document() {
   fi
 
   # Promote stdin .id into $id so mode-detection works for stdin-only callers.
-  if [[ -z "$id" ]]; then
+  # When --create-with-id is set, the id stays in input (DocumentCreateInput.id)
+  # and we DON'T promote it to $id (which would route to update mode).
+  if [[ "$create_with_id" -eq 0 && -z "$id" ]]; then
     id=$(printf '%s' "$stdin_input" | jq -r '.id // ""')
   fi
 
   local input
-  input=$(printf '%s' "$stdin_input" | jq 'del(.id)')   # id is a path arg, not an input field
+  if [[ "$create_with_id" -eq 1 ]]; then
+    # Keep id in input → routes to DocumentCreateInput.id
+    input="$stdin_input"
+  else
+    input=$(printf '%s' "$stdin_input" | jq 'del(.id)')   # id is a path arg, not input
+  fi
   if [[ -n "$title" ]]; then
     input=$(printf '%s' "$input" | jq --arg v "$title" '. + {title:$v}')
   fi
@@ -746,7 +760,7 @@ cmd_save_document() {
     input=$(printf '%s' "$input" | jq --argjson v "$trashed" '. + {trashed:$v}')
   fi
 
-  if [[ -z "$id" ]]; then
+  if [[ -z "$id" || "$create_with_id" -eq 1 ]]; then
     # Create. Title required; exactly one parent (issueId | projectId | initiativeId).
     if [[ -z "$(echo "$input" | jq -r '.title // ""')" ]]; then
       _die 2 "save-document create requires --title"

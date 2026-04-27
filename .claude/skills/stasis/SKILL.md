@@ -51,9 +51,29 @@ The validator excludes `Kind: session` stasis from feature alignment, so the old
 
 Inherit `> Work:` when feature-kind by reading `bash .ccanvil/scripts/docs-check.sh status` and copying `.spec.work` verbatim.
 
-## Synthesis — write docs/stasis.md
+## Synthesis — write the stasis snapshot
 
-Copy `.ccanvil/templates/stasis.md` to `docs/stasis.md` and fill each section:
+**BTS-204: provider-aware write.** Compose the full stasis content from
+`.ccanvil/templates/stasis.md` as the structural template, then write via
+the routing-aware primitive:
+
+```bash
+# Feature-kind:
+<rendered stasis content> | bash .ccanvil/scripts/docs-check.sh \
+  artifact-write --kind stasis --stasis-kind feature --feature <BTS-N>
+
+# Session-kind (no --feature; uses provider config's project_id):
+<rendered stasis content> | bash .ccanvil/scripts/docs-check.sh \
+  artifact-write --kind stasis --stasis-kind session
+```
+
+On local-routed nodes this writes `docs/stasis.md` (existing behavior).
+On Linear-routed nodes (`integrations.routing.stasis=linear`) this upserts
+the stasis Linear Document — issue-parented for feature-kind, project-parented
+for session-kind. Cross-session history continues to live in `docs/sessions/`
+archives via the BTS-22 archive substrate (unchanged).
+
+Fill each section:
 
 ### ## Accomplished
 What was completed this session. Use git log + file changes as the factual spine, your own session memory for the narrative.

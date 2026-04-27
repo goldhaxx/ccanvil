@@ -250,8 +250,10 @@ OPERATIONS="$REPO_ROOT/.ccanvil/scripts/operations.sh"
   grep -q 'audit-session' "$REPO_ROOT/.claude/skills/recall/SKILL.md"
 }
 
-@test "recall skill: runs docs-check.sh validate" {
-  grep -q 'docs-check.sh validate' "$REPO_ROOT/.claude/skills/recall/SKILL.md"
+@test "recall skill: runs docs-check.sh lifecycle-state (BTS-20 migration)" {
+  # BTS-20 migrated /recall from separate validate + recommend calls to a
+  # single lifecycle-state envelope. Pin the post-migration shape.
+  grep -q 'docs-check.sh lifecycle-state' "$REPO_ROOT/.claude/skills/recall/SKILL.md"
 }
 
 @test "legacy catchup command: .claude/commands/catchup.md is deleted" {
@@ -276,8 +278,9 @@ OPERATIONS="$REPO_ROOT/.ccanvil/scripts/operations.sh"
   grep -q '\.ccanvil/templates/stasis\.md' "$REPO_ROOT/.claude/skills/stasis/SKILL.md"
 }
 
-@test "stasis skill: invokes docs-check.sh validate (AC-4, AC-11)" {
-  grep -q 'docs-check.sh validate' "$REPO_ROOT/.claude/skills/stasis/SKILL.md"
+@test "stasis skill: invokes docs-check.sh lifecycle-state (BTS-20 migration of AC-4, AC-11)" {
+  # BTS-20 migrated /stasis pre-flight from validate to lifecycle-state.
+  grep -q 'docs-check.sh lifecycle-state' "$REPO_ROOT/.claude/skills/stasis/SKILL.md"
 }
 
 @test "stasis skill: invokes radar-gather, idea-count, audit-session (AC-2)" {

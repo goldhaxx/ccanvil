@@ -7,8 +7,7 @@ Read the current state of the project to resume work after a context reset. `/re
 
 ## Data gathering (deterministic)
 
-0a. If `.ccanvil/scripts/docs-check.sh` exists, run `.ccanvil/scripts/docs-check.sh validate` and report any staleness or mismatches before reading documents.
-0b. If `.ccanvil/scripts/docs-check.sh` exists, run `.ccanvil/scripts/docs-check.sh recommend` and display the recommended next action.
+0a. **BTS-20: unified lifecycle-state envelope.** Run `bash .ccanvil/scripts/docs-check.sh lifecycle-state --project-dir .` and capture the JSON envelope. The envelope has shape `{state, legal_next_actions:[{action, command, reason}], blockers:[], suggestions:[]}` and replaces the prior pair of `validate` + `recommend` calls — one resolver call now drives both staleness reporting and the next-action recommendation. The `state` field is one of: `no-active-spec`, `spec-activated`, `plan-written`, `implementing`, `pr-open`, `pr-merged`, `session-wrap`, `blocked`, `uninitialized` (codified in `.ccanvil/templates/lifecycle-graph.json`).
 0c. Capture the resolution into `$RESOLUTION` and branch on mechanism:
 
 ```bash
@@ -55,7 +54,7 @@ Report counts by status (Draft, Ready, In Progress, Complete) — or by Linear s
 ## Briefing
 
 Then provide a brief summary:
-- Lifecycle state (from steps 0a/0b — aligned/stale/mismatched/no-active-spec + recommended action)
+- **Lifecycle state** (from step 0a's envelope) — the `state` field plus legal next actions and any blockers. Render as: one line for the current state name, then a `**Legal next actions:**` sub-list walking `legal_next_actions[]` (each entry's `action` + `command` + `reason`). When `blockers[]` is non-empty, render a `**Blockers:**` sub-list with one bullet per entry — these always come BEFORE legal next actions because recovery is required first.
 - **Spec backlog** — count of specs by status from step 0c, and which spec (if any) is active on the current branch
 - **Ideas** — untriaged idea count from step 8 (if > 0, note: "N untriaged ideas — run /idea triage")
 - **Permissions Review** — sum from step 9. When `(check.danger + promote-review.counts.total) > 0`, print one line: `**Permissions Review:** N candidates pending — run /permissions-review`. When 0, omit entirely (no noise).

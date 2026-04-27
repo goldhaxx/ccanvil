@@ -23,6 +23,67 @@ setup() {
   [[ "$output" =~ ^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$ ]]
 }
 
+# =========================================================================
+# BTS-216: resolve-document-id emits valid RFC 4122 UUIDs
+# =========================================================================
+
+@test "BTS-216 AC-1: resolve-document-id third group starts with version nibble 4" {
+  set -e
+  for kind in spec plan feature-stasis session-stasis; do
+    for ticket in BTS-204 BTS-215 BTS-216 bts-test-feat; do
+      run bash "$LQ" resolve-document-id --kind "$kind" --ticket "$ticket"
+      [ "$status" -eq 0 ]
+      # Third group: chars 14-17. Position 14 must be '4' (Linear validates
+      # isUUID('4') — v4 only; v3/v5 rejected. See BTS-216 spec).
+      [[ "${output:14:1}" == "4" ]]
+    done
+  done
+}
+
+@test "BTS-216 AC-2: resolve-document-id fourth group starts with variant nibble 8" {
+  set -e
+  for kind in spec plan feature-stasis session-stasis; do
+    for ticket in BTS-204 BTS-215 BTS-216 bts-test-feat; do
+      run bash "$LQ" resolve-document-id --kind "$kind" --ticket "$ticket"
+      [ "$status" -eq 0 ]
+      # Fourth group: chars 19-22. Position 19 must be '8'.
+      [[ "${output:19:1}" == "8" ]]
+    done
+  done
+}
+
+@test "BTS-216 AC-3: resolve-document-id is byte-stable (deterministic)" {
+  set -e
+  run bash "$LQ" resolve-document-id --kind spec --ticket BTS-216
+  first="$output"
+  run bash "$LQ" resolve-document-id --kind spec --ticket BTS-216
+  [ "$output" = "$first" ]
+}
+
+@test "BTS-216 AC-4: different kind/ticket pairs still produce distinct UUIDs" {
+  set -e
+  run bash "$LQ" resolve-document-id --kind spec --ticket BTS-216
+  spec_216="$output"
+  run bash "$LQ" resolve-document-id --kind plan --ticket BTS-216
+  plan_216="$output"
+  run bash "$LQ" resolve-document-id --kind spec --ticket BTS-217
+  spec_217="$output"
+  [ "$spec_216" != "$plan_216" ]
+  [ "$spec_216" != "$spec_217" ]
+  [ "$plan_216" != "$spec_217" ]
+}
+
+@test "BTS-216: post-fix UUIDs match the canonical RFC 4122 v4 regex" {
+  # Stricter than AC-1/AC-2: combined regex match for the full RFC 4122
+  # v4 shape — version=4, variant=10xx (high nibble 8/9/a/b). Linear's
+  # validator only accepts v4; v5 is rejected ("id must be a UUID").
+  set -e
+  for kind in spec plan feature-stasis session-stasis; do
+    run bash "$LQ" resolve-document-id --kind "$kind" --ticket BTS-N
+    [[ "$output" =~ ^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$ ]]
+  done
+}
+
 @test "BTS-204 Step 1: resolve-document-id is deterministic across invocations" {
   run bash "$LQ" resolve-document-id --kind spec --ticket BTS-204
   first="$output"

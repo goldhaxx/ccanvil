@@ -26,9 +26,14 @@ works end-to-end (concurrent-edit cache, /spec dispatch, archive matching).
 
 - [ ] **AC-1:** `linear-query.sh resolve-document-id --kind <K> --ticket <T>`
       output's third group (chars 14-17) starts with the literal character
-      `5` (RFC 4122 version 5 — name-based, SHA-1; we use SHA-256 but force
-      the version nibble; cryptographic strength of the hash is irrelevant
-      because UUIDs are namespace-local identifiers, not security tokens).
+      `4` (RFC 4122 version 4 — random). **Live-validated against
+      api.linear.app/graphql:** Linear's validator (`class-validator`
+      `isUuid('4')`) accepts ONLY v4. Hand-crafted control test:
+      `aaaaaaaa-bbbb-4ccc-8ddd-...` succeeded; same UUID with `5ccc`
+      version-nibble was rejected with `"id must be a UUID"`. Substituting
+      the version nibble with literal `4` after the SHA-256 slice keeps
+      determinism (this is "v4-shaped" not actually-v4 since v4 spec
+      requires RNG, but the validator checks shape, not entropy).
 - [ ] **AC-2:** `resolve-document-id` output's fourth group (chars 19-22)
       starts with one of `[89ab]` (RFC 4122 variant `10xx` — "DCE 1.1, ISO/IEC
       11578:1996"). The deterministic choice MUST be `8` so the UUID is
@@ -59,7 +64,7 @@ works end-to-end (concurrent-edit cache, /spec dispatch, archive matching).
 |------|--------|
 | `.ccanvil/scripts/linear-query.sh` | `cmd_resolve_document_id`: force version/variant nibbles |
 | `hub/tests/ssot-linear.bats` | New BTS-216 drift-guards (AC-1/2/3/4); existing UUID-equality fixtures regenerate via `resolve-document-id` (no hard-coded values to update) |
-| `.ccanvil/guide/command-reference.md` | Note `resolve-document-id` is RFC 4122 v5-shaped |
+| `.ccanvil/guide/command-reference.md` | Note `resolve-document-id` is RFC 4122 v4-shaped (Linear validates v4 only) |
 
 ## Dependencies
 
@@ -71,17 +76,17 @@ works end-to-end (concurrent-edit cache, /spec dispatch, archive matching).
   exist (every prior `--create-with-id` 422'd).
 - Changing the namespace UUID (`5b8e4a8e-4f3c-4d2a-9c1e-bf204550b91d`) —
   keep stable so derivations stay deterministic across the fix.
-- Implementing strict RFC 4122 v5 (which uses SHA-1 over the namespace
-  prefix). Our derivation uses SHA-256 of `"<NS>:<kind>:<ticket>"` and
-  forces v5 nibbles cosmetically. This passes Linear's `isUuid` validator
-  (which checks shape, not v5 algorithmic correctness) and preserves the
-  collision strength of SHA-256 over SHA-1.
+- Implementing strict RFC 4122 v4 (which requires RNG). Our derivation
+  uses SHA-256 of `"<NS>:<kind>:<ticket>"` and forces v4 nibbles
+  cosmetically. This passes Linear's `isUuid('4')` validator (which checks
+  shape, not entropy) while preserving the deterministic-derivation
+  invariant the BTS-204 idempotency contract depends on.
 
 ## Implementation Notes
 
 - The fix is two extra characters of forcing in the printf format string.
   Stable across re-runs because we substitute the version/variant nibbles
-  with constants (`5` and `8`).
+  with constants (`4` and `8`).
 - Live-validation gate: BTS-204's stasis claimed live-validation, but the
   test cited Linear-assigned UUIDs (not derived ones). This shipped a
   contract bug into 3 subsequent ships (BTS-213, BTS-214, BTS-204 itself).

@@ -3,7 +3,7 @@
 > Feature: bts-203-evidence-scan-description-fetch
 > Work: linear:BTS-203
 > Created: 1777329118
-> Status: In Progress
+> Status: Complete
 
 ## Summary
 

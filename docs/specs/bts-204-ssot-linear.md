@@ -3,7 +3,7 @@
 > Feature: bts-204-ssot-linear
 > Work: linear:BTS-204
 > Created: 1777261768
-> Status: In Progress
+> Status: Complete
 
 ## Summary
 

@@ -3,7 +3,7 @@
 > Feature: bts-213-spec-skill-linear-routing
 > Work: linear:BTS-213
 > Created: 1777268075
-> Status: In Progress
+> Status: Complete
 
 ## Summary
 

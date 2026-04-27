@@ -14,6 +14,41 @@ set -euo pipefail
 
 DEFAULT_DOCS_DIR="docs"
 
+# PROJECT_TREE_SUBCOMMANDS (BTS-212) — single source of truth for the family
+# of subcommands that operate on a project root and therefore must:
+#   1. accept --project-dir <path> to specify the root (skill prose calls
+#      `--project-dir .` mechanically across these); and
+#   2. emit a clean `Usage: ...` to stderr + exit 2 on any unknown flag,
+#      rather than silently consuming it (`*) shift ;;`) and letting the
+#      flag string reach a downstream tool like dirname/jq/sed which
+#      produces a cryptic non-substrate error message.
+#
+# Excluded from this set:
+#   - Pure-utility cmds that operate on stdin/stdout or take a single file
+#     path (no project-root resolution): extract-work, title-from-body,
+#     idea-template-body, derive-pr-title.
+#   - Internal pass-through cmds invoked only from other cmds in the family
+#     (their callers own the flag): auto-close-emit, auto-transition-emit,
+#     idea-pending-append, idea-pending-validate.
+#
+# When adding a new subcommand that resolves a project root, append it here
+# AND apply the canonical arg-loop pattern (see cmd_session_info for the
+# reference shape). hub/tests/docs-check-flags.bats enforces both directions:
+# (a) every name listed here must implement the contract; (b) every dispatched
+# cmd that parses --project-dir must appear in this list.
+PROJECT_TREE_SUBCOMMANDS=(
+  status validate recommend audit-session config-get list-specs
+  activate complete pr-cleanup detect-repo-type land land-recover-branch
+  sync-check pr-guard radar-gather
+  idea-add idea-list idea-count idea-count-local idea-update idea-sync
+  idea-pending-replay idea-review-icebox idea-migrate-state idea-migrate
+  idea-setup idea-upgrade
+  refresh-plan-hash archive-stasis sessions-list legacy-refs-scan stamp-spec
+  evidence-scan-session lifecycle-state
+  artifact-read artifact-write route-of ssot-migrate
+  session-info assert-pr-title remote-presence
+)
+
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
@@ -259,6 +294,8 @@ cmd_session_info() {
   while [[ $# -gt 0 ]]; do
     case "$1" in
       --project-dir) project_dir="${2:-.}"; shift 2 ;;
+      --) shift; break ;;
+      --*) echo "Usage: docs-check.sh session-info [--project-dir <path>]" >&2; exit 2 ;;
       *) shift ;;
     esac
   done
@@ -298,7 +335,23 @@ cmd_session_info() {
 # Output: JSON object with spec, plan, stasis entries.
 # ---------------------------------------------------------------------------
 cmd_status() {
-  local docs_dir="${1:-$DEFAULT_DOCS_DIR}"
+  # BTS-212: arg loop — accepts --project-dir <path> or legacy positional
+  # docs_dir. Unknown flags emit Usage + exit 2.
+  local project_dir=""
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --project-dir) project_dir="${2:-.}"; shift 2 ;;
+      --) shift; break ;;
+      --*) echo "Usage: docs-check.sh status [--project-dir <path>] [<docs-dir>]" >&2; exit 2 ;;
+      *) break ;;
+    esac
+  done
+  local docs_dir
+  if [[ -n "$project_dir" ]]; then
+    docs_dir="$project_dir/$DEFAULT_DOCS_DIR"
+  else
+    docs_dir="${1:-$DEFAULT_DOCS_DIR}"
+  fi
 
   local spec_entry plan_entry stasis_entry
   spec_entry=$(doc_entry "$docs_dir/spec.md" "spec")
@@ -340,7 +393,22 @@ cmd_status() {
 # Output: JSON with result, details array, and per-doc status.
 # ---------------------------------------------------------------------------
 cmd_validate() {
-  local docs_dir="${1:-$DEFAULT_DOCS_DIR}"
+  # BTS-212: arg loop
+  local project_dir=""
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --project-dir) project_dir="${2:-.}"; shift 2 ;;
+      --) shift; break ;;
+      --*) echo "Usage: docs-check.sh validate [--project-dir <path>] [<docs-dir>]" >&2; exit 2 ;;
+      *) break ;;
+    esac
+  done
+  local docs_dir
+  if [[ -n "$project_dir" ]]; then
+    docs_dir="$project_dir/$DEFAULT_DOCS_DIR"
+  else
+    docs_dir="${1:-$DEFAULT_DOCS_DIR}"
+  fi
   local status_json
   status_json=$(cmd_status "$docs_dir")
 
@@ -556,7 +624,22 @@ cmd_recommend() {
   # source of truth for "where in the lifecycle are we?" Recommend's job
   # is to render a single rich action string with context (Ready spec ID,
   # triage count, blocker details). Output schema unchanged for callers.
-  local docs_dir="${1:-$DEFAULT_DOCS_DIR}"
+  # BTS-212: arg loop
+  local project_dir=""
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --project-dir) project_dir="${2:-.}"; shift 2 ;;
+      --) shift; break ;;
+      --*) echo "Usage: docs-check.sh recommend [--project-dir <path>] [<docs-dir>]" >&2; exit 2 ;;
+      *) break ;;
+    esac
+  done
+  local docs_dir
+  if [[ -n "$project_dir" ]]; then
+    docs_dir="$project_dir/$DEFAULT_DOCS_DIR"
+  else
+    docs_dir="${1:-$DEFAULT_DOCS_DIR}"
+  fi
   local project_root="$(dirname "$docs_dir")"
 
   local envelope state
@@ -716,6 +799,12 @@ cmd_audit_session() {
         since_commit="$2"
         shift 2
         ;;
+      --project-dir)
+        repo_dir="${2:-.}"
+        shift 2
+        ;;
+      --) shift; break ;;
+      --*) echo "Usage: docs-check.sh audit-session [--since <commit>] [--project-dir <path>] [<repo-dir>]" >&2; exit 2 ;;
       *)
         repo_dir="$1"
         shift
@@ -835,7 +924,22 @@ cmd_audit_session() {
 # Returns [] if docs/specs/ is empty or doesn't exist.
 # ---------------------------------------------------------------------------
 cmd_list_specs() {
-  local docs_dir="${1:-$DEFAULT_DOCS_DIR}"
+  # BTS-212: arg loop
+  local project_dir=""
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --project-dir) project_dir="${2:-.}"; shift 2 ;;
+      --) shift; break ;;
+      --*) echo "Usage: docs-check.sh list-specs [--project-dir <path>] [<docs-dir>]" >&2; exit 2 ;;
+      *) break ;;
+    esac
+  done
+  local docs_dir
+  if [[ -n "$project_dir" ]]; then
+    docs_dir="$project_dir/$DEFAULT_DOCS_DIR"
+  else
+    docs_dir="${1:-$DEFAULT_DOCS_DIR}"
+  fi
   local specs_dir="$docs_dir/specs"
 
   if [[ ! -d "$specs_dir" ]]; then
@@ -891,10 +995,14 @@ cmd_activate() {
   local docs_dir=""
   local force_sync=false
   local auto_push=true
+  local project_dir_flag=""
   while [[ $# -gt 0 ]]; do
     case "$1" in
       --force-local-ahead|--force-sync) force_sync=true; shift ;;
       --no-auto-push) auto_push=false; shift ;;
+      --project-dir) project_dir_flag="${2:-.}"; shift 2 ;;
+      --) shift; break ;;
+      --*) echo "Usage: docs-check.sh activate [--force-sync] [--no-auto-push] [--project-dir <path>] <feature-id> [<docs-dir>]" >&2; exit 2 ;;
       *)
         if [[ -z "$feature_id" ]]; then feature_id="$1"
         elif [[ -z "$docs_dir" ]]; then docs_dir="$1"
@@ -903,7 +1011,10 @@ cmd_activate() {
         ;;
     esac
   done
-  [[ -n "$feature_id" ]] || { echo "Usage: activate <feature-id> [--force-sync] [--no-auto-push] [docs-dir]" >&2; exit 1; }
+  [[ -n "$feature_id" ]] || { echo "Usage: docs-check.sh activate [--force-sync] [--no-auto-push] [--project-dir <path>] <feature-id> [<docs-dir>]" >&2; exit 2; }
+  if [[ -n "$project_dir_flag" && -z "$docs_dir" ]]; then
+    docs_dir="$project_dir_flag/$DEFAULT_DOCS_DIR"
+  fi
   [[ -n "$docs_dir" ]] || docs_dir="$DEFAULT_DOCS_DIR"
   local specs_dir="$docs_dir/specs"
   local repo_root
@@ -1106,8 +1217,27 @@ cmd_activate() {
 # Fails if spec is not In Progress or feature-id not found.
 # ---------------------------------------------------------------------------
 cmd_complete() {
-  local feature_id="${1:?Usage: complete <feature-id> [docs-dir]}"
-  local docs_dir="${2:-$DEFAULT_DOCS_DIR}"
+  # BTS-212: arg loop
+  local project_dir_flag=""
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --project-dir) project_dir_flag="${2:-.}"; shift 2 ;;
+      --) shift; break ;;
+      --*) echo "Usage: docs-check.sh complete [--project-dir <path>] <feature-id> [<docs-dir>]" >&2; exit 2 ;;
+      *) break ;;
+    esac
+  done
+  local feature_id="${1:-}"
+  if [[ -z "$feature_id" ]]; then
+    echo "Usage: docs-check.sh complete [--project-dir <path>] <feature-id> [<docs-dir>]" >&2
+    exit 2
+  fi
+  local docs_dir
+  if [[ -n "$project_dir_flag" ]]; then
+    docs_dir="$project_dir_flag/$DEFAULT_DOCS_DIR"
+  else
+    docs_dir="${2:-$DEFAULT_DOCS_DIR}"
+  fi
   local specs_dir="$docs_dir/specs"
 
   # Find the spec file
@@ -1188,7 +1318,22 @@ cmd_complete() {
 # ---------------------------------------------------------------------------
 
 cmd_pr_cleanup() {
-  local docs_dir="${1:-$DEFAULT_DOCS_DIR}"
+  # BTS-212: arg loop
+  local project_dir=""
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --project-dir) project_dir="${2:-.}"; shift 2 ;;
+      --) shift; break ;;
+      --*) echo "Usage: docs-check.sh pr-cleanup [--project-dir <path>] [<docs-dir>]" >&2; exit 2 ;;
+      *) break ;;
+    esac
+  done
+  local docs_dir
+  if [[ -n "$project_dir" ]]; then
+    docs_dir="$project_dir/$DEFAULT_DOCS_DIR"
+  else
+    docs_dir="${1:-$DEFAULT_DOCS_DIR}"
+  fi
   local spec_file="$docs_dir/spec.md"
 
   if [[ -f "$spec_file" ]]; then
@@ -1370,7 +1515,21 @@ cmd_auto_close_emit() {
 # progress on network flakes" posture.
 # ---------------------------------------------------------------------------
 cmd_sync_check() {
-  local repo_root="${1:?Usage: sync-check <repo-root>}"
+  # BTS-212: arg loop
+  local project_dir_flag=""
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --project-dir) project_dir_flag="${2:-.}"; shift 2 ;;
+      --) shift; break ;;
+      --*) echo "Usage: docs-check.sh sync-check [--project-dir <path>] <repo-root>" >&2; exit 2 ;;
+      *) break ;;
+    esac
+  done
+  local repo_root="${project_dir_flag:-${1:-}}"
+  if [[ -z "$repo_root" ]]; then
+    echo "Usage: docs-check.sh sync-check [--project-dir <path>] <repo-root>" >&2
+    exit 2
+  fi
 
   # AC-9: no origin remote at all → no-op success.
   if ! git -C "$repo_root" remote get-url origin >/dev/null 2>&1; then
@@ -1439,6 +1598,19 @@ cmd_sync_check() {
 #   1   feature branch is behind origin/main — rebase or merge to update
 # ---------------------------------------------------------------------------
 cmd_pr_guard() {
+  # BTS-212: arg loop
+  local project_dir_flag=""
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --project-dir) project_dir_flag="${2:-.}"; shift 2 ;;
+      --) shift; break ;;
+      --*) echo "Usage: docs-check.sh pr-guard [--project-dir <path>]" >&2; exit 2 ;;
+      *) shift ;;
+    esac
+  done
+  if [[ -n "$project_dir_flag" ]]; then
+    cd "$project_dir_flag" 2>/dev/null || { echo "ERROR: cannot cd to $project_dir_flag" >&2; return 2; }
+  fi
   local repo_root
   repo_root=$(git rev-parse --show-toplevel 2>/dev/null) || {
     echo "ERROR: not inside a git worktree." >&2
@@ -1499,10 +1671,25 @@ cmd_pr_guard() {
 # Runs inside the CWD's git repo. Caller is responsible for cd.
 # ---------------------------------------------------------------------------
 cmd_land_recover_branch() {
+  # BTS-212: arg loop — accepts --project-dir, rejects unknown flags.
+  local project_dir_flag=""
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --project-dir) project_dir_flag="${2:-.}"; shift 2 ;;
+      --) shift; break ;;
+      --*) echo "Usage: docs-check.sh land-recover-branch [--project-dir <path>]" >&2; exit 2 ;;
+      *) shift ;;
+    esac
+  done
+  if [[ -n "$project_dir_flag" ]]; then
+    cd "$project_dir_flag" 2>/dev/null || { echo "ERROR: cannot cd to $project_dir_flag" >&2; return 2; }
+  fi
   # If HEAD commit subject looks like a session-stasis write (from /stasis
   # committed on main right before /compact), skip it and look at HEAD~1.
+  # BTS-212: tolerate empty/no-commit repos — git log returns 128, set -e
+  # would otherwise abort silently. `|| true` lets the WARN path below run.
   local subject
-  subject=$(git log -1 --format=%s 2>/dev/null)
+  subject=$(git log -1 --format=%s 2>/dev/null || true)
   # Tightened from `^docs:[[:space:]]*stasis` (reviewer WARN): require at
   # least one space after `docs:` and ensure `stasis` is followed by a word
   # boundary (space or end) so `docs:stasis-notes` or `docs: stasisnotes`
@@ -1561,6 +1748,20 @@ cmd_land_recover_branch() {
 # Exits 2 with a stderr error when invoked outside a git repository.
 # ---------------------------------------------------------------------------
 cmd_detect_repo_type() {
+  # BTS-212: arg loop — detect-repo-type takes no positionals; reject all flags
+  # except --project-dir which scopes the cwd for the git inspection.
+  local project_dir_flag=""
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --project-dir) project_dir_flag="${2:-.}"; shift 2 ;;
+      --) shift; break ;;
+      --*) echo "Usage: docs-check.sh detect-repo-type [--project-dir <path>]" >&2; exit 2 ;;
+      *) break ;;
+    esac
+  done
+  if [[ -n "$project_dir_flag" ]]; then
+    cd "$project_dir_flag" 2>/dev/null || { echo "ERROR: cannot cd to $project_dir_flag" >&2; return 2; }
+  fi
   if ! git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
     echo "ERROR: detect-repo-type: not in a git repository" >&2
     return 2
@@ -1596,8 +1797,21 @@ cmd_detect_repo_type() {
 }
 
 cmd_land() {
+  # BTS-212: arg loop
   local force=false
-  [[ "${1:-}" == "--force" ]] && force=true
+  local project_dir_flag=""
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --force) force=true; shift ;;
+      --project-dir) project_dir_flag="${2:-.}"; shift 2 ;;
+      --) shift; break ;;
+      --*) echo "Usage: docs-check.sh land [--force] [--project-dir <path>]" >&2; exit 2 ;;
+      *) shift ;;
+    esac
+  done
+  if [[ -n "$project_dir_flag" ]]; then
+    cd "$project_dir_flag" 2>/dev/null || { echo "ERROR: cannot cd to $project_dir_flag" >&2; return 2; }
+  fi
 
   local branch
   branch=$(git branch --show-current 2>/dev/null)
@@ -1781,8 +1995,22 @@ merge_config() {
 # missing, key is missing, or features object doesn't exist.
 # ---------------------------------------------------------------------------
 cmd_config_get() {
-  local key="${1:?Usage: config-get <key> [project-dir]}"
-  local project_dir="${2:-.}"
+  # BTS-212: arg loop — accepts --project-dir or legacy positional position 2.
+  local project_dir_flag=""
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --project-dir) project_dir_flag="${2:-.}"; shift 2 ;;
+      --) shift; break ;;
+      --*) echo "Usage: docs-check.sh config-get [--project-dir <path>] <key> [<project-dir>]" >&2; exit 2 ;;
+      *) break ;;
+    esac
+  done
+  local key="${1:-}"
+  if [[ -z "$key" ]]; then
+    echo "Usage: docs-check.sh config-get [--project-dir <path>] <key> [<project-dir>]" >&2
+    exit 2
+  fi
+  local project_dir="${project_dir_flag:-${2:-.}}"
 
   local merged
   merged=$(merge_config "$project_dir") || return 1
@@ -1802,7 +2030,23 @@ cmd_config_get() {
 # ---------------------------------------------------------------------------
 
 cmd_radar_gather() {
-  local docs_dir="${1:-$DEFAULT_DOCS_DIR}"
+  # BTS-212: arg loop — accepts --project-dir <path> or legacy positional
+  # docs_dir. Unknown flags emit Usage + exit 2.
+  local project_dir=""
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --project-dir) project_dir="${2:-.}"; shift 2 ;;
+      --) shift; break ;;
+      --*) echo "Usage: docs-check.sh radar-gather [--project-dir <path>] [<docs-dir>]" >&2; exit 2 ;;
+      *) break ;;
+    esac
+  done
+  local docs_dir
+  if [[ -n "$project_dir" ]]; then
+    docs_dir="$project_dir/$DEFAULT_DOCS_DIR"
+  else
+    docs_dir="${1:-$DEFAULT_DOCS_DIR}"
+  fi
   local result="{}"
 
   # Active spec
@@ -1936,6 +2180,9 @@ cmd_idea_add() {
           return 2
         fi
         parent="$2"; shift 2 ;;
+      --project-dir) project_dir="${2:-.}"; shift 2 ;;
+      --) shift; break ;;
+      --*) echo "Usage: docs-check.sh idea-add <body> [--title <t>] [--parent <ref>] [--project-dir <path>]" >&2; exit 2 ;;
       *)
         if [[ -z "$body" ]]; then
           body="$1"
@@ -1947,7 +2194,7 @@ cmd_idea_add() {
     esac
   done
 
-  [[ -n "$body" ]] || { echo "Usage: idea-add <body> [--title TITLE] [--parent REF] [project-dir]" >&2; exit 1; }
+  [[ -n "$body" ]] || { echo "Usage: docs-check.sh idea-add <body> [--title TITLE] [--parent REF] [--project-dir <path>]" >&2; exit 2; }
 
   # Defense-in-depth: on Linear-configured nodes, captures must route
   # through the /idea skill (operations.sh -> MCP). Refuse direct script
@@ -2089,6 +2336,9 @@ cmd_idea_list() {
     case "$1" in
       --status)          filter_status="$2"; shift 2 ;;
       --include-archive) include_archive=1; shift ;;
+      --project-dir)     project_dir="${2:-.}"; shift 2 ;;
+      --) shift; break ;;
+      --*) echo "Usage: docs-check.sh idea-list [--status <s>] [--include-archive] [--project-dir <path>] [<project-dir>]" >&2; exit 2 ;;
       *)                 project_dir="$1"; shift ;;
     esac
   done
@@ -2152,7 +2402,17 @@ cmd_idea_count_local() {
   # Renamed from cmd_idea_count in BTS-164 — cmd_idea_count is now a thin
   # dispatcher that resolves the routing and calls this for the local path
   # or shells out to linear-query.sh for the http path.
-  local project_dir="${1:-.}"
+  # BTS-212: arg loop
+  local project_dir_flag=""
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --project-dir) project_dir_flag="${2:-.}"; shift 2 ;;
+      --) shift; break ;;
+      --*) echo "Usage: docs-check.sh idea-count-local [--project-dir <path>] [<project-dir>]" >&2; exit 2 ;;
+      *) break ;;
+    esac
+  done
+  local project_dir="${project_dir_flag:-${1:-.}}"
   local ideas_log="$project_dir/.ccanvil/ideas.log"
 
   # Five-state vocab: triage/backlog/icebox/canceled/duplicate.
@@ -2193,7 +2453,17 @@ cmd_idea_count() {
   # linear-query.sh and aggregate Linear state (mechanism=http). Same
   # output shape regardless of mechanism so radar-gather and /recall stay
   # provider-neutral.
-  local project_dir="${1:-.}"
+  # BTS-212: arg loop
+  local project_dir_flag=""
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --project-dir) project_dir_flag="${2:-.}"; shift 2 ;;
+      --) shift; break ;;
+      --*) echo "Usage: docs-check.sh idea-count [--project-dir <path>] [<project-dir>]" >&2; exit 2 ;;
+      *) break ;;
+    esac
+  done
+  local project_dir="${project_dir_flag:-${1:-.}}"
   local ops="$(dirname "$0")/operations.sh"
 
   local resolution
@@ -2260,7 +2530,17 @@ cmd_idea_count() {
 # merged→duplicate. Writes a timestamped backup before mutating. Idempotent:
 # a second run against a log with no legacy entries reports 0 migrations.
 cmd_idea_migrate_state() {
-  local project_dir="${1:-.}"
+  # BTS-212: arg loop
+  local project_dir_flag=""
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --project-dir) project_dir_flag="${2:-.}"; shift 2 ;;
+      --) shift; break ;;
+      --*) echo "Usage: docs-check.sh idea-migrate-state [--project-dir <path>] [<project-dir>]" >&2; exit 2 ;;
+      *) break ;;
+    esac
+  done
+  local project_dir="${project_dir_flag:-${1:-.}}"
   local ideas_log="$project_dir/.ccanvil/ideas.log"
 
   if [[ ! -f "$ideas_log" ]]; then
@@ -2307,7 +2587,17 @@ cmd_idea_migrate_state() {
 # least 60 days (5184000s) in the past. Used by /idea review-icebox and
 # surfaced as a count via radar-gather.
 cmd_idea_review_icebox() {
-  local project_dir="${1:-.}"
+  # BTS-212: arg loop
+  local project_dir_flag=""
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --project-dir) project_dir_flag="${2:-.}"; shift 2 ;;
+      --) shift; break ;;
+      --*) echo "Usage: docs-check.sh idea-review-icebox [--project-dir <path>] [<project-dir>]" >&2; exit 2 ;;
+      *) break ;;
+    esac
+  done
+  local project_dir="${project_dir_flag:-${1:-.}}"
   local ideas_log="$project_dir/.ccanvil/ideas.log"
   local now threshold
   now=$(date +%s)
@@ -2327,9 +2617,23 @@ cmd_idea_review_icebox() {
 }
 
 cmd_idea_update() {
-  local uid="${1:?Usage: idea-update <uid> <status> [project-dir]}"
-  local new_status="${2:?Usage: idea-update <uid> <status> [project-dir]}"
-  local project_dir="${3:-.}"
+  # BTS-212: arg loop
+  local project_dir_flag=""
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --project-dir) project_dir_flag="${2:-.}"; shift 2 ;;
+      --) shift; break ;;
+      --*) echo "Usage: docs-check.sh idea-update [--project-dir <path>] <uid> <status> [<project-dir>]" >&2; exit 2 ;;
+      *) break ;;
+    esac
+  done
+  local uid="${1:-}"
+  local new_status="${2:-}"
+  if [[ -z "$uid" || -z "$new_status" ]]; then
+    echo "Usage: docs-check.sh idea-update [--project-dir <path>] <uid> <status> [<project-dir>]" >&2
+    exit 2
+  fi
+  local project_dir="${project_dir_flag:-${3:-.}}"
   local ideas_log="$project_dir/.ccanvil/ideas.log"
 
   # Accept new vocab (triage/backlog/icebox/canceled/duplicate) and legacy
@@ -2399,7 +2703,10 @@ cmd_idea_sync() {
 
   while [[ $# -gt 0 ]]; do
     case "$1" in
-      --ack) ack_ts="$2"; shift 2 ;;
+      --ack)         ack_ts="$2"; shift 2 ;;
+      --project-dir) project_dir="${2:-.}"; shift 2 ;;
+      --) shift; break ;;
+      --*) echo "Usage: docs-check.sh idea-sync [--ack <ts>] [--project-dir <path>] [<project-dir>]" >&2; exit 2 ;;
       *) project_dir="$1"; shift ;;
     esac
   done
@@ -2447,6 +2754,8 @@ cmd_refresh_plan_hash() {
   while [[ $# -gt 0 ]]; do
     case "$1" in
       --project-dir) project_dir="$2"; shift 2 ;;
+      --) shift; break ;;
+      --*) echo "Usage: docs-check.sh refresh-plan-hash [--project-dir <path>] [<project-dir>]" >&2; exit 2 ;;
       *) project_dir="$1"; shift ;;
     esac
   done
@@ -2547,6 +2856,8 @@ cmd_archive_stasis() {
   while [[ $# -gt 0 ]]; do
     case "$1" in
       --project-dir) project_dir="$2"; shift 2 ;;
+      --) shift; break ;;
+      --*) echo "Usage: docs-check.sh archive-stasis [--project-dir <path>] [<project-dir>]" >&2; exit 2 ;;
       *) project_dir="$1"; shift ;;
     esac
   done
@@ -2605,6 +2916,8 @@ cmd_sessions_list() {
     case "$1" in
       --project-dir) project_dir="$2"; shift 2 ;;
       --limit)       limit="$2"; shift 2 ;;
+      --) shift; break ;;
+      --*) echo "Usage: docs-check.sh sessions-list [--project-dir <path>] [--limit <n>] [<project-dir>]" >&2; exit 2 ;;
       *)             project_dir="$1"; shift ;;
     esac
   done
@@ -2667,6 +2980,8 @@ cmd_assert_pr_title() {
   while [[ $# -gt 0 ]]; do
     case "$1" in
       --project-dir) project_dir="$2"; shift 2 ;;
+      --) shift; break ;;
+      --*) echo "Usage: docs-check.sh assert-pr-title [--project-dir <path>] <pr-number>" >&2; exit 2 ;;
       *)
         if [[ -z "$pr_number" ]]; then pr_number="$1"; else project_dir="$1"; fi
         shift
@@ -2675,7 +2990,7 @@ cmd_assert_pr_title() {
   done
 
   if [[ -z "$pr_number" ]]; then
-    echo "ERROR: assert-pr-title requires <pr-number>" >&2
+    echo "Usage: docs-check.sh assert-pr-title [--project-dir <path>] <pr-number>" >&2
     return 2
   fi
   if ! command -v gh >/dev/null 2>&1; then
@@ -2764,6 +3079,8 @@ cmd_idea_pending_replay() {
   while [[ $# -gt 0 ]]; do
     case "$1" in
       --project-dir) project_dir="$2"; shift 2 ;;
+      --) shift; break ;;
+      --*) echo "Usage: docs-check.sh idea-pending-replay [--project-dir <path>] [<project-dir>]" >&2; exit 2 ;;
       *) project_dir="$1"; shift ;;
     esac
   done
@@ -2932,8 +3249,11 @@ cmd_idea_migrate() {
 
   while [[ $# -gt 0 ]]; do
     case "$1" in
-      --extract) mode="extract"; shift ;;
-      --finalize) mode="finalize"; shift ;;
+      --extract)     mode="extract"; shift ;;
+      --finalize)    mode="finalize"; shift ;;
+      --project-dir) project_dir="${2:-.}"; shift 2 ;;
+      --) shift; break ;;
+      --*) echo "Usage: docs-check.sh idea-migrate [--extract|--finalize] [--project-dir <path>] [<project-dir>]" >&2; exit 2 ;;
       *) project_dir="$1"; shift ;;
     esac
   done
@@ -3025,10 +3345,13 @@ cmd_idea_setup() {
 
   while [[ $# -gt 0 ]]; do
     case "$1" in
-      --provider) provider="$2"; shift 2 ;;
-      --team)     team="$2";     shift 2 ;;
-      --project)  project="$2";  shift 2 ;;
-      *)          project_dir="$1"; shift ;;
+      --provider)    provider="$2"; shift 2 ;;
+      --team)        team="$2";     shift 2 ;;
+      --project)     project="$2";  shift 2 ;;
+      --project-dir) project_dir="${2:-.}"; shift 2 ;;
+      --) shift; break ;;
+      --*) echo "Usage: docs-check.sh idea-setup [--provider <p>] [--team <t>] [--project <p>] [--project-dir <path>] [<project-dir>]" >&2; exit 2 ;;
+      *)             project_dir="$1"; shift ;;
     esac
   done
 
@@ -3114,21 +3437,30 @@ cmd_legacy_refs_scan() {
   # against a user-supplied allowlist (same ERE format as
   # hub/tests/legacy-refs-allowlist.txt). Default (no flag) returns every
   # raw match — preserves existing behavior for backward compat.
+  # BTS-212: arg loop with strict unknown-flag handling
   local allowlist=""
-  if [[ "${1:-}" == "--respect-allowlist" ]]; then
-    allowlist="${2:-}"
-    if [[ -z "$allowlist" ]]; then
-      echo "ERROR: --respect-allowlist requires a path argument" >&2
-      return 2
-    fi
-    if [[ ! -f "$allowlist" ]]; then
-      echo "ERROR: allowlist file not found: $allowlist" >&2
-      return 2
-    fi
-    shift 2
-  fi
+  local project_dir_flag=""
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --respect-allowlist)
+        allowlist="${2:-}"
+        if [[ -z "$allowlist" ]]; then
+          echo "ERROR: --respect-allowlist requires a path argument" >&2
+          return 2
+        fi
+        if [[ ! -f "$allowlist" ]]; then
+          echo "ERROR: allowlist file not found: $allowlist" >&2
+          return 2
+        fi
+        shift 2 ;;
+      --project-dir) project_dir_flag="${2:-.}"; shift 2 ;;
+      --) shift; break ;;
+      --*) echo "Usage: docs-check.sh legacy-refs-scan [--respect-allowlist <path>] [--project-dir <path>] [<project-dir>]" >&2; exit 2 ;;
+      *) break ;;
+    esac
+  done
 
-  local project_dir="${1:-.}"
+  local project_dir="${project_dir_flag:-${1:-.}}"
 
   local pattern='/catchup|/checkpoint|docs/checkpoint\.md|checkpoint\.(read|write)|stale-checkpoint'
 
@@ -3237,9 +3569,12 @@ cmd_idea_upgrade() {
       --provider)       provider="$2"; shift 2 ;;
       --team)           team="$2";     shift 2 ;;
       --project)        project="$2";  shift 2 ;;
+      --project-dir)    project_dir="${2:-.}"; shift 2 ;;
       --dry-run)        dry_run=1;     shift ;;
       --create-project) create_project=1; shift ;;
       --from-legacy)    from_legacy=1; shift ;;
+      --) shift; break ;;
+      --*) echo "Usage: docs-check.sh idea-upgrade [--provider <p>] [--team <t>] [--project <p>] [--project-dir <path>] [--dry-run] [--create-project] [--from-legacy] [<project-dir>]" >&2; exit 2 ;;
       *)                project_dir="$1"; shift ;;
     esac
   done
@@ -3483,11 +3818,26 @@ cmd_title_from_body() {
 # Output (stdout, JSON): {"feature_id":"<id>","stamped_epoch":<n>,"file":"<path>"}
 # ---------------------------------------------------------------------------
 cmd_stamp_spec() {
+  # BTS-212: arg loop
+  local project_dir_flag=""
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --project-dir) project_dir_flag="${2:-.}"; shift 2 ;;
+      --) shift; break ;;
+      --*) echo "Usage: docs-check.sh stamp-spec [--project-dir <path>] <feature_id> [<docs-dir>]" >&2; exit 2 ;;
+      *) break ;;
+    esac
+  done
   local feature_id="${1:-}"
-  local docs_dir="${2:-docs}"
+  local docs_dir
+  if [[ -n "$project_dir_flag" ]]; then
+    docs_dir="$project_dir_flag/docs"
+  else
+    docs_dir="${2:-docs}"
+  fi
 
   if [[ -z "$feature_id" ]]; then
-    echo "ERROR: stamp-spec requires <feature_id>" >&2
+    echo "Usage: docs-check.sh stamp-spec [--project-dir <path>] <feature_id> [<docs-dir>]" >&2
     return 2
   fi
 
@@ -3531,7 +3881,17 @@ cmd_stamp_spec() {
 # Exit code: always 0 (callers branch on has_origin, not status).
 # ---------------------------------------------------------------------------
 cmd_remote_presence() {
-  local repo_dir="${1:-.}"
+  # BTS-212: arg loop
+  local project_dir_flag=""
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --project-dir) project_dir_flag="${2:-.}"; shift 2 ;;
+      --) shift; break ;;
+      --*) echo "Usage: docs-check.sh remote-presence [--project-dir <path>] [<repo-dir>]" >&2; exit 2 ;;
+      *) break ;;
+    esac
+  done
+  local repo_dir="${project_dir_flag:-${1:-.}}"
 
   local git_repo="false"
   local has_origin="false"
@@ -3731,6 +4091,8 @@ cmd_evidence_scan_session() {
       --project-dir) project_dir="${2:-.}"; shift 2 ;;
       --input-json) input_json="${2:-}"; shift 2 ;;
       --no-time-filter) no_time_filter=1; shift ;;
+      --) shift; break ;;
+      --*) echo "Usage: docs-check.sh evidence-scan-session [--since <ref>] [--project-dir <path>] [--input-json <path>] [--no-time-filter]" >&2; exit 2 ;;
       *) shift ;;
     esac
   done
@@ -4160,11 +4522,14 @@ _doc_concurrent_edit_check() {
 # lifecycle artifacts between local files and Linear Documents. Bidirectional.
 # Never auto-triggered. Per AC-12.
 cmd_ssot_migrate() {
-  local direction="" feature=""
+  local direction="" feature="" project_dir="."
   while [[ $# -gt 0 ]]; do
     case "$1" in
-      --to)       direction="$2"; shift 2 ;;
-      --feature)  feature="$2";   shift 2 ;;
+      --to)         direction="$2"; shift 2 ;;
+      --feature)    feature="$2";   shift 2 ;;
+      --project-dir) project_dir="${2:-.}"; shift 2 ;;
+      --) shift; break ;;
+      --*) echo "Usage: docs-check.sh ssot-migrate --to {linear|local} [--feature <id>] [--project-dir <path>]" >&2; exit 2 ;;
       *) shift ;;
     esac
   done
@@ -4177,7 +4542,7 @@ cmd_ssot_migrate() {
     return 2
   fi
 
-  local project_dir="."
+  # BTS-212: project_dir parsed from arg loop (default ".")
   local migrated=0 skipped=0 errors=0
   local kind
 
@@ -4244,12 +4609,14 @@ cmd_route_of() {
   while [[ $# -gt 0 ]]; do
     case "$1" in
       --project-dir) project_dir="${2:-.}"; shift 2 ;;
+      --) shift; break ;;
+      --*) echo "Usage: docs-check.sh route-of <spec|plan|stasis> [--project-dir <path>]" >&2; exit 2 ;;
       spec|plan|stasis) kind="$1"; shift ;;
       *) shift ;;
     esac
   done
   if [[ -z "$kind" ]]; then
-    echo "Usage: route-of <spec|plan|stasis> [--project-dir <dir>]" >&2
+    echo "Usage: docs-check.sh route-of <spec|plan|stasis> [--project-dir <dir>]" >&2
     return 2
   fi
   _lifecycle_route "$kind" "$project_dir"
@@ -4269,6 +4636,8 @@ cmd_artifact_read() {
       --feature)      feature="$2";     shift 2 ;;
       --stasis-kind)  stasis_kind="$2"; shift 2 ;;
       --project-dir)  project_dir="${2:-.}"; shift 2 ;;
+      --) shift; break ;;
+      --*) echo "Usage: docs-check.sh artifact-read --kind {spec|plan|stasis} [--feature <id>] [--stasis-kind {feature|session}] [--project-dir <path>]" >&2; exit 2 ;;
       *) shift ;;
     esac
   done
@@ -4350,6 +4719,8 @@ cmd_artifact_write() {
       --feature)      feature="$2";     shift 2 ;;
       --stasis-kind)  stasis_kind="$2"; shift 2 ;;
       --project-dir)  project_dir="${2:-.}"; shift 2 ;;
+      --) shift; break ;;
+      --*) echo "Usage: docs-check.sh artifact-write --kind {spec|plan|stasis} [--feature <id>] [--stasis-kind {feature|session}] [--project-dir <path>]" >&2; exit 2 ;;
       *) shift ;;
     esac
   done
@@ -4479,6 +4850,8 @@ cmd_lifecycle_state() {
   while [[ $# -gt 0 ]]; do
     case "$1" in
       --project-dir) project_dir="${2:-.}"; shift 2 ;;
+      --) shift; break ;;
+      --*) echo "Usage: docs-check.sh lifecycle-state [--project-dir <path>]" >&2; exit 2 ;;
       *) shift ;;
     esac
   done

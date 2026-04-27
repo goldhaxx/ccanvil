@@ -347,8 +347,8 @@ JSON
   _setup_stub
   cat > "$LINEAR_STUB_RESPONSE" <<'JSON'
 {"data":{"documentContentHistory":{"history":[
-  {"id":"h1","contentDataSnapshotAt":"2026-04-26T20:00:00.000Z","actor":{"id":"u1","name":"alice"}},
-  {"id":"h2","contentDataSnapshotAt":"2026-04-26T19:00:00.000Z","actor":null}
+  {"id":"h1","contentDataSnapshotAt":"2026-04-26T20:00:00.000Z","actorIds":["u1"]},
+  {"id":"h2","contentDataSnapshotAt":"2026-04-26T19:00:00.000Z","actorIds":[]}
 ]}}}
 JSON
   run bash -c "source '$STUB_FIXTURE' && bash '$LQ' document-history doc-1"
@@ -356,6 +356,7 @@ JSON
   echo "$output" | jq -e 'length == 2'
   echo "$output" | jq -e '.[0].id == "h1"'
   echo "$output" | jq -e '.[0].snapshotAt == "2026-04-26T20:00:00.000Z"'
+  echo "$output" | jq -e '.[0].actorIds == ["u1"]'
 }
 
 @test "BTS-204 Step 5c: document-history requires id" {

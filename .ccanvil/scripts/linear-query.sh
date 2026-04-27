@@ -890,7 +890,7 @@ cmd_document_history() {
       history {
         id
         contentDataSnapshotAt
-        actor { id name }
+        actorIds
       }
     }
   }'
@@ -898,7 +898,7 @@ cmd_document_history() {
   _post_graphql "$query" "$variables" | jq '[.documentContentHistory.history[] | {
     id: .id,
     snapshotAt: .contentDataSnapshotAt,
-    actor: (.actor // null)
+    actorIds: (.actorIds // [])
   }]'
 }
 

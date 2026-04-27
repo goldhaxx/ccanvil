@@ -407,6 +407,46 @@ cmd_list_projects() {
   _post_graphql "$query" "$variables" | jq '[.projects.nodes[] | {id, name, slugId}]'
 }
 
+# BTS-228: create an Issue↔Issue relation. Linear's IssueUpdateInput does
+# NOT support duplicate/blocks/related fields — those are separate
+# IssueRelation entities created via issueRelationCreate. This subcommand
+# wraps that mutation as a clean primitive; cmd_save_issue's --duplicate-of
+# convenience flag dispatches through this path internally.
+cmd_create_relation() {
+  _require_api_key
+  local rel_type="" issue_id="" related_id=""
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --type)    rel_type="$2";    shift 2 ;;
+      --issue)   issue_id="$2";    shift 2 ;;
+      --related) related_id="$2";  shift 2 ;;
+      *) _die 2 "create-relation: unknown flag: $1" ;;
+    esac
+  done
+  case "$rel_type" in
+    duplicate|blocks|related) ;;
+    "")  _die 2 "create-relation: --type required (duplicate|blocks|related)" ;;
+    *)   _die 2 "create-relation: unknown --type '$rel_type' (valid: duplicate|blocks|related)" ;;
+  esac
+  [[ -z "$issue_id" ]]   && _die 2 "create-relation: --issue required (issue UUID)"
+  [[ -z "$related_id" ]] && _die 2 "create-relation: --related required (related issue UUID)"
+
+  local query='mutation IssueRelationCreate($input: IssueRelationCreateInput!) {
+    issueRelationCreate(input: $input) {
+      success
+      issueRelation { id type }
+    }
+  }'
+  local variables
+  variables=$(jq -nc \
+    --arg type "$rel_type" \
+    --arg issueId "$issue_id" \
+    --arg relatedIssueId "$related_id" \
+    '{input:{type:$type, issueId:$issueId, relatedIssueId:$relatedIssueId}}')
+
+  _post_graphql "$query" "$variables" | jq '.issueRelationCreate.issueRelation | {id, type}'
+}
+
 cmd_save_issue() {
   _require_api_key
 
@@ -532,9 +572,10 @@ cmd_save_issue() {
   if [[ -n "$parent_id" ]]; then
     input=$(printf '%s' "$input" | jq --arg v "$parent_id" '. + {parentId:$v}')
   fi
-  if [[ -n "$duplicate_of" ]]; then
-    input=$(printf '%s' "$input" | jq --arg v "$duplicate_of" '. + {duplicateOf:$v}')
-  fi
+  # BTS-228: do NOT append duplicateOf to IssueUpdateInput — Linear rejects
+  # the field. Duplicate-of is an IssueRelation entity created via a separate
+  # issueRelationCreate mutation (cmd_create_relation). The relation dispatch
+  # happens AFTER a successful issueUpdate, below.
   if [[ -n "$priority" ]]; then
     input=$(printf '%s' "$input" | jq --argjson v "$priority" '. + {priority:$v}')
   fi
@@ -570,12 +611,36 @@ cmd_save_issue() {
     # Update mode. Linear's issueUpdate accepts the same input shape minus
     # creation-only fields (teamId is rejected for update, but we already
     # don't add it for the update path's expected callers).
+    # BTS-228: query also returns the issue UUID (`id`) so the post-update
+    # relation dispatch (when --duplicate-of was supplied) can use it.
     local query='mutation IssueUpdate($id: String!, $input: IssueUpdateInput!) {
-      issueUpdate(id: $id, input: $input) { success issue { identifier title } }
+      issueUpdate(id: $id, input: $input) { success issue { id identifier title } }
     }'
     local variables
     variables=$(jq -n --arg id "$id" --argjson i "$input" '{id:$id, input:$i}')
-    _post_graphql "$query" "$variables" | jq '.issueUpdate.issue | {
+    local update_response
+    update_response=$(_post_graphql "$query" "$variables")
+
+    # BTS-228: dispatch the IssueRelation as a follow-up when --duplicate-of
+    # was supplied. State transition has already succeeded; relation failure
+    # is non-fatal (WARN + retry recipe). Linear's relation API requires
+    # both endpoints as UUIDs.
+    if [[ -n "$duplicate_of" ]]; then
+      local issue_uuid
+      issue_uuid=$(printf '%s' "$update_response" | jq -r '.issueUpdate.issue.id // empty')
+      if [[ -n "$issue_uuid" ]]; then
+        if ! cmd_create_relation --type duplicate --issue "$issue_uuid" --related "$duplicate_of" >/dev/null 2>&1; then
+          echo "WARN: save-issue: relation-create-failed — type=duplicate from=$id to=$duplicate_of" >&2
+          echo "Retry: bash linear-query.sh create-relation --type duplicate --issue $issue_uuid --related $duplicate_of" >&2
+        fi
+      else
+        echo "WARN: save-issue: relation-create-failed — could not resolve issue uuid for relation dispatch" >&2
+        echo "Retry: bash linear-query.sh create-relation --type duplicate --issue <uuid-of-$id> --related $duplicate_of" >&2
+      fi
+    fi
+
+    # Re-emit the existing output shape ({id: identifier, title}) for callers.
+    printf '%s' "$update_response" | jq '.issueUpdate.issue | {
       id: .identifier,
       title: .title
     }'
@@ -607,6 +672,7 @@ main() {
     list-teams)    cmd_list_teams    "$@" ;;
     list-projects) cmd_list_projects "$@" ;;
     save-issue)   cmd_save_issue   "$@" ;;
+    create-relation) cmd_create_relation "$@" ;;
     resolve-document-id) cmd_resolve_document_id "$@" ;;
     get-document) cmd_get_document "$@" ;;
     save-document) cmd_save_document "$@" ;;

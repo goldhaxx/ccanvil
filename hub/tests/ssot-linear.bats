@@ -1494,3 +1494,38 @@ SHELL
   run bash -c "source '$STUB_FIXTURE' && bash '$DC' complete bts-local-feat '$fx/docs'"
   [ "$status" -eq 0 ]
 }
+
+# --- BTS-217: _normalize_feature_to_ticket helper ---
+# These tests source ONLY the helper function (extracted via awk) so the
+# script's tail dispatcher doesn't run. This pattern protects unit tests
+# of internal helpers without requiring them to be promoted to public CLI
+# commands.
+
+_extract_normalize_helper() {
+  awk '/^_normalize_feature_to_ticket\(\)/,/^}$/' "$DC"
+}
+
+@test "BTS-217 normalize: canonical BTS-N passes through" {
+  result=$(bash -c "$(_extract_normalize_helper); _normalize_feature_to_ticket BTS-217")
+  [ "$result" = "BTS-217" ]
+}
+
+@test "BTS-217 normalize: kebab feature_id → upper-slug" {
+  result=$(bash -c "$(_extract_normalize_helper); _normalize_feature_to_ticket bts-217-flip-linear-routing")
+  [ "$result" = "BTS-217" ]
+}
+
+@test "BTS-217 normalize: multi-segment kebab → upper-slug (only leading slug)" {
+  result=$(bash -c "$(_extract_normalize_helper); _normalize_feature_to_ticket proj-42-some-very-long-feature-name")
+  [ "$result" = "PROJ-42" ]
+}
+
+@test "BTS-217 normalize: legacy no-slug input passes through verbatim" {
+  result=$(bash -c "$(_extract_normalize_helper); _normalize_feature_to_ticket some-legacy-feature-no-slug")
+  [ "$result" = "some-legacy-feature-no-slug" ]
+}
+
+@test "BTS-217 normalize: empty input passes through verbatim" {
+  result=$(bash -c "$(_extract_normalize_helper); _normalize_feature_to_ticket ''")
+  [ "$result" = "" ]
+}

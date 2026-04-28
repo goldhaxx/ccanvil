@@ -3,7 +3,7 @@
 > Feature: bts-232-recall-carry-forward-determinism
 > Work: linear:BTS-232
 > Created: 1777333997
-> Status: In Progress
+> Status: Complete
 
 ## Summary
 

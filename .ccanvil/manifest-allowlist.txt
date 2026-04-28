@@ -69,3 +69,10 @@
 .ccanvil/scripts/docs-check.sh:cmd_idea_count_local
 .ccanvil/scripts/docs-check.sh:cmd_idea_count
 .ccanvil/scripts/docs-check.sh:cmd_idea_update
+# Batch 3 — idea sync/migrate/setup/upgrade.
+.ccanvil/scripts/docs-check.sh:cmd_idea_migrate_state
+.ccanvil/scripts/docs-check.sh:cmd_idea_review_icebox
+.ccanvil/scripts/docs-check.sh:cmd_idea_sync
+.ccanvil/scripts/docs-check.sh:cmd_idea_migrate
+.ccanvil/scripts/docs-check.sh:cmd_idea_setup
+.ccanvil/scripts/docs-check.sh:cmd_idea_upgrade

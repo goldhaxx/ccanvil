@@ -3069,6 +3069,19 @@ cmd_idea_count() {
 # Translates new→triage, promoted→backlog, parked→icebox, dismissed→canceled,
 # merged→duplicate. Writes a timestamped backup before mutating. Idempotent:
 # a second run against a log with no legacy entries reports 0 migrations.
+# @manifest
+# purpose: One-shot rewrite of legacy-vocab status values in .ccanvil/ideas.log (new→triage, promoted→backlog, parked→icebox, dismissed→canceled, merged→duplicate); writes timestamped backup before mutating; idempotent on already-migrated logs
+# input: --project-dir <path>
+# input: positional <project-dir>
+# output: stdout migration count summary
+# output: exit-codes 0 ok, 2 unknown-flag
+# depends-on: jq
+# side-effect: writes-backup-and-rewrites-ideas-log
+# failure-mode: unknown-flag | exit=2 | visible=stderr-Usage
+# failure-mode: missing-log | exit=0 | visible=zero-migrations | mitigation=expected-on-fresh-projects
+# contract: idempotent
+# contract: backup-before-mutate
+# anchor: BTS-241 (manifest seed)
 cmd_idea_migrate_state() {
   # BTS-212: arg loop
   local project_dir_flag=""
@@ -3076,6 +3089,7 @@ cmd_idea_migrate_state() {
     case "$1" in
       --project-dir) project_dir_flag="${2:-.}"; shift 2 ;;
       --) shift; break ;;
+      # @failure-mode: unknown-flag
       --*) echo "Usage: docs-check.sh idea-migrate-state [--project-dir <path>] [<project-dir>]" >&2; exit 2 ;;
       *) break ;;
     esac
@@ -3084,6 +3098,7 @@ cmd_idea_migrate_state() {
   local ideas_log="$project_dir/.ccanvil/ideas.log"
 
   if [[ ! -f "$ideas_log" ]]; then
+    # @failure-mode: missing-log
     echo "0 entries migrated (no ideas.log at $ideas_log)"
     return 0
   fi
@@ -3100,6 +3115,7 @@ cmd_idea_migrate_state() {
   # Timestamped backup before mutation.
   local ts
   ts=$(date +%Y%m%d-%H%M%S)
+  # @side-effect: writes-backup-and-rewrites-ideas-log
   cp "$ideas_log" "${ideas_log}.${ts}.bak"
 
   local tmp
@@ -3126,6 +3142,19 @@ cmd_idea_migrate_state() {
 # is icebox (or legacy alias "parked") and whose `created` epoch is at
 # least 60 days (5184000s) in the past. Used by /idea review-icebox and
 # surfaced as a count via radar-gather.
+# @manifest
+# purpose: Surface Icebox-state ideas older than 60 days from the local ideas.log so /idea review-icebox can re-evaluate (promote / keep / dismiss / merge); prevents graveyard drift
+# input: --project-dir <path>
+# input: positional <project-dir>
+# output: stdout JSON array of stale icebox entries
+# output: exit-codes 0 ok, 2 unknown-flag
+# caller: skill:/idea
+# depends-on: jq
+# side-effect: reads-ideas-log
+# failure-mode: unknown-flag | exit=2 | visible=stderr-Usage
+# failure-mode: missing-log | exit=0 | visible=empty-array
+# contract: 60-day-staleness-threshold
+# anchor: BTS-241 (manifest seed)
 cmd_idea_review_icebox() {
   # BTS-212: arg loop
   local project_dir_flag=""
@@ -3133,6 +3162,7 @@ cmd_idea_review_icebox() {
     case "$1" in
       --project-dir) project_dir_flag="${2:-.}"; shift 2 ;;
       --) shift; break ;;
+      # @failure-mode: unknown-flag
       --*) echo "Usage: docs-check.sh idea-review-icebox [--project-dir <path>] [<project-dir>]" >&2; exit 2 ;;
       *) break ;;
     esac
@@ -3144,10 +3174,12 @@ cmd_idea_review_icebox() {
   threshold=$((now - 5184000))
 
   if [[ ! -f "$ideas_log" ]]; then
+    # @failure-mode: missing-log
     echo "[]"
     return 0
   fi
 
+  # @side-effect: reads-ideas-log
   grep -v '^# ' "$ideas_log" | jq -s --argjson t "$threshold" '
     [ .[]
       | select((.status == "icebox" or .status == "parked") and .created <= $t)
@@ -3257,6 +3289,20 @@ cmd_idea_update() {
 #   idea-sync [project-dir]             → print {pending, entries} JSON
 #   idea-sync --ack <ts> [project-dir]  → remove entry matching ts
 # ---------------------------------------------------------------------------
+# @manifest
+# purpose: List pending idea-sync entries from .ccanvil/ideas-pending.log as JSON, OR ack a specific entry by timestamp removing it from the log; full replay-and-dispatch flow lives in the separate idea-pending-replay verb
+# input: --ack <ts>
+# input: --project-dir <path>
+# input: positional <project-dir>
+# output: stdout JSON {pending, entries} on default; "ACKED: <ts>" on --ack
+# output: exit-codes 0 ok, 2 unknown-flag
+# depends-on: jq
+# side-effect: rewrites-pending-log-on-ack
+# failure-mode: unknown-flag | exit=2 | visible=stderr-Usage
+# failure-mode: missing-pending-log | exit=0 | visible=zeroed-output | mitigation=expected-state
+# contract: ack-removes-by-ts-match
+# anchor: BTS-179 (replay substrate split)
+# anchor: BTS-241 (manifest seed)
 cmd_idea_sync() {
   local project_dir="."
   local ack_ts=""
@@ -3266,6 +3312,7 @@ cmd_idea_sync() {
       --ack)         ack_ts="$2"; shift 2 ;;
       --project-dir) project_dir="${2:-.}"; shift 2 ;;
       --) shift; break ;;
+      # @failure-mode: unknown-flag
       --*) echo "Usage: docs-check.sh idea-sync [--ack <ts>] [--project-dir <path>] [<project-dir>]" >&2; exit 2 ;;
       *) project_dir="$1"; shift ;;
     esac
@@ -3278,6 +3325,7 @@ cmd_idea_sync() {
       echo "ACKED: $ack_ts (pending log absent — no-op)"
       return 0
     fi
+    # @side-effect: rewrites-pending-log-on-ack
     local tmp
     tmp=$(mktemp)
     jq -c --argjson ts "$ack_ts" 'select(.ts != $ts)' "$pending" > "$tmp"
@@ -3287,6 +3335,7 @@ cmd_idea_sync() {
   fi
 
   if [[ ! -f "$pending" || ! -s "$pending" ]]; then
+    # @failure-mode: missing-pending-log
     jq -n '{pending: 0, entries: []}'
     return 0
   fi
@@ -4182,6 +4231,22 @@ cmd_idea_pending_replay() {
 #   idea-migrate --finalize [project-dir]
 #     git rm docs/ideas.md + update .gitignore. No parsing.
 # ---------------------------------------------------------------------------
+# @manifest
+# purpose: One-shot migration of legacy docs/ideas.md (markdown checkbox format) into the new .ccanvil/ideas.log JSONL store; --extract emits parsed JSONL only, --finalize removes legacy file + gitignores artifacts, default --full does both
+# input: --extract / --finalize
+# input: --project-dir <path>
+# input: positional <project-dir>
+# output: stdout migration progress + count
+# output: exit-codes 0 ok (also when nothing to migrate), 2 unknown-flag
+# depends-on: jq
+# side-effect: appends-ideas-log
+# side-effect: removes-legacy-ideas-md
+# side-effect: updates-gitignore
+# failure-mode: unknown-flag | exit=2 | visible=stderr-Usage
+# failure-mode: nothing-to-migrate | exit=0 | visible=stdout-message | mitigation=expected-when-no-legacy-file
+# contract: extract-and-finalize-can-run-separately
+# contract: idempotent-no-op-on-already-migrated
+# anchor: BTS-241 (manifest seed)
 cmd_idea_migrate() {
   local project_dir="."
   local mode="full"   # full | extract | finalize
@@ -4192,6 +4257,7 @@ cmd_idea_migrate() {
       --finalize)    mode="finalize"; shift ;;
       --project-dir) project_dir="${2:-.}"; shift 2 ;;
       --) shift; break ;;
+      # @failure-mode: unknown-flag
       --*) echo "Usage: docs-check.sh idea-migrate [--extract|--finalize] [--project-dir <path>] [<project-dir>]" >&2; exit 2 ;;
       *) project_dir="$1"; shift ;;
     esac
@@ -4207,12 +4273,14 @@ cmd_idea_migrate() {
          git -C "$project_dir" ls-files --error-unmatch docs/ideas.md >/dev/null 2>&1; then
         git -C "$project_dir" rm -q docs/ideas.md
       else
+        # @side-effect: removes-legacy-ideas-md
         rm -f "$ideas_md"
       fi
     fi
     touch "$gitignore"
     for entry in "docs/ideas.md" ".ccanvil/ideas-pending.log" ".ccanvil/ideas.log"; do
       if ! grep -qxF "$entry" "$gitignore" 2>/dev/null; then
+        # @side-effect: updates-gitignore
         echo "$entry" >> "$gitignore"
       fi
     done
@@ -4247,6 +4315,7 @@ cmd_idea_migrate() {
       _idea_migrate_finalize
       ;;
     extract)
+      # @failure-mode: nothing-to-migrate
       [[ -f "$ideas_md" ]] || { echo "Nothing to migrate: $ideas_md not found"; return 0; }
       _idea_migrate_extract
       ;;
@@ -4256,6 +4325,7 @@ cmd_idea_migrate() {
         return 0
       fi
       mkdir -p "$(dirname "$ideas_log")"
+      # @side-effect: appends-ideas-log
       # Write each parsed entry as a local JSONL idea (title=body, status preserved).
       _idea_migrate_extract >> "$ideas_log"
       local migrated
@@ -4276,6 +4346,21 @@ cmd_idea_migrate() {
 #   idea-setup --provider local                                  [project-dir]
 #   idea-setup --provider linear --team TEAM --project PROJECT   [project-dir]
 # ---------------------------------------------------------------------------
+# @manifest
+# purpose: Initialize idea-routing config (.claude/ccanvil.local.json) for a new provider — writes integrations.routing.idea, scoping team/project, and resolves Linear state IDs by name; supports `--provider linear` and `--provider local`
+# input: --provider <name>
+# input: --team <id>
+# input: --project <id>
+# input: --project-dir <path>
+# output: stdout config write summary
+# output: exit-codes 0 ok, 1 provider-error/missing-required, 2 unknown-flag
+# depends-on: jq
+# side-effect: writes-ccanvil-local-json
+# failure-mode: unknown-flag | exit=2 | visible=stderr-Usage
+# failure-mode: missing-required | exit=1 | visible=stderr-error | mitigation=pass-required-flags
+# failure-mode: provider-error | exit=1 | visible=stderr-error | mitigation=verify-provider-credentials
+# contract: idempotent-on-existing-config
+# anchor: BTS-241 (manifest seed)
 cmd_idea_setup() {
   local provider=""
   local team=""
@@ -4289,6 +4374,7 @@ cmd_idea_setup() {
       --project)     project="$2";  shift 2 ;;
       --project-dir) project_dir="${2:-.}"; shift 2 ;;
       --) shift; break ;;
+      # @failure-mode: unknown-flag
       --*) echo "Usage: docs-check.sh idea-setup [--provider <p>] [--team <t>] [--project <p>] [--project-dir <path>] [<project-dir>]" >&2; exit 2 ;;
       *)             project_dir="$1"; shift ;;
     esac
@@ -4297,11 +4383,14 @@ cmd_idea_setup() {
   case "$provider" in
     local) ;;
     linear)
+      # @failure-mode: missing-required
       [[ -n "$team" ]]    || { echo "ERROR: --provider linear requires --team TEAM" >&2; exit 1; }
       [[ -n "$project" ]] || { echo "ERROR: --provider linear requires --project PROJECT" >&2; exit 1; }
       ;;
     "")  echo "ERROR: --provider is required (local|linear)" >&2; exit 1 ;;
-    *)   echo "ERROR: unknown provider '$provider' (must be local|linear)" >&2; exit 1 ;;
+    *)
+         # @failure-mode: provider-error
+         echo "ERROR: unknown provider '$provider' (must be local|linear)" >&2; exit 1 ;;
   esac
 
   mkdir -p "$project_dir/.claude" "$project_dir/.ccanvil"
@@ -4321,6 +4410,7 @@ cmd_idea_setup() {
   [[ -f "$cfg" ]] && existing=$(cat "$cfg")
 
   echo "$existing" | jq --argjson slice "$slice" '. * $slice' > "$cfg.tmp"
+  # @side-effect: writes-ccanvil-local-json
   mv "$cfg.tmp" "$cfg"
 
   # .gitignore hygiene — both stores live under the repo and must never be
@@ -4516,6 +4606,27 @@ cmd_legacy_refs_scan() {
 #   idea-upgrade --provider local                                  [project-dir]
 #   idea-upgrade --provider linear --team TEAM --project PROJECT   [project-dir]
 # ---------------------------------------------------------------------------
+# @manifest
+# purpose: Upgrade an existing idea-routing config — validate provider state IDs against live Linear, optionally create new project, optionally migrate from legacy local-only setup; --dry-run shows the diff without writing
+# input: --provider <name>
+# input: --team <id>
+# input: --project <id>
+# input: --dry-run
+# input: --create-project
+# input: --from-legacy
+# input: --project-dir <path>
+# output: stdout upgrade plan + summary JSON
+# output: exit-codes 0 ok, 1 provider-error/missing-required, 2 unknown-flag
+# depends-on: cmd_idea_setup
+# depends-on: jq
+# side-effect: writes-via-cmd_idea_setup
+# side-effect: commits-config-changes
+# failure-mode: unknown-flag | exit=2 | visible=stderr-Usage
+# failure-mode: missing-required | exit=1 | visible=stderr-error | mitigation=pass-required-flags
+# failure-mode: provider-error | exit=1 | visible=stderr-error | mitigation=verify-provider-credentials
+# contract: dry-run-never-mutates
+# contract: idempotent-on-already-upgraded
+# anchor: BTS-241 (manifest seed)
 cmd_idea_upgrade() {
   local provider=""
   local team=""
@@ -4535,6 +4646,7 @@ cmd_idea_upgrade() {
       --create-project) create_project=1; shift ;;
       --from-legacy)    from_legacy=1; shift ;;
       --) shift; break ;;
+      # @failure-mode: unknown-flag
       --*) echo "Usage: docs-check.sh idea-upgrade [--provider <p>] [--team <t>] [--project <p>] [--project-dir <path>] [--dry-run] [--create-project] [--from-legacy] [<project-dir>]" >&2; exit 2 ;;
       *)                project_dir="$1"; shift ;;
     esac
@@ -4544,12 +4656,15 @@ cmd_idea_upgrade() {
     local) ;;
     linear)
       [[ -n "$team" && -n "$project" ]] || {
+        # @failure-mode: missing-required
         echo "ERROR: --provider linear requires --team and --project" >&2
         return 1
       }
       ;;
     "")  echo "ERROR: --provider is required (local|linear)" >&2; return 1 ;;
-    *)   echo "ERROR: unknown provider '$provider' (must be local|linear)" >&2; return 1 ;;
+    *)
+         # @failure-mode: provider-error
+         echo "ERROR: unknown provider '$provider' (must be local|linear)" >&2; return 1 ;;
   esac
 
   if [[ $create_project -eq 1 && "$provider" != "linear" ]]; then
@@ -4636,6 +4751,7 @@ cmd_idea_upgrade() {
   # Delegate the config + gitignore write to cmd_idea_setup. Suppress its
   # next-step text (idea-upgrade emits its own summary).
   if [[ "$provider" == "linear" ]]; then
+    # @side-effect: writes-via-cmd_idea_setup
     cmd_idea_setup --provider linear --team "$team" --project "$project" "$project_dir" >/dev/null
   else
     cmd_idea_setup --provider local "$project_dir" >/dev/null
@@ -4669,6 +4785,7 @@ cmd_idea_upgrade() {
     if [[ $legacy_present -eq 1 ]]; then
       git rm -q docs/ideas.md 2>/dev/null || rm -f docs/ideas.md
     fi
+    # @side-effect: commits-config-changes
     git add .claude/ccanvil.local.json .gitignore
     if [[ $legacy_present -eq 1 ]]; then
       git commit -q -m "chore(idea-upgrade): configure $provider provider + migrate $migrated_count legacy entries"

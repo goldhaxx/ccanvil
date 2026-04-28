@@ -3425,12 +3425,31 @@ _idea_pending_replay_one_log() {
   rm -f "$entries_file"
 }
 
+# @manifest
+# purpose: Drain ideas-pending.log AND dual-capture-emergency.log via the http substrate; ack on success, preserve failed entries in place.
+# input: --project-dir <path>
+# input: positional <project-dir> (legacy)
+# output: stdout JSON {synced, failed, pending, emergency_pending, entries:[]}
+# output: exit-codes 0 when failed==0; 1 when any entry failed; 2 usage
+# caller: skill:/idea
+# depends-on: _idea_pending_replay_one_log
+# depends-on: jq
+# side-effect: rewrites-pending-log
+# side-effect: rewrites-emergency-log
+# failure-mode: replay-dispatch-failure | exit=propagate | visible=stderr-per-entry | mitigation=rerun-after-network-recovery
+# failure-mode: usage-error | exit=2 | visible=stderr-usage
+# contract: idempotent-when-both-logs-empty
+# contract: drains-both-logs-in-one-pass
+# contract: preserves-failed-entries-for-retry
+# anchor: BTS-179 (origin)
+# anchor: BTS-233 (emergency-log drainage)
 cmd_idea_pending_replay() {
   local project_dir="."
   while [[ $# -gt 0 ]]; do
     case "$1" in
       --project-dir) project_dir="$2"; shift 2 ;;
       --) shift; break ;;
+      # @failure-mode: usage-error
       --*) echo "Usage: docs-check.sh idea-pending-replay [--project-dir <path>] [<project-dir>]" >&2; exit 2 ;;
       *) project_dir="$1"; shift ;;
     esac
@@ -3457,6 +3476,9 @@ cmd_idea_pending_replay() {
   trap 'rm -f "$results_file" "$synced_file" "$failed_acc_file"' RETURN
 
   # Process pending first, then emergency (BTS-233 ordering rationale in spec).
+  # @side-effect: rewrites-pending-log
+  # @side-effect: rewrites-emergency-log
+  # @failure-mode: replay-dispatch-failure
   _idea_pending_replay_one_log "$pending" "$project_dir" \
     "$results_file" "$synced_file" "$failed_acc_file"
   _idea_pending_replay_one_log "$emergency" "$project_dir" \

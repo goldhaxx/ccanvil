@@ -10,3 +10,4 @@
 
 .ccanvil/scripts/docs-check.sh:cmd_artifact_write
 .ccanvil/scripts/docs-check.sh:cmd_ship_finalize
+.ccanvil/scripts/docs-check.sh:cmd_idea_pending_replay

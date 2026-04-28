@@ -723,6 +723,27 @@ cmd_index() {
     done
   done
 
+  # BTS-240: markdown source-dir walks. Each glob pattern emits zero or
+  # more .md files. Manifests are extracted via the same cmd_extract path.
+  local md_globs=(
+    ".claude/skills/*/SKILL.md"
+    ".claude/rules/*.md"
+    ".claude/agents/*.md"
+    ".claude/commands/*.md"
+  )
+  local g
+  for g in "${md_globs[@]}"; do
+    for f in $g; do
+      [[ ! -f "$f" ]] && continue
+      local entries
+      entries=$(cmd_extract "$f") || return 2
+      if [[ "$entries" == "[]" ]]; then
+        continue
+      fi
+      printf '%s' "$entries" | jq -c --arg p "$f" '.[] | {key: ($p + ":" + .id), val: .}' >> "$tmp"
+    done
+  done
+
   if [[ ! -s "$tmp" ]]; then
     printf '{}\n' > "$out.tmp"
   else

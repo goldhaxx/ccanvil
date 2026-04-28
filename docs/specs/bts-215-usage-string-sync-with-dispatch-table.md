@@ -3,7 +3,7 @@
 > Feature: bts-215-usage-string-sync-with-dispatch-table
 > Work: linear:BTS-215
 > Created: 1777340297
-> Status: In Progress
+> Status: Complete
 
 ## Summary
 

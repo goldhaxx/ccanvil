@@ -4,7 +4,7 @@
 > Work: linear:BTS-241
 > Created: 1777407252
 > Subject: docs-check.sh lifecycle-cluster manifests
-> Status: In Progress
+> Status: Complete
 
 <!-- Subject: docs-check.sh lifecycle-cluster manifests (24 primitives) -->
 

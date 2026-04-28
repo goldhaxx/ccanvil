@@ -1,12 +1,12 @@
-# Feature: docs-check.sh lifecycle-cluster manifests
+# Feature: [docs-check.sh](<http://docs-check.sh>) lifecycle-cluster manifests
 
 > Feature: bts-241-docs-check-lifecycle-manifests
 > Work: linear:BTS-241
 > Created: 1777407252
-> Subject: docs-check.sh lifecycle-cluster manifests
+> Subject: [docs-check.sh](<http://docs-check.sh>) lifecycle-cluster manifests
 > Status: In Progress
 
-<!-- Subject: docs-check.sh lifecycle-cluster manifests (24 primitives) -->
+<!-- Subject: [docs-check.sh](<http://docs-check.sh>) lifecycle-cluster manifests (24 primitives) -->
 
 ## Summary
 
@@ -37,7 +37,7 @@ Each criterion is independently testable. Binary pass/fail.
 ## Affected Files
 
 | File | Change |
-|------|--------|
+| -- | -- |
 | `.ccanvil/scripts/docs-check.sh` | Modified — 24 `# @manifest` blocks + inline `# @failure-mode:` / `# @side-effect:` markers added at each primitive |
 | `.ccanvil/manifest-allowlist.txt` | Modified — 24 new entries appended under a Session-2 section header |
 | `docs/manifest-rollout.md` | Modified — Inventory table `Done` column update |
@@ -46,22 +46,22 @@ No new test files. No substrate changes. No new fixtures.
 
 ## Dependencies
 
-- **Requires:** BTS-239 (origin substrate) + BTS-240 (markdown extension) — both landed.
-- **Blocked by:** none.
+* **Requires:** BTS-239 (origin substrate) + BTS-240 (markdown extension) — both landed.
+* **Blocked by:** none.
 
 ## Out of Scope
 
-- The 24 remaining `cmd_*` in `docs-check.sh` (capture + audit cluster). Sessions 3 ships those.
-- Other mega-scripts (`ccanvil-sync.sh`, `linear-query.sh`, etc.). Sessions 4-7.
-- New ACs beyond manifest correctness — drift-guard semantics are unchanged from BTS-239.
+* The 24 remaining `cmd_*` in `docs-check.sh` (capture + audit cluster). Sessions 3 ships those.
+* Other mega-scripts (`ccanvil-sync.sh`, `linear-query.sh`, etc.). Sessions 4-7.
+* New ACs beyond manifest correctness — drift-guard semantics are unchanged from BTS-239.
 
 ## Implementation Notes
 
-- **Per-primitive workflow:** read the function body, enumerate inputs (positional + flags + env-vars + stdin), outputs (stdout shape + exit-code class + file writes), side-effects (every mutation outside the call frame), failure-modes (every non-zero `return`/`exit`), depends-on (helper functions called within body), callers (grep for `cmd_<name>`/dispatch-verb form across project). Compose manifest, add markers at the failing/mutating lines.
-- **Quality bar (per `docs/manifest-rollout.md` "Quality bar"):** every field semantically true, not best-guess; `purpose` answers "what does this do that no other primitive does" (not "wraps X").
-- **Batching:** ~6 manifests per commit, one drift-guard verify after each batch. Catches errors early.
-- **Bash 3.2 compat preserved:** no substrate change, just data declarations + inline markers in comments.
-- **Frontmatter on rules/commands sanity-check:** N/A — all targets are shell function-level, not markdown.
+* **Per-primitive workflow:** read the function body, enumerate inputs (positional + flags + env-vars + stdin), outputs (stdout shape + exit-code class + file writes), side-effects (every mutation outside the call frame), failure-modes (every non-zero `return`/`exit`), depends-on (helper functions called within body), callers (grep for `cmd_<name>`/dispatch-verb form across project). Compose manifest, add markers at the failing/mutating lines.
+* **Quality bar (per** `docs/manifest-rollout.md` "Quality bar"): every field semantically true, not best-guess; `purpose` answers "what does this do that no other primitive does" (not "wraps X").
+* **Batching:** \~6 manifests per commit, one drift-guard verify after each batch. Catches errors early.
+* **Bash 3.2 compat preserved:** no substrate change, just data declarations + inline markers in comments.
+* **Frontmatter on rules/commands sanity-check:** N/A — all targets are shell function-level, not markdown.
 
 <!-- NODE-SPECIFIC-START -->
 <!-- Add project-specific content below this line. -->

@@ -1363,6 +1363,24 @@ cmd_complete() {
 # Fallback and error-halt behavior added in later steps.
 # ---------------------------------------------------------------------------
 
+# @manifest
+# purpose: Clean up lifecycle docs (spec.md, plan.md, stasis.md) before PR merge — invokes cmd_complete on the active spec to flip Status → Complete and remove the active docs, or falls back to bare-cleanup commit when no spec.md exists
+# input: --project-dir <path>
+# input: positional <docs-dir> (legacy)
+# output: stdout cmd_complete output (path archive transitions)
+# output: exit-codes 0 ok, 1 missing-feature_id, 2 unknown-flag
+# caller: skill:/pr
+# depends-on: cmd_complete
+# depends-on: parse_metadata
+# depends-on: jq
+# side-effect: removes-lifecycle-docs
+# side-effect: commits-cleanup
+# failure-mode: unknown-flag | exit=2 | visible=stderr-Usage
+# failure-mode: missing-feature-id | exit=1 | visible=stderr-error | mitigation=verify-spec-metadata
+# contract: idempotent-when-no-spec-present
+# contract: leaves-clean-tree-on-feature-branch
+# anchor: BTS-212 (arg loop refactor)
+# anchor: BTS-241 (manifest seed)
 cmd_pr_cleanup() {
   # BTS-212: arg loop
   local project_dir=""
@@ -1370,6 +1388,7 @@ cmd_pr_cleanup() {
     case "$1" in
       --project-dir) project_dir="${2:-.}"; shift 2 ;;
       --) shift; break ;;
+      # @failure-mode: unknown-flag
       --*) echo "Usage: docs-check.sh pr-cleanup [--project-dir <path>] [<docs-dir>]" >&2; exit 2 ;;
       *) break ;;
     esac
@@ -1386,11 +1405,14 @@ cmd_pr_cleanup() {
     local feature_id
     feature_id=$(parse_metadata "$spec_file" | jq -r '.feature_id // empty')
     if [[ -z "$feature_id" ]]; then
+      # @failure-mode: missing-feature-id
       echo "ERROR: could not parse feature_id from $spec_file" >&2
       exit 1
     fi
     cmd_complete "$feature_id" "$docs_dir"
   else
+    # @side-effect: removes-lifecycle-docs
+    # @side-effect: commits-cleanup
     # Fallback: no active spec (e.g. `/pr` run on a branch without lifecycle spec).
     # Remove any lingering lifecycle docs and commit so nothing rides the merge.
     local repo_root
@@ -1631,6 +1653,25 @@ cmd_auto_close_emit() {
 # check` on stderr and return 0. Matches BTS-119's "never block forward
 # progress on network flakes" posture.
 # ---------------------------------------------------------------------------
+# @manifest
+# purpose: Verify local main is in sync with origin/main before activating a feature branch — refuses ahead (unpushed leak) and behind (stale baseline); graceful no-op on offline / no-remote
+# input: --project-dir <path>
+# input: positional <repo-root> (legacy)
+# output: stdout silent on success
+# output: stderr error block with resolution hints on ahead/behind
+# output: exit-codes 0 in-sync/no-remote/offline, 1 AHEAD, 2 BEHIND
+# caller: cmd_activate
+# depends-on: git
+# side-effect: fetches-origin-main
+# failure-mode: missing-repo-root | exit=2 | visible=stderr-Usage
+# failure-mode: unknown-flag | exit=2 | visible=stderr-Usage
+# failure-mode: ahead | exit=1 | visible=stderr-error-with-unpushed-list | mitigation=git-push-origin-main
+# failure-mode: behind | exit=2 | visible=stderr-error-with-pull-hint | mitigation=git-pull-ff-only
+# failure-mode: offline | exit=0 | visible=stderr-WARN | mitigation=continue-on-cached-state
+# contract: ahead-precedence-over-behind-on-divergence
+# contract: never-blocks-on-network-flakes
+# anchor: BTS-122 (sync-check substrate)
+# anchor: BTS-241 (manifest seed)
 cmd_sync_check() {
   # BTS-212: arg loop
   local project_dir_flag=""
@@ -1638,12 +1679,14 @@ cmd_sync_check() {
     case "$1" in
       --project-dir) project_dir_flag="${2:-.}"; shift 2 ;;
       --) shift; break ;;
+      # @failure-mode: unknown-flag
       --*) echo "Usage: docs-check.sh sync-check [--project-dir <path>] <repo-root>" >&2; exit 2 ;;
       *) break ;;
     esac
   done
   local repo_root="${project_dir_flag:-${1:-}}"
   if [[ -z "$repo_root" ]]; then
+    # @failure-mode: missing-repo-root
     echo "Usage: docs-check.sh sync-check [--project-dir <path>] <repo-root>" >&2
     exit 2
   fi
@@ -1653,6 +1696,8 @@ cmd_sync_check() {
     return 0
   fi
 
+  # @side-effect: fetches-origin-main
+  # @failure-mode: offline
   # AC-1/AC-3: fetch with short timeout; degrade to WARN on failure.
   if ! git -C "$repo_root" \
       -c http.lowSpeedLimit=1 -c http.lowSpeedTime=5 \
@@ -1674,6 +1719,7 @@ cmd_sync_check() {
   # Ahead takes precedence over behind when diverged — unpushed leak is the
   # more dangerous failure mode.
   if [[ -n "$ahead" ]]; then
+    # @failure-mode: ahead
     echo "ERROR: local main is AHEAD of origin/main — unpushed commits would leak into the feature branch." >&2
     echo "" >&2
     echo "Unpushed commits:" >&2
@@ -1685,6 +1731,7 @@ cmd_sync_check() {
   fi
 
   if [[ "$behind" -gt 0 ]]; then
+    # @failure-mode: behind
     echo "ERROR: local main is BEHIND origin/main by $behind commit(s) — activate would cut from a stale baseline." >&2
     echo "" >&2
     echo "Resolve by pulling first:" >&2
@@ -1714,6 +1761,23 @@ cmd_sync_check() {
 #       emitted, graceful degradation)
 #   1   feature branch is behind origin/main — rebase or merge to update
 # ---------------------------------------------------------------------------
+# @manifest
+# purpose: Verify the current feature branch is not behind origin/main before /pr finalizes — prevents PR base drift that would surface conflicts in CI rebases downstream
+# input: --project-dir <path>
+# output: stdout silent on success
+# output: stderr error block with rebase/merge resolution hints when behind
+# output: exit-codes 0 up-to-date/no-remote/offline, 1 BEHIND, 2 unknown-flag
+# caller: skill:/pr
+# depends-on: git
+# side-effect: fetches-origin-main
+# failure-mode: unknown-flag | exit=2 | visible=stderr-Usage
+# failure-mode: cd-failure | exit=2 | visible=stderr-error | mitigation=verify-project-dir
+# failure-mode: not-in-git-worktree | exit=1 | visible=stderr-error | mitigation=run-from-git-worktree
+# failure-mode: behind-base | exit=1 | visible=stderr-error-with-rebase-hint | mitigation=git-rebase-or-merge
+# failure-mode: offline | exit=0 | visible=stderr-WARN | mitigation=continue-on-cached-state
+# contract: never-blocks-on-network-flakes
+# anchor: BTS-122 (pr-guard substrate)
+# anchor: BTS-241 (manifest seed)
 cmd_pr_guard() {
   # BTS-212: arg loop
   local project_dir_flag=""
@@ -1721,15 +1785,18 @@ cmd_pr_guard() {
     case "$1" in
       --project-dir) project_dir_flag="${2:-.}"; shift 2 ;;
       --) shift; break ;;
+      # @failure-mode: unknown-flag
       --*) echo "Usage: docs-check.sh pr-guard [--project-dir <path>]" >&2; exit 2 ;;
       *) shift ;;
     esac
   done
   if [[ -n "$project_dir_flag" ]]; then
+    # @failure-mode: cd-failure
     cd "$project_dir_flag" 2>/dev/null || { echo "ERROR: cannot cd to $project_dir_flag" >&2; return 2; }
   fi
   local repo_root
   repo_root=$(git rev-parse --show-toplevel 2>/dev/null) || {
+    # @failure-mode: not-in-git-worktree
     echo "ERROR: not inside a git worktree." >&2
     exit 1
   }
@@ -1739,10 +1806,12 @@ cmd_pr_guard() {
     return 0
   fi
 
+  # @side-effect: fetches-origin-main
   # Fetch with short timeout; degrade gracefully on failure.
   if ! git -C "$repo_root" \
       -c http.lowSpeedLimit=1 -c http.lowSpeedTime=5 \
       fetch origin main 2>/dev/null; then
+    # @failure-mode: offline
     echo "WARN: offline — skipping pr-guard sync check" >&2
     return 0
   fi
@@ -1757,6 +1826,7 @@ cmd_pr_guard() {
   behind_count=$(git -C "$repo_root" rev-list --count HEAD..origin/main 2>/dev/null || echo "0")
 
   if [[ "$behind_count" -gt 0 ]]; then
+    # @failure-mode: behind-base
     echo "ERROR: feature branch is BEHIND origin/main by $behind_count commit(s) — the PR base has moved." >&2
     echo "" >&2
     echo "Resolve by one of:" >&2
@@ -1787,6 +1857,26 @@ cmd_pr_guard() {
 #
 # Runs inside the CWD's git repo. Caller is responsible for cd.
 # ---------------------------------------------------------------------------
+# @manifest
+# purpose: BTS-138 — recover the landed feature branch name from the last squash-merge commit's (#<PR>) suffix via gh pr view, so cmd_land on main can still emit AUTO-CLOSE markers after gh pr merge --delete-branch has cleaned up the local branch
+# input: --project-dir <path>
+# output: stdout recovered branch name on success
+# output: stdout empty + stderr WARN on graceful failure
+# output: exit-codes 0 always (graceful degradation; never blocks landing)
+# caller: cmd_land
+# depends-on: git
+# depends-on: gh
+# side-effect: queries-gh-pr-view
+# failure-mode: unknown-flag | exit=2 | visible=stderr-Usage
+# failure-mode: cd-failure | exit=2 | visible=stderr-error
+# failure-mode: no-pr-suffix | exit=0 | visible=stderr-WARN | mitigation=expected-on-non-squash-merges
+# failure-mode: gh-missing | exit=0 | visible=stderr-WARN | mitigation=install-gh-cli
+# failure-mode: gh-query-failed | exit=0 | visible=stderr-WARN | mitigation=verify-pr-exists
+# contract: never-blocks-landing
+# contract: skips-stasis-commits-via-subject-regex
+# anchor: BTS-138 (recover-from-squash-merge)
+# anchor: BTS-212 (arg loop refactor)
+# anchor: BTS-241 (manifest seed)
 cmd_land_recover_branch() {
   # BTS-212: arg loop — accepts --project-dir, rejects unknown flags.
   local project_dir_flag=""
@@ -1794,11 +1884,13 @@ cmd_land_recover_branch() {
     case "$1" in
       --project-dir) project_dir_flag="${2:-.}"; shift 2 ;;
       --) shift; break ;;
+      # @failure-mode: unknown-flag
       --*) echo "Usage: docs-check.sh land-recover-branch [--project-dir <path>]" >&2; exit 2 ;;
       *) shift ;;
     esac
   done
   if [[ -n "$project_dir_flag" ]]; then
+    # @failure-mode: cd-failure
     cd "$project_dir_flag" 2>/dev/null || { echo "ERROR: cannot cd to $project_dir_flag" >&2; return 2; }
   fi
   # If HEAD commit subject looks like a session-stasis write (from /stasis
@@ -1818,6 +1910,7 @@ cmd_land_recover_branch() {
   # Extract PR number from the trailing `(#<N>)` suffix — GitHub's canonical
   # squash-merge commit format.
   if [[ ! "$subject" =~ \(#([0-9]+)\)$ ]]; then
+    # @failure-mode: no-pr-suffix
     echo "WARN: land on main — could not recover PR number from last commit" >&2
     return 0
   fi
@@ -1825,16 +1918,17 @@ cmd_land_recover_branch() {
 
   # Require gh binary on PATH. Missing → WARN + skip (never fail).
   if ! command -v gh >/dev/null 2>&1; then
+    # @failure-mode: gh-missing
     echo "WARN: land on main — gh unavailable, skipping PR recovery" >&2
     return 0
   fi
 
+  # @side-effect: queries-gh-pr-view
   # Query the PR for its head ref. Exit nonzero or empty result → WARN + skip.
-  # Avoid relying on $? after assignment — `if ! var=$(...)` captures the
-  # subshell exit cleanly in both bash and strict-mode callers.
   local branch
   if ! branch=$(gh pr view "$pr" --json headRefName -q .headRefName 2>/dev/null) \
       || [[ -z "$branch" ]]; then
+    # @failure-mode: gh-query-failed
     echo "WARN: land on main — could not recover landed branch via gh (PR #$pr)" >&2
     return 0
   fi
@@ -1933,6 +2027,34 @@ cmd_detect_repo_type() {
     '{type:$type, has_remote:$has_remote, remote_url:$url}'
 }
 
+# @manifest
+# purpose: Switch to main, sync with remote, delete the merged feature branch, and emit AUTO-CLOSE marker for /land or /ship to dispatch ticket close; handles already-on-main edge case via cmd_land_recover_branch (BTS-138)
+# input: --force
+# input: --project-dir <path>
+# output: stdout status messages + optional AUTO-CLOSE marker
+# output: exit-codes 0 ok, 1 unmerged-pr/checkout-failed/conflict, 2 unknown-flag/cd-failure
+# caller: skill:/land
+# caller: cmd_ship_finalize
+# depends-on: cmd_detect_repo_type
+# depends-on: cmd_land_recover_branch
+# depends-on: cmd_auto_close_emit
+# depends-on: git
+# depends-on: gh
+# side-effect: switches-branch
+# side-effect: deletes-feature-branch
+# side-effect: fetches-origin
+# failure-mode: unknown-flag | exit=2 | visible=stderr-Usage
+# failure-mode: cd-failure | exit=2 | visible=stderr-error
+# failure-mode: unmerged-pr | exit=1 | visible=stderr-error | mitigation=merge-PR-first-or-use-force
+# failure-mode: checkout-main-failed | exit=1 | visible=stderr-error | mitigation=verify-main-branch-exists
+# failure-mode: local-merge-conflict | exit=1 | visible=stderr-error | mitigation=resolve-on-feature-branch
+# contract: never-deletes-unmerged-branch-without-force
+# contract: idempotent-when-already-on-main
+# contract: emits-auto-close-marker-on-linear-routed-specs
+# anchor: BTS-72 (local-only path)
+# anchor: BTS-119 (auto-close emission)
+# anchor: BTS-138 (recover-from-squash-merge)
+# anchor: BTS-241 (manifest seed)
 cmd_land() {
   # BTS-212: arg loop
   local force=false
@@ -1942,11 +2064,13 @@ cmd_land() {
       --force) force=true; shift ;;
       --project-dir) project_dir_flag="${2:-.}"; shift 2 ;;
       --) shift; break ;;
+      # @failure-mode: unknown-flag
       --*) echo "Usage: docs-check.sh land [--force] [--project-dir <path>]" >&2; exit 2 ;;
       *) shift ;;
     esac
   done
   if [[ -n "$project_dir_flag" ]]; then
+    # @failure-mode: cd-failure
     cd "$project_dir_flag" 2>/dev/null || { echo "ERROR: cannot cd to $project_dir_flag" >&2; return 2; }
   fi
 
@@ -1998,13 +2122,17 @@ cmd_land() {
     local pr_state
     pr_state=$(gh pr view --json state -q '.state' 2>/dev/null || echo "NONE")
     if [[ "$pr_state" != "MERGED" ]]; then
+      # @failure-mode: unmerged-pr
       echo "ERROR: No merged PR found for branch '$branch'. Merge the PR first, or use --force." >&2
       exit 1
     fi
   fi
 
+  # @side-effect: switches-branch
+  # @side-effect: fetches-origin
   # Switch to main
   git checkout main 2>/dev/null || git checkout master 2>/dev/null || {
+    # @failure-mode: checkout-main-failed
     echo "ERROR: Could not switch to main/master." >&2
     exit 1
   }
@@ -2024,6 +2152,7 @@ cmd_land() {
         # the original feature branch still intact.
         git merge --abort 2>/dev/null || true
         git checkout "$branch" 2>/dev/null || true
+        # @failure-mode: local-merge-conflict
         echo "ERROR: Could not merge '$branch' into main (conflicts). Aborted; resolve on the feature branch and re-run." >&2
         exit 1
       fi
@@ -2077,6 +2206,7 @@ cmd_land() {
   cmd_auto_close_emit "$branch"
 
   # Delete local branch
+  # @side-effect: deletes-feature-branch
   git branch -d "$branch" 2>/dev/null || git branch -D "$branch" 2>/dev/null || true
   echo "Deleted local branch '$branch'."
 
@@ -5622,17 +5752,46 @@ _session_stasis_ticket() {
   echo ""
 }
 
+# @manifest
+# purpose: BTS-20 unified envelope — derive the project's current lifecycle state plus legal next actions and blockers from spec/plan/stasis presence + freshness, with route-aware overrides for Linear-routed artifacts; one resolver call replaces the prior validate+recommend pair
+# input: --project-dir <path>
+# output: stdout JSON {state, legal_next_actions:[{action, command, reason}], blockers:[], suggestions:[], validate_result}
+# output: exit-codes 0 ok, 2 unknown-flag/uninitialized
+# caller: skill:/spec
+# caller: skill:/plan
+# caller: skill:/pr
+# caller: skill:/recall
+# caller: skill:/stasis
+# depends-on: cmd_validate
+# depends-on: _has_any_linear_route
+# depends-on: _active_feature_id
+# depends-on: _lifecycle_route
+# depends-on: _artifact_present_linear
+# depends-on: jq
+# side-effect: reads-state-files
+# side-effect: queries-linear-routed-artifacts
+# failure-mode: unknown-flag | exit=2 | visible=stderr-Usage
+# failure-mode: uninitialized | exit=2 | visible=json-state-uninitialized | mitigation=run-/init-or-cd-into-ccanvil-project
+# contract: blockers-non-empty-implies-state-blocked
+# contract: legal-actions-derived-from-lifecycle-graph
+# contract: route-aware-when-any-artifact-linear-routed
+# anchor: BTS-20 (lifecycle-state envelope substrate)
+# anchor: BTS-204 (route-aware overrides)
+# anchor: BTS-241 (manifest seed)
 cmd_lifecycle_state() {
   local project_dir="."
   while [[ $# -gt 0 ]]; do
     case "$1" in
       --project-dir) project_dir="${2:-.}"; shift 2 ;;
       --) shift; break ;;
+      # @failure-mode: unknown-flag
       --*) echo "Usage: docs-check.sh lifecycle-state [--project-dir <path>]" >&2; exit 2 ;;
       *) shift ;;
     esac
   done
 
+  # @failure-mode: uninitialized
+  # @side-effect: reads-state-files
   # AC-9: uninitialized — not a ccanvil project (no .ccanvil/ root).
   # Requiring .git/ is too strict — recommend test fixtures and bare project
   # roots may not initialize git. The .ccanvil/ presence is the canonical
@@ -5654,6 +5813,7 @@ cmd_lifecycle_state() {
   stasis_exists=$(echo "$validate_json" | jq -r '.status.stasis.exists')
   stasis_kind=$(echo "$validate_json" | jq -r '.status.stasis.kind // empty')
 
+  # @side-effect: queries-linear-routed-artifacts
   # BTS-204 Step 8: when any lifecycle artifact is routed to Linear, override
   # the filesystem-based exists flags using Linear-side presence checks. The
   # fast-path skips this entirely on pure-local nodes (zero network cost).

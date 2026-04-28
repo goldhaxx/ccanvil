@@ -32,3 +32,10 @@
 .ccanvil/scripts/docs-check.sh:cmd_auto_transition_emit
 .ccanvil/scripts/docs-check.sh:cmd_auto_close_emit
 .ccanvil/scripts/docs-check.sh:cmd_detect_repo_type
+# Batch 2 — sync/pr/land helpers.
+.ccanvil/scripts/docs-check.sh:cmd_sync_check
+.ccanvil/scripts/docs-check.sh:cmd_pr_guard
+.ccanvil/scripts/docs-check.sh:cmd_land_recover_branch
+.ccanvil/scripts/docs-check.sh:cmd_pr_cleanup
+.ccanvil/scripts/docs-check.sh:cmd_land
+.ccanvil/scripts/docs-check.sh:cmd_lifecycle_state

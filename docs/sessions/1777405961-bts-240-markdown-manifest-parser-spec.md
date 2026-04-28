@@ -33,7 +33,7 @@ Each criterion is independently testable. Binary pass/fail.
   - `.claude/rules/tdd.md` (rule)
   - `.claude/agents/code-reviewer.md` (agent)
   - `.claude/commands/pr.md` (command)
-  Each is appended to `.ccanvil/manifest-allowlist.txt` and passes `cmd_validate` cleanly. Allowlist grows from 7 → 11; drift-guard at 100% coverage.
+    Each is appended to `.ccanvil/manifest-allowlist.txt` and passes `cmd_validate` cleanly. Allowlist grows from 7 → 11; drift-guard at 100% coverage.
 - [ ] **AC-8:** `failure-mode` line schema is preserved unchanged from BTS-239 — pipe-delimited string `<id> | exit=N | visible=<phrase> | mitigation=<phrase>`. Markdown frontmatter encodes each as a YAML string in the `failure-mode:` array. Parser produces identical internal representation across both containers.
 - [ ] **AC-9:** Cross-file caller resolution at scale — at least one of the four reference manifests declares 5+ callers spanning ≥3 files (mix of `.sh`, `.md`, `.bats` paths). `cmd_validate` resolves each via the existing grep-based lookup; all must hit. Verifies the existing resolver scales beyond BTS-239's 7-seed test set before bulk rollout starts.
 - [ ] **AC-10:** Drift-guard tests (`hub/tests/module-manifest-drift-guard.bats`) gain one mutation test per markdown sub-shape — for each, mutate the reference manifest (drop a required key, fabricate a non-existent caller, etc.) and assert `cmd_validate` exits 2 with the expected `reason=` class.
@@ -43,7 +43,7 @@ Each criterion is independently testable. Binary pass/fail.
 ## Affected Files
 
 | File | Change |
-|------|--------|
+| -- | -- |
 | `.ccanvil/scripts/module-manifest.sh` | Modified — `cmd_extract` gains markdown branch (file-extension detection); `cmd_validate` skips marker-check for `.md` paths |
 | `.ccanvil/templates/manifest.md` | Modified — new "Markdown frontmatter shape" section; out-of-scope bullet updated |
 | `.claude/skills/spec/SKILL.md` | Modified — `manifest:` key added to existing frontmatter |
@@ -60,25 +60,25 @@ Each criterion is independently testable. Binary pass/fail.
 
 ## Dependencies
 
-- **Requires:** BTS-239 substrate (extract / validate / query / index, allowlist mechanic, drift-guard) — landed.
-- **Blocked by:** none.
+* **Requires:** BTS-239 substrate (extract / validate / query / index, allowlist mechanic, drift-guard) — landed.
+* **Blocked by:** none.
 
 ## Out of Scope
 
-- Inline `@failure-mode` / `@side-effect` markers in markdown body. Markers anchor code paths; markdown describes contracts. Markers stay shell-only.
-- Bulk rollout of all 37 markdown units (skills + rules + agents + commands). Sessions 9-10 ship those once this substrate is live and 4 references prove the shape.
-- HTML-comment block alternative (`<!-- @manifest -->`). Decided in spec: YAML frontmatter is the chosen shape — semantic alignment with existing skills/agents convention.
-- Pre-commit warn hook for missing manifests on changed files. Layer 2 follow-up ship in a later session.
+* Inline `@failure-mode` / `@side-effect` markers in markdown body. Markers anchor code paths; markdown describes contracts. Markers stay shell-only.
+* Bulk rollout of all 37 markdown units (skills + rules + agents + commands). Sessions 9-10 ship those once this substrate is live and 4 references prove the shape.
+* HTML-comment block alternative (`<!-- @manifest -->`). Decided in spec: YAML frontmatter is the chosen shape — semantic alignment with existing skills/agents convention.
+* Pre-commit warn hook for missing manifests on changed files. Layer 2 follow-up ship in a later session.
 
 ## Implementation Notes
 
-- **YAML parser approach**: avoid adding a YAML dep (no `yq`, no `python3 -c "import yaml"`). Implement a constrained YAML extractor in pure bash + awk that handles: top-level frontmatter delimiters (`---`), `manifest:` block detection (zero-indent), nested keys (2-space indent), array values (`  - <val>` lines under a key). Do NOT support arbitrary nesting, anchors, references, multi-line strings — the manifest schema is flat-by-design.
-- **Internal data shape**: the markdown branch produces the same `key\tval\n` block_data string the shell branch produces, then funnels through the existing `_compose_block` helper. Same JSON output, same `id` resolution path (basename fallback for file-level), same compose semantics. One parser surface, two intake shapes.
-- **`id` resolution for markdown**: when the manifest body declares `manifest.id:`, use it; otherwise fall back to `basename "$path" .md`. Mirrors shell's `basename .sh` fallback for file-level entries.
-- **Bash 3.2 compat constraint** holds — no `mapfile`, no `local -n`. Use indexed arrays + `while IFS= read` loops + global array references where helpers need them.
-- **Marker-skip branch in cmd_validate**: gate the existing `_check_failure_mode_markers` and `_check_side_effect_markers` helpers behind `[[ "$path" != *.md ]]`. Single-line guard, no architectural change.
-- **Reference manifest selection rationale**: `pr.md` is chosen over a smaller command because it spans 5+ caller surfaces (`/pr` operator dispatch + several internal callers in skill flows) — exercises AC-9 cross-file resolution at scale.
-- **Frontmatter on rules and commands**: rules and commands files do not currently carry frontmatter. Adding frontmatter to `tdd.md` and `pr.md` requires care — verify rendering tooling and any skill-loader that reads these files isn't sensitive to leading `---`. Quick scan needed in /plan.
+* **YAML parser approach**: avoid adding a YAML dep (no `yq`, no `python3 -c "import yaml"`). Implement a constrained YAML extractor in pure bash + awk that handles: top-level frontmatter delimiters (`---`), `manifest:` block detection (zero-indent), nested keys (2-space indent), array values (`  - <val>` lines under a key). Do NOT support arbitrary nesting, anchors, references, multi-line strings — the manifest schema is flat-by-design.
+* **Internal data shape**: the markdown branch produces the same `key\tval\n` block_data string the shell branch produces, then funnels through the existing `_compose_block` helper. Same JSON output, same `id` resolution path (basename fallback for file-level), same compose semantics. One parser surface, two intake shapes.
+* `id` resolution for markdown: when the manifest body declares `manifest.id:`, use it; otherwise fall back to `basename "$path" .md`. Mirrors shell's `basename .sh` fallback for file-level entries.
+* **Bash 3.2 compat constraint** holds — no `mapfile`, no `local -n`. Use indexed arrays + `while IFS= read` loops + global array references where helpers need them.
+* **Marker-skip branch in cmd_validate**: gate the existing `_check_failure_mode_markers` and `_check_side_effect_markers` helpers behind `[[ "$path" != *.md ]]`. Single-line guard, no architectural change.
+* **Reference manifest selection rationale**: `pr.md` is chosen over a smaller command because it spans 5+ caller surfaces (`/pr` operator dispatch + several internal callers in skill flows) — exercises AC-9 cross-file resolution at scale.
+* **Frontmatter on rules and commands**: rules and commands files do not currently carry frontmatter. Adding frontmatter to `tdd.md` and `pr.md` requires care — verify rendering tooling and any skill-loader that reads these files isn't sensitive to leading `---`. Quick scan needed in /plan.
 
 <!-- NODE-SPECIFIC-START -->
 <!-- Add project-specific content below this line. -->

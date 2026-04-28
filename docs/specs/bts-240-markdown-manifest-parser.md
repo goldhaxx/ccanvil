@@ -4,7 +4,7 @@
 > Work: linear:BTS-240
 > Created: 1777402708
 > Subject: Markdown manifest parser substrate
-> Status: In Progress
+> Status: Complete
 
 <!-- Subject: markdown manifest parser — frontmatter shape + 4 reference seeds -->
 

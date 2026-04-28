@@ -265,7 +265,9 @@ RESOLUTION=$(bash .ccanvil/scripts/operations.sh resolve idea.sync --project-dir
 eval "$(echo "$RESOLUTION" | jq -r '.invocation.command')"
 ```
 
-The resolved command (`docs-check.sh idea-pending-replay`) iterates every entry in `.ccanvil/ideas-pending.log`, dispatches each by `op` via the http substrate, ack's on success, preserves on failure, and emits `{synced, failed, pending, entries}` JSON. Render the summary as `SYNCED: N / FAILED: M / PENDING: K`.
+The resolved command (`docs-check.sh idea-pending-replay`) iterates every entry in `.ccanvil/ideas-pending.log`, dispatches each by `op` via the http substrate, ack's on success, preserves on failure, and emits `{synced, failed, pending, emergency_pending, entries}` JSON. Render the summary as `SYNCED: N / FAILED: M / PENDING: K`.
+
+BTS-233: the substrate ALSO drains `.ccanvil/dual-capture-emergency.log` in the same pass — entries written there by `cmd_idea_pending_append`'s last-resort dead-letter (BTS-205) are auto-replayed and cleared on success, with the remaining-failed count surfaced in `emergency_pending`. No separate sync invocation needed.
 
 **Per-op dispatch (now substrate-owned, documented for reference):**
 

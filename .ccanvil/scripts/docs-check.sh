@@ -3103,42 +3103,27 @@ cmd_assert_pr_title() {
 # Output: {synced, failed, pending, entries: [{ts, op, result, error?}]}
 # Exit 0 when failed == 0; non-zero otherwise.
 # ---------------------------------------------------------------------------
-cmd_idea_pending_replay() {
-  local project_dir="."
-  while [[ $# -gt 0 ]]; do
-    case "$1" in
-      --project-dir) project_dir="$2"; shift 2 ;;
-      --) shift; break ;;
-      --*) echo "Usage: docs-check.sh idea-pending-replay [--project-dir <path>] [<project-dir>]" >&2; exit 2 ;;
-      *) project_dir="$1"; shift ;;
-    esac
-  done
+# BTS-233: per-log replay helper. Processes one JSONL log (entries-pending or
+# dual-capture-emergency), dispatches each entry through the resolved http
+# substrate, rewrites the source log with only failed entries. Increments
+# `synced` and `failed` accumulators (one line per outcome) and appends per-
+# entry result records to `results_file`. Returns 0 always — caller decides
+# overall exit code based on the failed-accumulator size.
+_idea_pending_replay_one_log() {
+  local log_path="$1" project_dir="$2"
+  local results_file="$3" synced_file="$4" failed_acc_file="$5"
 
-  local pending="$project_dir/.ccanvil/ideas-pending.log"
+  [[ ! -f "$log_path" || ! -s "$log_path" ]] && return 0
 
-  # Empty/absent log → empty summary, exit 0.
-  if [[ ! -f "$pending" || ! -s "$pending" ]]; then
-    jq -n '{synced: 0, failed: 0, pending: 0, entries: []}'
-    return 0
-  fi
-
-  local synced=0 failed=0
-  local results_file failed_file entries_file
-  results_file=$(mktemp)
-  failed_file=$(mktemp)
+  local entries_file failed_file
   entries_file=$(mktemp)
-  trap 'rm -f "$results_file" "$failed_file" "$entries_file"' RETURN
+  failed_file=$(mktemp)
 
-  # Snapshot the pending log; iterate from the snapshot so per-entry ack
-  # rewrites of the live log don't perturb iteration. Also avoids the
-  # ts-collision class (multiple entries appended in the same second share
-  # a ts, and idea-sync --ack removes all matches).
-  cp "$pending" "$entries_file"
+  cp "$log_path" "$entries_file"
 
-  # Iterate JSONL safely: read each line directly, no echo round-trip.
-  # Use fd 3 so dispatched commands can't accidentally consume entries_file
-  # via inherited stdin (e.g., a wrapper that calls `cat` would otherwise
-  # drain the rest of the loop's input).
+  local script_dir
+  script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
   while IFS= read -r entry <&3; do
     [[ -z "$entry" ]] && continue
     local op ts
@@ -3148,40 +3133,24 @@ cmd_idea_pending_replay() {
     local resolution_op resolution cmd dispatch_status=0 dispatch_err=""
 
     case "$op" in
-      add)
-        resolution_op="idea.add"
-        ;;
-      promote)
-        resolution_op="ticket.transition"
-        ;;
-      defer)
-        resolution_op="ticket.transition"
-        ;;
-      dismiss)
-        resolution_op="ticket.transition"
-        ;;
-      merge)
-        resolution_op="ticket.transition"
-        ;;
-      ticket.transition)
-        resolution_op="ticket.transition"
-        ;;
+      add)               resolution_op="idea.add" ;;
+      promote|defer|dismiss|merge|ticket.transition)
+                         resolution_op="ticket.transition" ;;
       *)
-        failed=$((failed + 1))
+        echo 1 >> "$failed_acc_file"
         jq -n --argjson ts "$ts" --arg op "$op" --arg err "unknown op" \
           '{ts:$ts, op:$op, result:"failed", error:$err}' >> "$results_file"
+        printf '%s\n' "$entry" >> "$failed_file"
         continue
         ;;
     esac
 
-    local script_dir
-    script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-
     if [[ "$op" == "add" ]]; then
       resolution=$(bash "$script_dir/operations.sh" resolve idea.add --project-dir "$project_dir" 2>&1) || {
-        failed=$((failed + 1))
+        echo 1 >> "$failed_acc_file"
         jq -n --argjson ts "$ts" --arg op "$op" --arg err "resolve idea.add failed: $resolution" \
           '{ts:$ts, op:$op, result:"failed", error:$err}' >> "$results_file"
+        printf '%s\n' "$entry" >> "$failed_file"
         continue
       }
       cmd=$(printf '%s' "$resolution" | jq -r '.invocation.command')
@@ -3209,9 +3178,10 @@ cmd_idea_pending_replay() {
         ticket.transition) role=$(printf '%s' "$entry" | jq -r '.args.role') ;;
       esac
       resolution=$(bash "$script_dir/operations.sh" resolve ticket.transition "$id" "$role" --project-dir "$project_dir" 2>&1) || {
-        failed=$((failed + 1))
+        echo 1 >> "$failed_acc_file"
         jq -n --argjson ts "$ts" --arg op "$op" --arg err "resolve ticket.transition failed: $resolution" \
           '{ts:$ts, op:$op, result:"failed", error:$err}' >> "$results_file"
+        printf '%s\n' "$entry" >> "$failed_file"
         continue
       }
       cmd=$(printf '%s' "$resolution" | jq -r '.invocation.command')
@@ -3226,31 +3196,80 @@ cmd_idea_pending_replay() {
     fi
 
     if [[ "$dispatch_status" -eq 0 ]]; then
-      synced=$((synced + 1))
+      echo 1 >> "$synced_file"
       jq -n --argjson ts "$ts" --arg op "$op" '{ts:$ts, op:$op, result:"synced"}' >> "$results_file"
     else
-      failed=$((failed + 1))
+      echo 1 >> "$failed_acc_file"
       printf '%s\n' "$entry" >> "$failed_file"
       jq -n --argjson ts "$ts" --arg op "$op" --arg err "$dispatch_err" \
         '{ts:$ts, op:$op, result:"failed", error:$err}' >> "$results_file"
     fi
   done 3< "$entries_file"
 
-  # Rewrite pending log with only the failed entries (atomic mv).
+  # Rewrite source log with only failed entries (atomic mv).
   if [[ -s "$failed_file" ]]; then
-    mv "$failed_file" "$pending"
+    mv "$failed_file" "$log_path"
   else
-    : > "$pending"
+    : > "$log_path"
     rm -f "$failed_file"
   fi
+  rm -f "$entries_file"
+}
 
-  local pending_count=0
+cmd_idea_pending_replay() {
+  local project_dir="."
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --project-dir) project_dir="$2"; shift 2 ;;
+      --) shift; break ;;
+      --*) echo "Usage: docs-check.sh idea-pending-replay [--project-dir <path>] [<project-dir>]" >&2; exit 2 ;;
+      *) project_dir="$1"; shift ;;
+    esac
+  done
+
+  local pending="$project_dir/.ccanvil/ideas-pending.log"
+  local emergency="$project_dir/.ccanvil/dual-capture-emergency.log"
+
+  # BTS-233: process BOTH logs in a single invocation. Empty/absent
+  # logs short-circuit individually inside the helper.
+  local pending_empty=1 emergency_empty=1
+  [[ -f "$pending" && -s "$pending" ]] && pending_empty=0
+  [[ -f "$emergency" && -s "$emergency" ]] && emergency_empty=0
+
+  if (( pending_empty == 1 && emergency_empty == 1 )); then
+    jq -n '{synced: 0, failed: 0, pending: 0, emergency_pending: 0, entries: []}'
+    return 0
+  fi
+
+  local results_file synced_file failed_acc_file
+  results_file=$(mktemp)
+  synced_file=$(mktemp)
+  failed_acc_file=$(mktemp)
+  trap 'rm -f "$results_file" "$synced_file" "$failed_acc_file"' RETURN
+
+  # Process pending first, then emergency (BTS-233 ordering rationale in spec).
+  _idea_pending_replay_one_log "$pending" "$project_dir" \
+    "$results_file" "$synced_file" "$failed_acc_file"
+  _idea_pending_replay_one_log "$emergency" "$project_dir" \
+    "$results_file" "$synced_file" "$failed_acc_file"
+
+  local synced failed
+  synced=$(wc -l < "$synced_file" 2>/dev/null | tr -d ' ' || echo 0)
+  failed=$(wc -l < "$failed_acc_file" 2>/dev/null | tr -d ' ' || echo 0)
+  : "${synced:=0}"
+  : "${failed:=0}"
+
+  local pending_count=0 emergency_pending_count=0
   if [[ -f "$pending" && -s "$pending" ]]; then
     pending_count=$(jq -s 'length' "$pending")
   fi
+  if [[ -f "$emergency" && -s "$emergency" ]]; then
+    emergency_pending_count=$(jq -s 'length' "$emergency")
+  fi
 
-  jq -s --argjson synced "$synced" --argjson failed "$failed" --argjson pending "$pending_count" \
-    '{synced:$synced, failed:$failed, pending:$pending, entries:.}' "$results_file"
+  jq -s --argjson synced "$synced" --argjson failed "$failed" \
+    --argjson pending "$pending_count" --argjson emergency_pending "$emergency_pending_count" \
+    '{synced:$synced, failed:$failed, pending:$pending, emergency_pending:$emergency_pending, entries:.}' "$results_file"
 
   [[ "$failed" -eq 0 ]]
 }

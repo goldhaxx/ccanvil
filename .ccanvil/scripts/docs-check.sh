@@ -3133,6 +3133,36 @@ _ship_gh() {
   fi
 }
 
+# @manifest
+# purpose: Post-merge ship substrate — title-fix, mark-ready, squash-merge, fast-forward main, auto-close Linear ticket.
+# input: positional <pr-number>
+# input: --project-dir <path>
+# output: stdout JSON envelope (always emitted, every code path)
+# output: exit-codes 0 ok, 1 step-failure, 2 usage-error
+# caller: skill:/ship
+# depends-on: _ship_gh
+# depends-on: cmd_assert_pr_title
+# depends-on: cmd_land
+# depends-on: _parse_auto_close
+# depends-on: operations.sh
+# depends-on: cmd_idea_pending_append
+# side-effect: merges-pr
+# side-effect: updates-pr-title
+# side-effect: marks-pr-ready
+# side-effect: fast-forwards-main
+# side-effect: transitions-linear-ticket
+# side-effect: queues-pending-on-failure
+# failure-mode: usage-error | exit=2 | visible=stderr-usage
+# failure-mode: preflight-error | exit=1 | visible=json-envelope-step-preflight
+# failure-mode: title-error | exit=1 | visible=json-envelope-step-title
+# failure-mode: ready-error | exit=1 | visible=json-envelope-step-ready
+# failure-mode: merge-error | exit=1 | visible=json-envelope-step-merge
+# contract: idempotent-on-already-merged
+# contract: emits-json-envelope-every-path
+# contract: never-blocks-on-linear-failure
+# anchor: BTS-235 (origin — post-merge ship substrate)
+# anchor: BTS-178 (title-fix integration)
+# anchor: BTS-119 (queue-on-dispatch-failure pattern)
 cmd_ship_finalize() {
   local pr_number=""
   local project_dir="."
@@ -3148,6 +3178,7 @@ cmd_ship_finalize() {
     esac
   done
 
+  # @failure-mode: usage-error
   if [[ -z "$pr_number" ]]; then
     echo "Usage: docs-check.sh ship-finalize [--project-dir <path>] <pr-number>" >&2
     return 2
@@ -3156,6 +3187,7 @@ cmd_ship_finalize() {
   local errors='[]'
 
   # 1. Pre-flight: PR must exist, not already MERGED.
+  # @failure-mode: preflight-error
   local pr_state pr_state_raw
   pr_state_raw=$(_ship_gh pr view "$pr_number" --json state --jq '.state' 2>&1) || {
     jq -n --arg pr "$pr_number" --arg err "$pr_state_raw" \
@@ -3172,6 +3204,8 @@ cmd_ship_finalize() {
   fi
 
   # 2. Title fix (idempotent, BTS-178). cmd_assert_pr_title uses bare `gh`
+  # @failure-mode: title-error
+  # @side-effect: updates-pr-title
   # currently — the GH_OVERRIDE wrapper does not propagate. Acceptable: the
   # title-fix path is dogfood-validated, and bats tests for AC-3 cover the
   # parsing logic via a separate path. Production use unaffected.
@@ -3184,6 +3218,8 @@ cmd_ship_finalize() {
   fi
 
   # 3. Mark ready (idempotent — already-ready emits stderr "already \"ready
+  # @failure-mode: ready-error
+  # @side-effect: marks-pr-ready
   # for review\"" with non-zero exit on some gh versions; treat as success).
   local ready_out ready_status=0
   ready_out=$(_ship_gh pr ready "$pr_number" 2>&1) || ready_status=$?
@@ -3194,6 +3230,8 @@ cmd_ship_finalize() {
   fi
 
   # 4. Merge (squash + delete branch). gh switches HEAD to main on success.
+  # @failure-mode: merge-error
+  # @side-effect: merges-pr
   local merge_out merge_status=0
   merge_out=$(_ship_gh pr merge "$pr_number" --squash --delete-branch 2>&1) || merge_status=$?
   if (( merge_status != 0 )); then
@@ -3203,6 +3241,7 @@ cmd_ship_finalize() {
   fi
 
   # 5. Land — fast-forward main + recover landed branch + emit AUTO-CLOSE.
+  # @side-effect: fast-forwards-main
   local land_out land_status=0
   land_out=$(cd "$project_dir" && cmd_land 2>&1) || land_status=$?
   # cmd_land non-zero is rare on the on-main path; capture but continue.
@@ -3211,6 +3250,8 @@ cmd_ship_finalize() {
   fi
 
   # 6. Parse AUTO-CLOSE marker + dispatch ticket.transition done.
+  # @side-effect: transitions-linear-ticket
+  # @side-effect: queues-pending-on-failure
   local auto_close_json
   auto_close_json=$(_parse_auto_close "$land_out")
   local ticket_closed=null
@@ -3384,12 +3425,31 @@ _idea_pending_replay_one_log() {
   rm -f "$entries_file"
 }
 
+# @manifest
+# purpose: Drain ideas-pending.log AND dual-capture-emergency.log via the http substrate; ack on success, preserve failed entries in place.
+# input: --project-dir <path>
+# input: positional <project-dir> (legacy)
+# output: stdout JSON {synced, failed, pending, emergency_pending, entries:[]}
+# output: exit-codes 0 when failed==0; 1 when any entry failed; 2 usage
+# caller: skill:/idea
+# depends-on: _idea_pending_replay_one_log
+# depends-on: jq
+# side-effect: rewrites-pending-log
+# side-effect: rewrites-emergency-log
+# failure-mode: replay-dispatch-failure | exit=propagate | visible=stderr-per-entry | mitigation=rerun-after-network-recovery
+# failure-mode: usage-error | exit=2 | visible=stderr-usage
+# contract: idempotent-when-both-logs-empty
+# contract: drains-both-logs-in-one-pass
+# contract: preserves-failed-entries-for-retry
+# anchor: BTS-179 (origin)
+# anchor: BTS-233 (emergency-log drainage)
 cmd_idea_pending_replay() {
   local project_dir="."
   while [[ $# -gt 0 ]]; do
     case "$1" in
       --project-dir) project_dir="$2"; shift 2 ;;
       --) shift; break ;;
+      # @failure-mode: usage-error
       --*) echo "Usage: docs-check.sh idea-pending-replay [--project-dir <path>] [<project-dir>]" >&2; exit 2 ;;
       *) project_dir="$1"; shift ;;
     esac
@@ -3416,6 +3476,9 @@ cmd_idea_pending_replay() {
   trap 'rm -f "$results_file" "$synced_file" "$failed_acc_file"' RETURN
 
   # Process pending first, then emergency (BTS-233 ordering rationale in spec).
+  # @side-effect: rewrites-pending-log
+  # @side-effect: rewrites-emergency-log
+  # @failure-mode: replay-dispatch-failure
   _idea_pending_replay_one_log "$pending" "$project_dir" \
     "$results_file" "$synced_file" "$failed_acc_file"
   _idea_pending_replay_one_log "$emergency" "$project_dir" \
@@ -5232,6 +5295,43 @@ cmd_artifact_read() {
 # cmd_artifact_write — write artifact content to the routed destination.
 # Reads content from stdin. For Linear, performs upsert via document-updated-at
 # pre-check, then save-document with --create-with-id on first write.
+# @manifest
+# purpose: Provider-aware write of feature artifact (spec/plan/stasis) — local file on local-routed projects, Linear Document upsert on Linear-routed.
+# routes-by: integrations.routing.<kind>
+# input: stdin (artifact body, raw markdown)
+# input: --kind {spec|plan|stasis}
+# input: --feature <id>
+# input: --stasis-kind {feature|session}
+# input: --project-dir <path>
+# output: stdout JSON envelope on Linear path
+# output: empty stdout on local path
+# output: exit-codes 0|2|3|4
+# caller: cmd_activate
+# caller: cmd_ssot_migrate
+# caller: skill:/spec
+# caller: skill:/stasis
+# caller: skill:/plan
+# depends-on: linear-query.sh
+# depends-on: _lifecycle_route
+# depends-on: _normalize_feature_to_ticket
+# depends-on: _session_stasis_ticket
+# depends-on: _doc_concurrent_edit_check
+# depends-on: _doc_cache_set_updated_at
+# side-effect: writes-local-doc
+# side-effect: upserts-linear-document
+# side-effect: sets-doc-cache-updated-at
+# failure-mode: validation-error | exit=2 | visible=stderr | mitigation=caller-fixes-args
+# failure-mode: dispatch-error | exit=3 | visible=stderr | mitigation=verify-provider-config
+# failure-mode: concurrent-edit | exit=4 | visible=stderr-with-history-hint | mitigation=ALLOW_CONCURRENT_EDIT_OVERRIDE=1
+# failure-mode: save-failure | exit=passthrough | visible=stderr | mitigation=retry-or-pending-log
+# contract: idempotent-on-byte-identical-input
+# contract: never-corrupts-on-mid-flight-failure
+# contract: skips-cache-on-CREATE-path
+# contract: normalizes-feature-id-input
+# anchor: BTS-204 (origin)
+# anchor: BTS-213 (route-aware spec dispatch)
+# anchor: BTS-217 (feature-id normalization)
+# anchor: BTS-237 (CREATE-cache fix)
 cmd_artifact_write() {
   local kind="" feature="" stasis_kind="feature" project_dir="."
   while [[ $# -gt 0 ]]; do
@@ -5245,6 +5345,7 @@ cmd_artifact_write() {
       *) shift ;;
     esac
   done
+  # @failure-mode: validation-error
   [[ -z "$kind" ]] && { echo "ERROR: artifact-write --kind is required" >&2; return 2; }
 
   local content
@@ -5261,6 +5362,7 @@ cmd_artifact_write() {
       stasis) target="docs/stasis.md" ;;
       *) echo "ERROR: artifact-write unknown kind '$kind'" >&2; return 2 ;;
     esac
+    # @side-effect: writes-local-doc
     printf '%s' "$content" > "$target"
     return 0
   fi
@@ -5302,6 +5404,7 @@ cmd_artifact_write() {
   esac
   [[ -z "$ticket" ]] && { echo "ERROR: artifact-write $kind requires --feature" >&2; return 2; }
 
+  # @failure-mode: dispatch-error
   if [[ "$parent_field" == "issueId" ]]; then
     parent_value=$(bash "$lq" get-issue "$feature_ticket" 2>/dev/null | jq -r '.uuid // empty')
     [[ -z "$parent_value" ]] && { echo "ERROR: artifact-write could not resolve issue UUID for $feature_ticket (input: $feature)" >&2; return 3; }
@@ -5317,6 +5420,7 @@ cmd_artifact_write() {
   # If the cache has a known updatedAt and Linear's current updatedAt has
   # advanced past it, refuse the write — surface document-history hint.
   # When ALLOW_CONCURRENT_EDIT_OVERRIDE=1, skip the check (operator escape).
+  # @failure-mode: concurrent-edit
   if [[ "${ALLOW_CONCURRENT_EDIT_OVERRIDE:-0}" != "1" ]]; then
     if ! _doc_concurrent_edit_check "$doc_id" "$project_dir"; then
       cat >&2 <<EOF
@@ -5335,6 +5439,8 @@ EOF
 
   local result
   local was_create=0
+  # @side-effect: upserts-linear-document
+  # @failure-mode: save-failure
   if bash "$lq" document-updated-at "$doc_id" >/dev/null 2>&1; then
     # Update path
     result=$(jq -n --arg id "$doc_id" --arg content "$content" '{id:$id, content:$content}' \
@@ -5360,6 +5466,7 @@ EOF
     local new_ts
     new_ts=$(printf '%s' "$result" | jq -r '.updatedAt // empty')
     if [[ -n "$new_ts" ]]; then
+      # @side-effect: sets-doc-cache-updated-at
       _doc_cache_set_updated_at "$doc_id" "$new_ts" "$project_dir"
     fi
   fi

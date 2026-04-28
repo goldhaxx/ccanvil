@@ -83,3 +83,11 @@
 .ccanvil/scripts/docs-check.sh:cmd_stasis_carry_forward
 .ccanvil/scripts/docs-check.sh:cmd_title_from_body
 .ccanvil/scripts/docs-check.sh:cmd_ssot_migrate
+
+# BTS-243 — Session 4: ccanvil-sync.sh sync-core cluster.
+# Batch 1 — init + status.
+.ccanvil/scripts/ccanvil-sync.sh:cmd_init
+.ccanvil/scripts/ccanvil-sync.sh:cmd_init_preflight
+.ccanvil/scripts/ccanvil-sync.sh:cmd_init_apply
+.ccanvil/scripts/ccanvil-sync.sh:cmd_retrofit_check
+.ccanvil/scripts/ccanvil-sync.sh:cmd_status

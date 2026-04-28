@@ -389,10 +389,33 @@ scan_hub_files() {
 # Commands
 # ---------------------------------------------------------------------------
 
+# @manifest
+# purpose: Initialize a ccanvil downstream node by classifying tracked files against the hub, computing per-file hashes, and writing the canonical lockfile that all subsequent sync verbs read
+# input: positional <hub-path> (defaults to $HOME/projects/ccanvil)
+# output: stdout human-readable summary (total + clean/modified/local-only/hub-only counts)
+# output: writes .ccanvil/ccanvil.lock (JSON: hub_source, hub_version, synced_at, files{})
+# output: exit-codes 0 ok, 1 hub-not-found
+# caller: global-commands/ccanvil-init.md
+# depends-on: jq
+# depends-on: file_hash
+# depends-on: scan_tracked_files
+# depends-on: scan_hub_files
+# depends-on: get_or_create_node_uuid
+# depends-on: persist_node_uuid
+# depends-on: cmd_register
+# depends-on: timestamp
+# depends-on: die
+# side-effect: writes-lockfile
+# side-effect: registers-with-hub
+# failure-mode: hub-not-found | exit=1 | visible=stderr-die-Hub-not-found-at | mitigation=pass-correct-hub-path
+# contract: idempotent-on-rerun
+# contract: never-modifies-tracked-files
+# anchor: BTS-243 (manifest seed)
 cmd_init() {
   local hub_path="${1:-$HOME/projects/ccanvil}"
   hub_path="${hub_path/#\~/$HOME}"
 
+  # @failure-mode: hub-not-found
   [[ -d "$hub_path" ]] || die "Hub not found at: $hub_path"
 
   # Resolve dist root (hub root where distributable files live)
@@ -445,6 +468,7 @@ cmd_init() {
 
   # Write lockfile (store ~ instead of absolute home path to avoid PII in tracked files)
   local display_path="${hub_path/#$HOME/~}"
+  # @side-effect: writes-lockfile
   jq -n --arg src "$display_path" --arg ver "$hub_version" --arg ts "$(timestamp)" --argjson files "$files_json" \
     '{hub_source: $src, hub_version: $ver, synced_at: $ts, files: $files}' > "$LOCKFILE"
 
@@ -467,6 +491,7 @@ cmd_init() {
   persist_node_uuid "$node_uuid"
 
   # Auto-register with the hub
+  # @side-effect: registers-with-hub
   cmd_register 2>/dev/null || echo "WARNING: Hub registration failed (non-fatal)"
 }
 
@@ -536,11 +561,34 @@ detect_project_mode() {
   echo "fresh"
 }
 
+# @manifest
+# purpose: Classify every hub-tracked, init-extra, GitHub-template, local, and stack file into a recommended-action plan (copy / skip / section-merge / section-merge-create-delimiters / review) so /ccanvil-init can preview changes before applying them
+# input: positional <hub-path>
+# input: --stack <id> (repeatable; also reads stacks[] from .claude/ccanvil.json)
+# output: stdout JSON {project_mode, summary{conflicts, auto, total}, plan[]}
+# output: exit-codes 0 ok, 1 hub-not-found
+# caller: cmd_retrofit_check
+# caller: global-commands/ccanvil-init.md
+# depends-on: jq
+# depends-on: scan_hub_files
+# depends-on: file_hash
+# depends-on: detect_project_mode
+# depends-on: classify_file
+# depends-on: die
+# side-effect: pure-no-mutations
+# failure-mode: hub-not-found | exit=1 | visible=stderr-die-Hub-not-found-at | mitigation=pass-correct-hub-path
+# failure-mode: missing-positional-hub | exit=1 | visible=stderr-Usage | mitigation=supply-hub-path
+# contract: read-only-classification
+# contract: emits-stable-json-shape-on-empty-plan
+# anchor: BTS-243 (manifest seed)
 cmd_init_preflight() {
+  # @failure-mode: missing-positional-hub
+  # @side-effect: pure-no-mutations
   local hub_path="${1:?Usage: ccanvil-sync.sh init-preflight <hub-path>}"
   hub_path="${hub_path/#\~/$HOME}"
   shift
 
+  # @failure-mode: hub-not-found
   [[ -d "$hub_path" ]] || die "Hub not found at: $hub_path"
 
   # Parse --stack flags
@@ -733,12 +781,46 @@ cmd_init_preflight() {
     '{"project_mode": $mode, "summary": {"conflicts": $conflicts, "auto": $auto, "total": $total}, "plan": $plan}'
 }
 
+# @manifest
+# purpose: Execute an init-preflight plan by copying, skipping, section-merging, or wrapping-then-merging files according to each entry's recommended_action so /ccanvil-init can move from preview to applied scaffolding
+# input: positional <hub-path> <plan-file>
+# output: stdout one log line per entry (COPIED/MERGED/SKIP/ERROR) and a final JSON summary {copied, skipped, merged, errors}
+# output: exit-codes 0 ok, 1 hub-not-found-or-plan-missing-or-invalid
+# caller: global-commands/ccanvil-init.md
+# depends-on: jq
+# depends-on: cmd_section_merge
+# depends-on: cp
+# depends-on: mkdir
+# depends-on: sed
+# depends-on: mktemp
+# depends-on: mv
+# depends-on: grep
+# depends-on: tail
+# depends-on: cat
+# depends-on: wc
+# depends-on: die
+# side-effect: writes-target-files
+# side-effect: creates-target-directories
+# side-effect: appends-hub-managed-section
+# failure-mode: hub-not-found | exit=1 | visible=stderr-die-Hub-not-found-at | mitigation=pass-correct-hub-path
+# failure-mode: plan-file-missing | exit=1 | visible=stderr-die-Plan-file-not-found | mitigation=run-init-preflight-first
+# failure-mode: plan-shape-invalid | exit=1 | visible=stderr-die-Invalid-plan-file | mitigation=regenerate-plan-via-preflight
+# failure-mode: hub-source-missing-per-entry | exit=0 | visible=stderr-ERROR-Hub-source-not-found | mitigation=increments-errors-counter-and-continues
+# failure-mode: section-merge-failure-per-entry | exit=0 | visible=stderr-ERROR-Section-merge-failed | mitigation=increments-errors-counter-and-continues
+# contract: applies-recommended-action-verbatim
+# contract: continues-past-per-entry-errors
+# contract: emits-summary-on-completion
+# anchor: BTS-243 (manifest seed)
 cmd_init_apply() {
+  # @failure-mode: hub-source-missing-per-entry
+  # @failure-mode: section-merge-failure-per-entry
   local hub_path="${1:?Usage: ccanvil-sync.sh init-apply <hub-path> <plan-file>}"
   local plan_file="${2:?Usage: ccanvil-sync.sh init-apply <hub-path> <plan-file>}"
   hub_path="${hub_path/#\~/$HOME}"
 
+  # @failure-mode: hub-not-found
   [[ -d "$hub_path" ]] || die "Hub not found at: $hub_path"
+  # @failure-mode: plan-file-missing
   [[ -f "$plan_file" ]] || die "Plan file not found: $plan_file"
 
   local dist_root
@@ -752,6 +834,7 @@ cmd_init_apply() {
   if jq -e 'type == "object" and has("plan")' "$plan_file" > /dev/null 2>&1; then
     plan_expr='.plan'
   elif ! jq -e 'type == "array"' "$plan_file" > /dev/null 2>&1; then
+    # @failure-mode: plan-shape-invalid
     die "Invalid plan file: expected JSON array or object with .plan key"
   fi
 
@@ -804,7 +887,9 @@ cmd_init_apply() {
           errors=$((errors + 1))
           i=$((i + 1)); continue
         fi
+        # @side-effect: creates-target-directories
         mkdir -p "$(dirname "$file")"
+        # @side-effect: writes-target-files
         cp "$hub_file" "$file"
         copied=$((copied + 1))
         echo "COPIED: $file"
@@ -866,6 +951,7 @@ cmd_init_apply() {
           }
         else
           # AC-6: wrap local as node section, append hub's delimiter-onwards.
+          # @side-effect: appends-hub-managed-section
           local tmp
           tmp=$(mktemp)
           cat "$file" > "$tmp"
@@ -924,13 +1010,50 @@ format_preflight_table() {
 # cmd_retrofit_check — AC-15
 # Thin wrapper around init-preflight that emits a human-readable table
 # instead of JSON. Read-only: no files created, no lockfile touched.
+# @manifest
+# purpose: Render init-preflight classification as a human-readable table for operators previewing scaffold-changes before committing to apply
+# input: positional <hub-path>
+# output: stdout formatted table (Detected mode + per-file rows: File, Hub, Local, Action, Reason)
+# output: exit-codes 0 ok, 1 hub-not-found-or-missing-positional
+# caller: global-commands/ccanvil-init.md
+# depends-on: cmd_init_preflight
+# depends-on: format_preflight_table
+# side-effect: pure-no-mutations
+# failure-mode: missing-positional-hub | exit=1 | visible=stderr-Usage | mitigation=supply-hub-path
+# failure-mode: preflight-failure-bubble | exit=1 | visible=stderr-from-cmd_init_preflight | mitigation=fix-hub-path-then-rerun
+# contract: read-only-passthrough
+# anchor: BTS-243 (manifest seed)
 cmd_retrofit_check() {
+  # @failure-mode: missing-positional-hub
+  # @side-effect: pure-no-mutations
   local hub_path="${1:?Usage: ccanvil-sync.sh retrofit-check <hub-path>}"
+  # @failure-mode: preflight-failure-bubble
   cmd_init_preflight "$hub_path" | format_preflight_table
   return 0
 }
 
+# @manifest
+# purpose: Read the ccanvil lockfile and emit per-file sync status (CLEAN / MODIFIED / LOCAL / PROMOTED / HUB-ONLY / NODE-ONLY) plus hub-version drift indicator so operators can see what's diverged at a glance
+# input: --json (machine-readable output)
+# input: --filter <status> (one of clean / modified / local-only / promoted / hub-only / non-clean)
+# output: stdout human-readable table (default) OR JSON {hub_source, hub_version, synced_at, files[]}
+# output: exit-codes 0 ok, 1 missing-lockfile-via-require_lockfile
+# caller: skill:/ccanvil-status
+# depends-on: jq
+# depends-on: require_lockfile
+# depends-on: get_hub_source
+# depends-on: get_hub_source_raw
+# depends-on: get_hub_source_display
+# depends-on: get_sync_field
+# depends-on: git
+# side-effect: reads-lockfile
+# failure-mode: missing-lockfile | exit=1 | visible=stderr-die-from-require_lockfile | mitigation=run-ccanvil-sync-init-first
+# contract: emits-empty-table-when-no-tracked-files
+# contract: surfaces-hub-version-drift-when-detectable
+# anchor: BTS-243 (manifest seed)
 cmd_status() {
+  # @failure-mode: missing-lockfile
+  # @side-effect: reads-lockfile
   require_lockfile
 
   # Parse flags

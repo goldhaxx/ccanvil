@@ -57,6 +57,140 @@ setup() {
   ! echo "$output$stderr" | grep -q "missing-side-effect-marker"
 }
 
+@test "validate markdown: declared caller (path form) is found in target file" {
+  set -e
+  # Create a target markdown file that "calls" the primitive.
+  mkdir -p "$proj/.claude/commands"
+  cat > "$proj/.claude/commands/caller-fixture.md" <<'EOF'
+# Caller fixture
+
+Invokes with-caller somewhere in its body.
+EOF
+  cat > "$proj/hub/tests/fixtures/manifest/with-caller.md" <<'EOF'
+---
+manifest:
+  purpose: Has a path-form caller
+  input:
+    - x
+  output:
+    - y
+  caller:
+    - .claude/commands/caller-fixture.md
+  side-effect:
+    - z
+  failure-mode:
+    - "f | exit=1 | visible=none"
+  contract:
+    - c
+  anchor:
+    - BTS-240
+---
+
+body
+EOF
+  echo "hub/tests/fixtures/manifest/with-caller.md" > "$proj/.ccanvil/manifest-allowlist.txt"
+  cd "$proj"
+  run bash "$SCRIPT" validate --json
+  [ "$status" -eq 0 ]
+  echo "$output" | jq -e '.coverage.covered == 1'
+}
+
+@test "validate markdown: declared caller pointing at missing file fails" {
+  set -e
+  cat > "$proj/hub/tests/fixtures/manifest/missing-caller.md" <<'EOF'
+---
+manifest:
+  purpose: Has a path-form caller that does not exist
+  input:
+    - x
+  output:
+    - y
+  caller:
+    - .claude/commands/does-not-exist.md
+  side-effect:
+    - z
+  failure-mode:
+    - "f | exit=1 | visible=none"
+  contract:
+    - c
+  anchor:
+    - BTS-240
+---
+
+body
+EOF
+  echo "hub/tests/fixtures/manifest/missing-caller.md" > "$proj/.ccanvil/manifest-allowlist.txt"
+  cd "$proj"
+  run bash "$SCRIPT" validate
+  [ "$status" -eq 2 ]
+  echo "$output$stderr" | grep -q "caller-not-found"
+}
+
+@test "validate markdown: depends-on present in body passes" {
+  set -e
+  cat > "$proj/hub/tests/fixtures/manifest/with-deps.md" <<'EOF'
+---
+manifest:
+  purpose: Depends on something that's in the body
+  input:
+    - x
+  output:
+    - y
+  depends-on:
+    - special_helper_word
+  side-effect:
+    - z
+  failure-mode:
+    - "f | exit=1 | visible=none"
+  contract:
+    - c
+  anchor:
+    - BTS-240
+---
+
+# Body
+
+This file mentions special_helper_word somewhere in its prose.
+EOF
+  echo "hub/tests/fixtures/manifest/with-deps.md" > "$proj/.ccanvil/manifest-allowlist.txt"
+  cd "$proj"
+  run bash "$SCRIPT" validate
+  [ "$status" -eq 0 ]
+}
+
+@test "validate markdown: depends-on absent from body fails" {
+  set -e
+  cat > "$proj/hub/tests/fixtures/manifest/missing-deps.md" <<'EOF'
+---
+manifest:
+  purpose: Depends on something not in the body
+  input:
+    - x
+  output:
+    - y
+  depends-on:
+    - totally_absent_token
+  side-effect:
+    - z
+  failure-mode:
+    - "f | exit=1 | visible=none"
+  contract:
+    - c
+  anchor:
+    - BTS-240
+---
+
+# Body
+
+This file does not mention the dependency.
+EOF
+  echo "hub/tests/fixtures/manifest/missing-deps.md" > "$proj/.ccanvil/manifest-allowlist.txt"
+  cd "$proj"
+  run bash "$SCRIPT" validate
+  [ "$status" -eq 2 ]
+  echo "$output$stderr" | grep -q "depends-on-not-found"
+}
+
 @test "validate markdown: missing required key still fails for .md" {
   set -e
   # Missing 'purpose' should still fail — marker-skip does NOT bypass

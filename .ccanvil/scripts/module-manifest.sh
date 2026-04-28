@@ -327,6 +327,28 @@ _function_body_grep() {
   return 1
 }
 
+# BTS-240: target-aware body grep. For .md targets, the manifest scope is
+# the file's BODY (everything after the closing frontmatter `---` delimiter)
+# — skipping the frontmatter avoids false-positive matches against the
+# manifest declaration itself. For .sh targets, fall through to
+# _function_body_grep.
+_target_body_grep() {
+  local path="$1" id="$2" pattern="$3"
+  if [[ "$path" == *.md ]]; then
+    awk '
+      BEGIN { fm=0; body=0 }
+      /^---$/ {
+        if (fm == 0) { fm=1; next }
+        else if (fm == 1) { body=1; next }
+      }
+      body == 1 { print }
+      fm == 0 { print }   # no frontmatter at all → entire file is body
+    ' "$path" | grep -qE -- "$pattern"
+    return $?
+  fi
+  _function_body_grep "$path" "$id" "$pattern"
+}
+
 # Verify that <caller_ref> actually invokes <primitive_id> somewhere.
 # Matches either the function name directly OR the dispatch-verb form
 # (cmd_foo_bar → foo-bar) used by skills/hooks invoking via `bash <script> <verb>`.
@@ -336,6 +358,16 @@ _caller_actually_calls_primitive() {
   local verb="${primitive_id#cmd_}"
   verb="${verb//_/-}"
   local pattern="\\b${primitive_id}\\b|\\b${verb}\\b"
+
+  # BTS-240: bare path-form caller (e.g. ".claude/commands/foo.md",
+  # ".ccanvil/scripts/bar.sh"). The path is checked for existence and
+  # grepped directly — no function-extraction.
+  if [[ "$caller_ref" == */* && "$caller_ref" != skill:/* ]]; then
+    local target="$project_dir/$caller_ref"
+    [[ -f "$target" ]] || return 1
+    grep -qE "$pattern" "$target" && return 0
+    return 1
+  fi
 
   if [[ "$caller_ref" == skill:/* ]]; then
     local skill_name="${caller_ref#skill:/}"
@@ -494,7 +526,8 @@ cmd_validate() {
       local dep
       while IFS= read -r dep; do
         [[ -z "$dep" ]] && continue
-        if ! _function_body_grep "$path" "$id" "\\b${dep}\\b"; then
+        # BTS-240: _target_body_grep dispatches by extension (whole-file for .md).
+        if ! _target_body_grep "$path" "$id" "\\b${dep}\\b"; then
           drift_records+=("$(jq -nc --arg p "$path" --arg id "$id" --arg v "$dep" \
             '{path:$p, id:$id, reason:"depends-on-not-found", value:$v}')")
           echo "DRIFT: $path:$id reason=depends-on-not-found value=$dep" >&2

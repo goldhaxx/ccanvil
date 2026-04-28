@@ -3,7 +3,7 @@
 > Feature: bts-207-cmd-session-info-jq-fork-reduction
 > Work: linear:BTS-207
 > Created: 1777341806
-> Status: In Progress
+> Status: Complete
 
 ## Summary
 

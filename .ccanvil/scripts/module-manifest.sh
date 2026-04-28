@@ -422,7 +422,9 @@ cmd_validate() {
       id="${entry#*:}"
     else
       path="$entry"
-      id="$(basename "$path" .sh)"
+      # BTS-240: extension-agnostic basename (handles .sh AND .md).
+      _vext="${path##*.}"
+      id="$(basename "$path" ".${_vext}")"
     fi
 
     if [[ ! -f "$path" ]]; then
@@ -504,9 +506,10 @@ cmd_validate() {
     if [[ -n "$deep_drift" ]]; then continue; fi
 
     # failure-mode markers: each declared failure-mode id must have @failure-mode: <id> in body.
+    # BTS-240: marker-skip for .md paths — markdown bodies don't anchor code-paths.
     local fms_json
     fms_json=$(printf '%s' "$manifest" | jq -c '."failure-mode" // []')
-    if [[ "$fms_json" != "[]" && "$fms_json" != "null" ]]; then
+    if [[ "$path" != *.md && "$fms_json" != "[]" && "$fms_json" != "null" ]]; then
       local fm
       while IFS= read -r fm; do
         [[ -z "$fm" ]] && continue
@@ -525,9 +528,10 @@ cmd_validate() {
     if [[ -n "$deep_drift" ]]; then continue; fi
 
     # side-effect markers: each declared side-effect must have @side-effect: <value> in body.
+    # BTS-240: marker-skip for .md paths.
     local ses_json
     ses_json=$(printf '%s' "$manifest" | jq -c '."side-effect" // []')
-    if [[ "$ses_json" != "[]" && "$ses_json" != "null" ]]; then
+    if [[ "$path" != *.md && "$ses_json" != "[]" && "$ses_json" != "null" ]]; then
       local se
       while IFS= read -r se; do
         [[ -z "$se" ]] && continue

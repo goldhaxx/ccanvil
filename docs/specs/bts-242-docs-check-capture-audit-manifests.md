@@ -4,7 +4,7 @@
 > Work: linear:BTS-242
 > Created: 1777409844
 > Subject: docs-check.sh capture+audit cluster manifests
-> Status: In Progress
+> Status: Complete
 
 <!-- Subject: docs-check.sh capture+audit cluster manifests (24 primitives, completes file coverage) -->
 

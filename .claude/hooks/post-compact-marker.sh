@@ -3,11 +3,35 @@
 # docs-check.sh recommend can distinguish "session about to end (suggest /compact)"
 # from "session just resumed after /compact + /recall (suggest forward action)".
 #
-# Runs silently on success. Failure is non-fatal: a missing marker falls back
-# to current behavior (AC-6).
-set -euo pipefail
+# BTS-209: migrated to canonical telemetry-hook pattern (loud, never-block,
+# never-snuff). Per-step explicit guards + durable failure log via
+# _hook_record_failure helper.
 
-# Resolve project root — hooks run from the project working directory.
+set +e
+
 ROOT="${CLAUDE_PROJECT_DIR:-$(pwd)}"
-mkdir -p "$ROOT/.ccanvil/state"
-date +%s > "$ROOT/.ccanvil/state/last-compact-ts"
+STATE_DIR="$ROOT/.ccanvil/state"
+MARKER_PATH="$STATE_DIR/last-compact-ts"
+HELPER="$ROOT/.claude/hooks/_lib/record-failure.sh"
+
+# Source helper — best-effort. If missing, fall back to stderr-only WARN.
+if [[ -f "$HELPER" ]]; then
+  source "$HELPER"
+else
+  _hook_record_failure() { :; }  # no-op fallback
+fi
+
+mkdir -p "$STATE_DIR" 2>/dev/null
+if [[ ! -d "$STATE_DIR" ]]; then
+  echo "WARN: post-compact-marker: cannot create $STATE_DIR" >&2
+  _hook_record_failure "post-compact-marker" "mkdir" "cannot create $STATE_DIR"
+  exit 0
+fi
+
+if ! date +%s > "$MARKER_PATH" 2>/dev/null; then
+  echo "WARN: post-compact-marker: cannot write $MARKER_PATH" >&2
+  _hook_record_failure "post-compact-marker" "write-marker" "cannot write $MARKER_PATH"
+  exit 0
+fi
+
+exit 0

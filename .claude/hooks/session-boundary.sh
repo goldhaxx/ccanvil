@@ -8,6 +8,8 @@
 #   .ccanvil/state/session-boundary  — JSON {epoch, iso, tz}
 #
 # Failure mode: WARN to stderr, exit 0. Never blocks session start.
+# BTS-209: durable failure recording via _hook_record_failure helper —
+# every WARN path also appends to .ccanvil/state/hook-failures.log.
 
 set +e
 
@@ -15,9 +17,19 @@ ROOT="${CLAUDE_PROJECT_DIR:-$(pwd)}"
 STATE_DIR="$ROOT/.ccanvil/state"
 COUNTER_PATH="$STATE_DIR/session-counter"
 BOUNDARY_PATH="$STATE_DIR/session-boundary"
+HELPER="$ROOT/.claude/hooks/_lib/record-failure.sh"
+
+# BTS-209: source helper if present; fall back to no-op when missing
+# (stderr WARN paths still fire — loud is preserved without the helper).
+if [[ -f "$HELPER" ]]; then
+  source "$HELPER"
+else
+  _hook_record_failure() { :; }
+fi
 
 mkdir -p "$STATE_DIR" 2>/dev/null || {
   echo "WARN: session-boundary: cannot create $STATE_DIR" >&2
+  _hook_record_failure "session-boundary" "mkdir-state-dir" "cannot create $STATE_DIR"
   exit 0
 }
 
@@ -29,6 +41,7 @@ if [[ -f "$COUNTER_PATH" ]]; then
     counter="$raw"
   else
     echo "WARN: session-counter contained non-integer; resetting to 1" >&2
+    _hook_record_failure "session-boundary" "counter-non-integer" "non-integer counter contents reset to 1"
     counter=0
   fi
 fi
@@ -36,12 +49,14 @@ counter=$((counter + 1))
 
 tmp_counter=$(mktemp "$STATE_DIR/.session-counter.XXXXXX" 2>/dev/null) || {
   echo "WARN: session-boundary: cannot mktemp counter" >&2
+  _hook_record_failure "session-boundary" "mktemp-counter" "cannot create temp counter file"
   exit 0
 }
 echo "$counter" > "$tmp_counter" 2>/dev/null && \
   mv "$tmp_counter" "$COUNTER_PATH" 2>/dev/null || {
     rm -f "$tmp_counter" 2>/dev/null
     echo "WARN: session-boundary: counter write failed" >&2
+    _hook_record_failure "session-boundary" "counter-write" "counter write or mv failed"
     exit 0
   }
 
@@ -71,6 +86,7 @@ tz="${tz:-UTC}"
 
 tmp_boundary=$(mktemp "$STATE_DIR/.session-boundary.XXXXXX" 2>/dev/null) || {
   echo "WARN: session-boundary: cannot mktemp boundary" >&2
+  _hook_record_failure "session-boundary" "mktemp-boundary" "cannot create temp boundary file"
   exit 0
 }
 jq -n --argjson epoch "$epoch" --arg iso "$iso" --arg tz "$tz" \
@@ -78,6 +94,7 @@ jq -n --argjson epoch "$epoch" --arg iso "$iso" --arg tz "$tz" \
   mv "$tmp_boundary" "$BOUNDARY_PATH" 2>/dev/null || {
     rm -f "$tmp_boundary" 2>/dev/null
     echo "WARN: session-boundary: boundary write failed" >&2
+    _hook_record_failure "session-boundary" "boundary-write" "boundary write or mv failed"
     exit 0
   }
 

@@ -81,9 +81,15 @@ ALLOWED_TILDE=(
   "~/projects/"
 )
 
-# Tokenize: strip quotes, then word-split on whitespace.
+# Tokenize: strip double-quotes, then word-split on whitespace.
 # This makes `bash -c "rm /etc/foo"` extract /etc/foo as a token.
-NORMALIZED=$(echo "$COMMAND" | tr -d '"' | tr -d "'")
+#
+# BTS-234: do NOT strip single quotes globally — preserves apostrophe-s
+# possessives (`/recall's wrap`) so the BTS-173 slash-command allowlist
+# can recognize them. Per-token leading/trailing apostrophe strip below
+# preserves the security fence for `'/etc/passwd'`-style quoted-path
+# attacks.
+NORMALIZED=$(echo "$COMMAND" | tr -d '"')
 
 violation=""
 for token in $NORMALIZED; do
@@ -109,8 +115,15 @@ for token in $NORMALIZED; do
   # blocked by the path scan. The capture group still extracts only
   # the slash-command name; trailing punct is OUTSIDE the capture.
   # `]` must be first inside the char class to be treated literally.
+  #
+  # BTS-234: tolerate an OPTIONAL `'s` possessive between the captured
+  # name and the trailing-punct run. So `/recall's`, `/recall's.`, and
+  # `/idea's,` all match. The allowlist still gates which name is
+  # tolerated — `/unknown's` falls through to the path scan.
   slash_command_trailing_punct=']).,;:!?>"'"'"'`'
-  if [[ "$token" =~ ^/([a-zA-Z][a-zA-Z0-9_-]{0,29})[${slash_command_trailing_punct}]*$ ]]; then
+  # BTS-234: $'\'s' yields the literal apostrophe-s for the regex
+  slash_command_possessive=$'(\'s)?'
+  if [[ "$token" =~ ^/([a-zA-Z][a-zA-Z0-9_-]{0,29})${slash_command_possessive}[${slash_command_trailing_punct}]*$ ]]; then
     candidate="${BASH_REMATCH[1]}"
     if [[ -z "${SLASH_COMMANDS+x}" ]]; then
       SLASH_COMMANDS=" "
@@ -136,12 +149,22 @@ for token in $NORMALIZED; do
     fi
   fi
 
-  case "$token" in
+  # BTS-234: per-token apostrophe strip (leading and trailing) before
+  # path-shape detection. Preserves the security fence for quoted-path
+  # attacks like `rm '/etc/passwd'` (token is `'/etc/passwd'`, leading
+  # `'` strip → `/etc/passwd'`, trailing `'` strip → `/etc/passwd`,
+  # path-shape match fires, blocked). The slash-command allowlist
+  # check above already used the unstripped `$token` for accurate
+  # `'s` matching; this strip only affects the path-shape branch.
+  path_token="${token#\'}"
+  path_token="${path_token%\'}"
+
+  case "$path_token" in
     /?*)
       # Absolute path (≥1 char after the slash — bare `/` is ignored)
       ok=false
       for prefix in "${ALLOWED_ABS[@]}"; do
-        case "$token" in
+        case "$path_token" in
           "$prefix"*|"$prefix")
             ok=true
             break
@@ -149,7 +172,7 @@ for token in $NORMALIZED; do
         esac
       done
       if ! $ok; then
-        violation="$token"
+        violation="$path_token"
         break
       fi
       ;;
@@ -157,7 +180,7 @@ for token in $NORMALIZED; do
       # Tilde-prefixed path (literal in command string)
       ok=false
       for prefix in "${ALLOWED_TILDE[@]}"; do
-        case "$token" in
+        case "$path_token" in
           "$prefix"*)
             ok=true
             break
@@ -165,7 +188,7 @@ for token in $NORMALIZED; do
         esac
       done
       if ! $ok; then
-        violation="$token"
+        violation="$path_token"
         break
       fi
       ;;

@@ -23,3 +23,33 @@
 .claude/rules/tdd.md
 .claude/agents/code-reviewer.md
 .claude/commands/pr.md
+
+# BTS-241: docs-check.sh lifecycle cluster (Session 2 of manifest rollout).
+# Batch 1 — foundational primitives.
+.ccanvil/scripts/docs-check.sh:cmd_session_info
+.ccanvil/scripts/docs-check.sh:cmd_status
+.ccanvil/scripts/docs-check.sh:cmd_extract_work
+.ccanvil/scripts/docs-check.sh:cmd_auto_transition_emit
+.ccanvil/scripts/docs-check.sh:cmd_auto_close_emit
+.ccanvil/scripts/docs-check.sh:cmd_detect_repo_type
+# Batch 2 — sync/pr/land helpers.
+.ccanvil/scripts/docs-check.sh:cmd_sync_check
+.ccanvil/scripts/docs-check.sh:cmd_pr_guard
+.ccanvil/scripts/docs-check.sh:cmd_land_recover_branch
+.ccanvil/scripts/docs-check.sh:cmd_pr_cleanup
+.ccanvil/scripts/docs-check.sh:cmd_land
+.ccanvil/scripts/docs-check.sh:cmd_lifecycle_state
+# Batch 3 — lifecycle entrypoints.
+.ccanvil/scripts/docs-check.sh:cmd_validate
+.ccanvil/scripts/docs-check.sh:cmd_recommend
+.ccanvil/scripts/docs-check.sh:cmd_audit_session
+.ccanvil/scripts/docs-check.sh:cmd_list_specs
+.ccanvil/scripts/docs-check.sh:cmd_activate
+.ccanvil/scripts/docs-check.sh:cmd_complete
+# Batch 4 — PR/title + spec primitives.
+.ccanvil/scripts/docs-check.sh:cmd_refresh_plan_hash
+.ccanvil/scripts/docs-check.sh:cmd_derive_pr_title
+.ccanvil/scripts/docs-check.sh:cmd_assert_pr_title
+.ccanvil/scripts/docs-check.sh:cmd_archive_stasis
+.ccanvil/scripts/docs-check.sh:cmd_sessions_list
+.ccanvil/scripts/docs-check.sh:cmd_stamp_spec

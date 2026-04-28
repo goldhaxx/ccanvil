@@ -3,7 +3,7 @@
 > Feature: bts-237-spec-activate-concurrent-edit-race
 > Work: linear:BTS-237
 > Created: 1777341282
-> Status: In Progress
+> Status: Complete
 
 ## Summary
 

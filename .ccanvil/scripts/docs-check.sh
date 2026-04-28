@@ -3159,12 +3159,28 @@ cmd_idea_sync() {
 # Exit 0 on success (including no-op); non-zero on missing spec/plan or
 # malformed plan metadata.
 # ---------------------------------------------------------------------------
+# @manifest
+# purpose: Recompute the spec content hash and overwrite the plan's `> Spec hash:` metadata line in-place — used after the operator edits a spec post-/plan to clear stale-plan validation drift without re-running the full /plan flow
+# input: --project-dir <path>
+# input: positional <project-dir>
+# output: stdout new hash
+# output: exit-codes 0 ok, 1 missing-spec/missing-plan/missing-hash-line, 2 unknown-flag
+# depends-on: content_hash
+# depends-on: sed
+# side-effect: rewrites-plan-metadata
+# failure-mode: unknown-flag | exit=2 | visible=stderr-Usage
+# failure-mode: missing-spec | exit=1 | visible=stderr-error | mitigation=run-/spec-and-/activate
+# failure-mode: missing-plan | exit=1 | visible=stderr-error | mitigation=run-/plan
+# failure-mode: missing-hash-line | exit=1 | visible=stderr-error | mitigation=use-current-template
+# contract: idempotent-when-spec-unchanged
+# anchor: BTS-241 (manifest seed)
 cmd_refresh_plan_hash() {
   local project_dir="."
   while [[ $# -gt 0 ]]; do
     case "$1" in
       --project-dir) project_dir="$2"; shift 2 ;;
       --) shift; break ;;
+      # @failure-mode: unknown-flag
       --*) echo "Usage: docs-check.sh refresh-plan-hash [--project-dir <path>] [<project-dir>]" >&2; exit 2 ;;
       *) project_dir="$1"; shift ;;
     esac
@@ -3174,14 +3190,18 @@ cmd_refresh_plan_hash() {
   local plan_file="$project_dir/docs/plan.md"
 
   if [[ ! -f "$spec_file" ]]; then
+    # @failure-mode: missing-spec
     echo "ERROR: docs/spec.md not found" >&2
     return 1
   fi
   if [[ ! -f "$plan_file" ]]; then
+    # @failure-mode: missing-plan
     echo "ERROR: docs/plan.md not found" >&2
     return 1
   fi
   if ! grep -qE '^> Spec hash: [a-f0-9]{6,}' "$plan_file"; then
+    # @failure-mode: missing-hash-line
+    # @side-effect: rewrites-plan-metadata
     echo "ERROR: docs/plan.md has no '> Spec hash:' metadata line" >&2
     return 1
   fi
@@ -3214,18 +3234,37 @@ cmd_refresh_plan_hash() {
 #   - Empty Summary section falls back to `activate feature`.
 # Used by cmd_activate (PR creation) and cmd_assert_pr_title (PR title repair).
 # ---------------------------------------------------------------------------
+# @manifest
+# purpose: Derive the canonical PR title from a spec — `feat(<feature-id>): <subject>` — preferring `> Subject:` metadata (auto-populated by stamp-spec) over Summary first-line extraction; truncates to ≤72 chars on word boundary
+# input: positional <spec-file>
+# output: stdout PR title string (no trailing newline manipulation)
+# output: exit-codes 0 ok, 1 missing-arg/spec-not-found
+# caller: cmd_activate
+# caller: cmd_assert_pr_title
+# depends-on: grep
+# depends-on: sed
+# side-effect: reads-spec-file
+# failure-mode: missing-arg | exit=1 | visible=stderr-error | mitigation=pass-spec-file
+# failure-mode: spec-not-found | exit=1 | visible=stderr-error | mitigation=verify-path
+# contract: title-≤-72-chars
+# contract: prefers-Subject-metadata-over-Summary
+# anchor: BTS-236 (Subject metadata pivot)
+# anchor: BTS-241 (manifest seed)
 cmd_derive_pr_title() {
   local spec_file="${1:-}"
   local lookback=8
   if [[ -z "$spec_file" ]]; then
+    # @failure-mode: missing-arg
     echo "ERROR: derive-pr-title: missing <spec-file> argument" >&2
     return 1
   fi
   if [[ ! -f "$spec_file" ]]; then
+    # @failure-mode: spec-not-found
     echo "ERROR: derive-pr-title: spec file not found: $spec_file" >&2
     return 1
   fi
 
+  # @side-effect: reads-spec-file
   local feature_id_meta first_line
   feature_id_meta=$(grep -m1 '^> Feature:' "$spec_file" | sed -E 's/^> Feature:[[:space:]]*//')
 
@@ -3276,12 +3315,30 @@ cmd_derive_pr_title() {
 # survives without git archeology. Idempotent on byte-identical content;
 # errors on collision with non-identical content.
 # ---------------------------------------------------------------------------
+# @manifest
+# purpose: Archive the active stasis to docs/sessions/<epoch>-<feature-id>.md and commit — runs at /pr-cleanup time so the session history rides the squash-merge into main; route-aware (reads from Linear Document on Linear-routed nodes, BTS-230)
+# input: --project-dir <path>
+# input: positional <project-dir>
+# output: stdout archive path on success
+# output: exit-codes 0 ok, 1 no-stasis-found, 2 unknown-flag
+# caller: skill:/stasis
+# depends-on: cmd_artifact_read
+# depends-on: _lifecycle_route
+# depends-on: jq
+# side-effect: writes-session-archive
+# failure-mode: unknown-flag | exit=2 | visible=stderr-Usage
+# failure-mode: no-stasis-found | exit=1 | visible=stderr-error | mitigation=run-/stasis-first
+# contract: archive-named-by-epoch-then-feature-id
+# anchor: BTS-22 (sessions archive substrate)
+# anchor: BTS-230 (route-aware stasis read)
+# anchor: BTS-241 (manifest seed)
 cmd_archive_stasis() {
   local project_dir="."
   while [[ $# -gt 0 ]]; do
     case "$1" in
       --project-dir) project_dir="$2"; shift 2 ;;
       --) shift; break ;;
+      # @failure-mode: unknown-flag
       --*) echo "Usage: docs-check.sh archive-stasis [--project-dir <path>] [<project-dir>]" >&2; exit 2 ;;
       *) project_dir="$1"; shift ;;
     esac
@@ -3306,6 +3363,7 @@ cmd_archive_stasis() {
       fi
     fi
     if [[ -z "$stasis_content" ]]; then
+      # @failure-mode: no-stasis-found
       echo "ERROR: archive-stasis: routing.stasis=linear but no stasis content found (tried session-kind, feature-kind)" >&2
       return 1
     fi
@@ -3353,6 +3411,7 @@ cmd_archive_stasis() {
   fi
 
   mkdir -p "$sessions_dir"
+  # @side-effect: writes-session-archive
   printf '%s' "$stasis_content" > "$dest"
   jq -n --arg path "$rel_path" '{archived: true, path: $path}'
 }
@@ -3362,6 +3421,21 @@ cmd_archive_stasis() {
 # docs/sessions/, sorted newest-first by epoch. Used by /recall to read
 # recent N sessions without git archeology.
 # ---------------------------------------------------------------------------
+# @manifest
+# purpose: List archived stasis files in docs/sessions/ as JSON [{path, feature_id, epoch, kind}], newest-first by epoch — consumed by /recall for cross-session pattern context (BTS-22)
+# input: --project-dir <path>
+# input: --limit <n>
+# input: positional <project-dir>
+# output: stdout JSON array
+# output: exit-codes 0 ok, 2 unknown-flag
+# caller: skill:/recall
+# depends-on: jq
+# side-effect: reads-sessions-archive
+# failure-mode: unknown-flag | exit=2 | visible=stderr-Usage
+# failure-mode: empty-archive | exit=0 | visible=stdout-empty-array
+# contract: sorted-newest-first-by-epoch
+# anchor: BTS-22 (sessions archive substrate)
+# anchor: BTS-241 (manifest seed)
 cmd_sessions_list() {
   local project_dir="."
   local limit=10
@@ -3370,13 +3444,16 @@ cmd_sessions_list() {
       --project-dir) project_dir="$2"; shift 2 ;;
       --limit)       limit="$2"; shift 2 ;;
       --) shift; break ;;
+      # @failure-mode: unknown-flag
       --*) echo "Usage: docs-check.sh sessions-list [--project-dir <path>] [--limit <n>] [<project-dir>]" >&2; exit 2 ;;
       *)             project_dir="$1"; shift ;;
     esac
   done
 
+  # @side-effect: reads-sessions-archive
   local sessions_dir="$project_dir/docs/sessions"
   if [[ ! -d "$sessions_dir" ]]; then
+    # @failure-mode: empty-archive
     echo "[]"
     return 0
   fi
@@ -3427,6 +3504,26 @@ cmd_sessions_list() {
 # Exit 0 on success (updated or no-op); non-zero on missing spec, missing
 # branch, or gh CLI absent.
 # ---------------------------------------------------------------------------
+# @manifest
+# purpose: BTS-178 — assert (or force-update via gh pr edit) that PR <N>'s title matches the spec-derived canonical form `feat(<feature-id>): <subject>` so the squash-merge subject on main is correct
+# input: --project-dir <path>
+# input: positional <pr-number>
+# output: stdout JSON {updated, expected, actual}
+# output: exit-codes 0 ok, 1 gh-missing/spec-not-found, 2 unknown-flag/missing-pr-arg
+# caller: skill:/pr
+# caller: cmd_ship_finalize
+# depends-on: cmd_derive_pr_title
+# depends-on: gh
+# depends-on: jq
+# side-effect: queries-gh-pr
+# side-effect: maybe-updates-pr-title
+# failure-mode: unknown-flag | exit=2 | visible=stderr-Usage
+# failure-mode: missing-pr-arg | exit=2 | visible=stderr-Usage
+# failure-mode: gh-missing | exit=1 | visible=stderr-error | mitigation=install-gh-cli
+# failure-mode: spec-not-found | exit=1 | visible=stderr-error | mitigation=verify-active-spec-or-archive
+# contract: idempotent-when-title-matches
+# anchor: BTS-178 (assert-pr-title substrate)
+# anchor: BTS-241 (manifest seed)
 cmd_assert_pr_title() {
   local pr_number=""
   local project_dir="."
@@ -3434,6 +3531,7 @@ cmd_assert_pr_title() {
     case "$1" in
       --project-dir) project_dir="$2"; shift 2 ;;
       --) shift; break ;;
+      # @failure-mode: unknown-flag
       --*) echo "Usage: docs-check.sh assert-pr-title [--project-dir <path>] <pr-number>" >&2; exit 2 ;;
       *)
         if [[ -z "$pr_number" ]]; then pr_number="$1"; else project_dir="$1"; fi
@@ -3443,10 +3541,13 @@ cmd_assert_pr_title() {
   done
 
   if [[ -z "$pr_number" ]]; then
+    # @failure-mode: missing-pr-arg
     echo "Usage: docs-check.sh assert-pr-title [--project-dir <path>] <pr-number>" >&2
     return 2
   fi
+  # @side-effect: queries-gh-pr
   if ! command -v gh >/dev/null 2>&1; then
+    # @failure-mode: gh-missing
     echo "ERROR: gh CLI not available — assert-pr-title requires GitHub CLI" >&2
     return 1
   fi
@@ -3467,6 +3568,7 @@ cmd_assert_pr_title() {
     if [[ -n "$feature_id" && -f "$project_dir/docs/specs/$feature_id.md" ]]; then
       spec_file="$project_dir/docs/specs/$feature_id.md"
     else
+      # @failure-mode: spec-not-found
       echo "ERROR: no spec found for branch '$branch' to derive expected title" >&2
       return 1
     fi
@@ -3495,6 +3597,7 @@ cmd_assert_pr_title() {
   fi
 
   if $needs_update; then
+    # @side-effect: maybe-updates-pr-title
     gh pr edit "$pr_number" --title "$expected_title" >/dev/null
     jq -n --arg expected "$expected_title" --arg actual "$actual_title" \
       '{updated:true, expected:$expected, actual:$actual}'
@@ -4503,6 +4606,25 @@ cmd_title_from_body() {
 #
 # Output (stdout, JSON): {"feature_id":"<id>","stamped_epoch":<n>,"file":"<path>"}
 # ---------------------------------------------------------------------------
+# @manifest
+# purpose: Stamp the current epoch into a spec's `> Created: PLACEHOLDER` line and auto-populate `> Subject:` from the H1 — owns the timestamp deterministically (BTS-141: never substitute via inline shell-variable interpolation)
+# input: --project-dir <path>
+# input: positional <feature_id>
+# input: positional [docs-dir]
+# output: stdout JSON {feature_id, stamped_epoch, file}
+# output: exit-codes 0 ok, 1 spec-not-found, 2 unknown-flag/missing-feature-id
+# caller: skill:/spec
+# depends-on: jq
+# depends-on: sed
+# side-effect: rewrites-spec-metadata
+# failure-mode: unknown-flag | exit=2 | visible=stderr-Usage
+# failure-mode: missing-feature-id | exit=2 | visible=stderr-Usage
+# failure-mode: spec-not-found | exit=1 | visible=stderr-error | mitigation=verify-feature-id-and-archive
+# contract: epoch-stamped-deterministically
+# contract: subject-auto-populated-from-h1-when-absent
+# anchor: BTS-141 (deterministic timestamp ownership)
+# anchor: BTS-236 (Subject auto-population)
+# anchor: BTS-241 (manifest seed)
 cmd_stamp_spec() {
   # BTS-212: arg loop
   local project_dir_flag=""
@@ -4510,6 +4632,7 @@ cmd_stamp_spec() {
     case "$1" in
       --project-dir) project_dir_flag="${2:-.}"; shift 2 ;;
       --) shift; break ;;
+      # @failure-mode: unknown-flag
       --*) echo "Usage: docs-check.sh stamp-spec [--project-dir <path>] <feature_id> [<docs-dir>]" >&2; exit 2 ;;
       *) break ;;
     esac
@@ -4523,12 +4646,14 @@ cmd_stamp_spec() {
   fi
 
   if [[ -z "$feature_id" ]]; then
+    # @failure-mode: missing-feature-id
     echo "Usage: docs-check.sh stamp-spec [--project-dir <path>] <feature_id> [<docs-dir>]" >&2
     return 2
   fi
 
   local spec_path="$docs_dir/specs/$feature_id.md"
   if [[ ! -f "$spec_path" ]]; then
+    # @failure-mode: spec-not-found
     echo "ERROR: spec not found: $spec_path" >&2
     return 1
   fi
@@ -4573,6 +4698,7 @@ cmd_stamp_spec() {
   # If a Subject was derived, insert it immediately after Created.
   local tmp
   tmp="${spec_path}.stamp.tmp"
+  # @side-effect: rewrites-spec-metadata
   awk -v ep="$epoch" -v subj="$subject" '
     /^> Created:/ && !created_done {
       print "> Created: " ep

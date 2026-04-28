@@ -76,3 +76,10 @@
 .ccanvil/scripts/docs-check.sh:cmd_idea_migrate
 .ccanvil/scripts/docs-check.sh:cmd_idea_setup
 .ccanvil/scripts/docs-check.sh:cmd_idea_upgrade
+# Batch 4 — pending log + evidence/title/ssot.
+.ccanvil/scripts/docs-check.sh:cmd_idea_pending_append
+.ccanvil/scripts/docs-check.sh:cmd_idea_pending_validate
+.ccanvil/scripts/docs-check.sh:cmd_evidence_scan_session
+.ccanvil/scripts/docs-check.sh:cmd_stasis_carry_forward
+.ccanvil/scripts/docs-check.sh:cmd_title_from_body
+.ccanvil/scripts/docs-check.sh:cmd_ssot_migrate

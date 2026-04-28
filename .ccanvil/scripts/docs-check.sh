@@ -4462,7 +4462,7 @@ cmd_idea_setup() {
 # Exit: 0 if empty; 1 if any matches found.
 # ---------------------------------------------------------------------------
 # @manifest
-# purpose: Scan the project tree for legacy references (e.g. /catchup, /checkpoint, docs/checkpoint.md) that were retired in earlier ccanvil migrations; emits JSON array of matches with optional allowlist pre-filter
+# purpose: Scan the project tree for retired-vocab references (legacy command names from earlier ccanvil migrations) and emit JSON matches with optional allowlist pre-filter; pattern lives in the substrate so this manifest stays vocab-free
 # input: --respect-allowlist <path>
 # input: --project-dir <path>
 # input: positional <project-dir> (legacy)
@@ -4814,6 +4814,18 @@ cmd_idea_upgrade() {
 #                                  truncate the reply to 80 chars.
 #   - Longer / multi-line, no CLI → first 80 chars of first line
 #                                    (deterministic fallback).
+# @manifest
+# purpose: Generate a concise ≤80-char title from a multi-line idea body via deterministic heuristics (first sentence, strip leading bullet/markup, truncate on word boundary); used by /idea capture flow when title not provided
+# input: stdin <body>
+# input: --title-map <path>
+# output: stdout single-line title string ≤80 chars
+# output: exit-codes 0 ok, 1 title-map-not-found
+# depends-on: jq
+# side-effect: emits-title-stdout
+# failure-mode: title-map-not-found | exit=1 | visible=stderr-error | mitigation=verify-title-map-path
+# contract: deterministic-no-llm
+# contract: title-≤-80-chars
+# anchor: BTS-241 (manifest seed)
 cmd_title_from_body() {
   local title_map=''
   while [[ $# -gt 0 ]]; do
@@ -4833,6 +4845,7 @@ cmd_title_from_body() {
   done
 
   if [[ -n "$title_map" && ! -f "$title_map" ]]; then
+    # @failure-mode: title-map-not-found
     echo "ERROR: --title-map file not found: $title_map" >&2
     return 1
   fi
@@ -4848,6 +4861,7 @@ cmd_title_from_body() {
     local mapped
     mapped=$(jq -r --arg b "$body" '.[$b] // empty' "$title_map" 2>/dev/null || echo '')
     if [[ -n "$mapped" ]]; then
+      # @side-effect: emits-title-stdout
       printf '%s' "$mapped"
       return 0
     fi
@@ -5085,6 +5099,33 @@ cmd_remote_presence() {
 #   merge             --id <ID> --duplicate-of <DID>
 #   ticket.transition --id <ID> --role <ROLE>
 # ---------------------------------------------------------------------------
+# @manifest
+# purpose: BTS-123 — deterministically append one entry to .ccanvil/ideas-pending.log when a Linear dispatch fails (network, auth, GraphQL); replaces hand-rolled echo+jq pipelines that produced malformed JSON; BTS-205 dead-letter via dual-capture-emergency.log on validate failure
+# input: --op {add|promote|defer|dismiss|merge|ticket.transition}
+# input: --title <title> (op=add)
+# input: --body <body> (op=add)
+# input: --id <BTS-N> (transition ops)
+# input: --priority <1-4> (op=promote)
+# input: --role <todo|in_progress|backlog|done> (op=ticket.transition)
+# input: --duplicate-of <BTS-N> (op=merge)
+# input: --parent <ref> (op=add, BTS-162)
+# input: --project-dir <path>
+# output: stdout JSON {appended:true, ts}
+# output: exit-codes 0 ok, 2 unknown-flag/missing-required
+# caller: skill:/idea
+# caller: skill:/activate
+# caller: skill:/land
+# depends-on: jq
+# side-effect: appends-pending-log
+# side-effect: maybe-writes-emergency-log
+# failure-mode: unknown-flag | exit=2 | visible=stderr-Usage
+# failure-mode: missing-op | exit=2 | visible=stderr-error | mitigation=pass-required-op
+# failure-mode: validate-failure | exit=0 | visible=stdout-emergency-message | mitigation=BTS-205-dual-capture
+# contract: deterministic-jq-shape-no-echo
+# contract: never-fails-fallback-path
+# anchor: BTS-123 (deterministic helper origin)
+# anchor: BTS-205 (dual-capture emergency)
+# anchor: BTS-241 (manifest seed)
 cmd_idea_pending_append() {
   local op="" title="" body="" id="" priority="" role="" duplicate_of="" parent=""
   local project_dir="."
@@ -5111,11 +5152,14 @@ cmd_idea_pending_append() {
         fi
         parent="$2"; shift 2 ;;
       --project-dir)    project_dir="$2"; shift 2 ;;
-      *)                echo "ERROR: unknown flag: $1" >&2; return 2 ;;
+      *)
+                        # @failure-mode: unknown-flag
+                        echo "ERROR: unknown flag: $1" >&2; return 2 ;;
     esac
   done
 
   if [[ -z "$op" ]]; then
+    # @failure-mode: missing-op
     echo "ERROR: idea-pending-append requires --op" >&2
     return 2
   fi
@@ -5183,8 +5227,11 @@ cmd_idea_pending_append() {
   # determinism candidates evaporated silently. Now the helper writes
   # to .ccanvil/dual-capture-emergency.log as a last-resort, with a
   # WARN to stderr so /stasis surfaces the degradation.
+  # @side-effect: appends-pending-log
   if ! printf '%s\n' "$entry" >> "$pending" 2>/dev/null; then
     local emergency="$project_dir/.ccanvil/dual-capture-emergency.log"
+    # @side-effect: maybe-writes-emergency-log
+    # @failure-mode: validate-failure
     if printf '%s\n' "$entry" >> "$emergency" 2>/dev/null; then
       echo "WARN: idea-pending-append: primary log write failed; entry written to emergency log ($emergency)" >&2
       return 0
@@ -5201,11 +5248,27 @@ cmd_idea_pending_append() {
 # Output (stdout, JSON): {count: N, valid: bool, errors: [<line-num>...]}
 # Exit codes: 0 when valid (or empty/missing), non-zero when any line fails to parse.
 # ---------------------------------------------------------------------------
+# @manifest
+# purpose: BTS-123 — count and structurally validate the entries in .ccanvil/ideas-pending.log; emits {count, valid, errors:[]} envelope so callers (skill:/idea, /stasis) can compute totals via JSON path rather than `wc -l` (physical lines ≠ JSON entries)
+# input: positional <project-dir>
+# output: stdout JSON {count, valid, errors:[]}
+# output: exit-codes 0 always (errors encoded in JSON)
+# caller: skill:/idea
+# depends-on: jq
+# side-effect: reads-pending-log
+# failure-mode: missing-log | exit=0 | visible=zeroed-output
+# failure-mode: malformed-entry | exit=0 | visible=errors-array-non-empty | mitigation=manual-cleanup-or-resync
+# contract: never-fails-on-invalid-content
+# contract: count-matches-entry-count-not-line-count
+# anchor: BTS-123 (deterministic-helper-pattern)
+# anchor: BTS-241 (manifest seed)
 cmd_idea_pending_validate() {
   local project_dir="${1:-.}"
+  # @side-effect: reads-pending-log
   local pending="$project_dir/.ccanvil/ideas-pending.log"
 
   if [[ ! -f "$pending" ]]; then
+    # @failure-mode: missing-log
     jq -n '{count: 0, valid: true, errors: []}'
     return 0
   fi
@@ -5220,6 +5283,7 @@ cmd_idea_pending_validate() {
     if echo "$line" | jq -e . >/dev/null 2>&1; then
       count=$((count + 1))
     else
+      # @failure-mode: malformed-entry
       errors_json=$(echo "$errors_json" | jq --argjson n "$lineno" '. + [$n]')
     fi
   done < "$pending"
@@ -5247,6 +5311,24 @@ cmd_idea_pending_validate() {
 #   --project-dir <path>  — defaults to "."
 #   --input-json <file>   — bypass live idea.list resolver; read canned issues array
 #   --no-time-filter      — skip createdAt filter (test mode)
+# @manifest
+# purpose: BTS-201 — scan the current session's idea captures for bug-shape language without the four evidence anchors (Command/Output/Exit/Reproduce) and emit a list for /stasis to surface as Evidence Gaps; closes the failure mode that almost shipped a phantom regex carve-out (BTS-198)
+# input: --since <ref>
+# input: --project-dir <path>
+# input: --input-json <path>
+# input: --no-time-filter
+# output: stdout JSON array of gap entries [{id, title, reason}]
+# output: exit-codes 0 always, 2 unknown-flag
+# caller: skill:/stasis
+# depends-on: jq
+# side-effect: reads-ideas-log-and-pending
+# failure-mode: unknown-flag | exit=2 | visible=stderr-Usage
+# failure-mode: linear-fetch-fallback | exit=0 | visible=fallback-field-in-envelope | mitigation=expected-on-network-flake
+# contract: bug-shape-heuristic-deterministic
+# contract: empty-array-when-no-gaps
+# anchor: BTS-198 (origin failure mode)
+# anchor: BTS-201 (evidence-required rule)
+# anchor: BTS-241 (manifest seed)
 cmd_evidence_scan_session() {
   local since="" project_dir="." input_json="" no_time_filter=0
   while [[ $# -gt 0 ]]; do
@@ -5256,6 +5338,7 @@ cmd_evidence_scan_session() {
       --input-json) input_json="${2:-}"; shift 2 ;;
       --no-time-filter) no_time_filter=1; shift ;;
       --) shift; break ;;
+      # @failure-mode: unknown-flag
       --*) echo "Usage: docs-check.sh evidence-scan-session [--since <ref>] [--project-dir <path>] [--input-json <path>] [--no-time-filter]" >&2; exit 2 ;;
       *) shift ;;
     esac
@@ -5268,6 +5351,7 @@ cmd_evidence_scan_session() {
   fi
   if [[ -z "$since_epoch" ]]; then
     since_epoch=$(( $(date +%s) - 86400 ))
+    # @failure-mode: linear-fetch-fallback
     [[ -n "$since" ]] && fallback="24h"
     # Empty --since with no resolution also implies fallback at first-stasis
     # nodes; we mark fallback only when the operator explicitly passed an
@@ -5366,6 +5450,7 @@ cmd_evidence_scan_session() {
       gaps=$(echo "$gaps" | jq --arg id "$id" --arg t "$title" \
         '. + [{id:$id, title:$t, reason:"missing-evidence-anchors"}]')
     fi
+  # @side-effect: reads-ideas-log-and-pending
   done < <(echo "$issues" | jq -c '.[]')
 
   if [[ -n "$fallback" ]]; then
@@ -5395,6 +5480,25 @@ cmd_evidence_scan_session() {
 #   {candidates:[{slug, has_idea, idea_id|null}], count_total, count_carry_forward}
 #   Plus optional `note: "no prior stasis"` when no stasis is found.
 # ---------------------------------------------------------------------------
+# @manifest
+# purpose: BTS-232 — parse the prior stasis's `## Determinism Review` section, extract candidate slugs, and cross-check each against current Linear ideas; surfaces candidates whose dual-capture didn't land for /recall to flag as carry-forward
+# input: --project-dir <path>
+# input: --input-json <path>
+# input: --stasis-content - (read from stdin)
+# output: stdout JSON {candidates, count_total, count_carry_forward}
+# output: exit-codes 0 always, 2 unknown-flag/bad-stasis-content
+# caller: skill:/recall
+# depends-on: cmd_artifact_read
+# depends-on: jq
+# side-effect: reads-prior-stasis
+# side-effect: queries-linear-ideas
+# failure-mode: unknown-flag | exit=2 | visible=stderr-error
+# failure-mode: bad-stasis-content-flag | exit=2 | visible=stderr-error | mitigation=use-dash-for-stdin
+# failure-mode: empty-result | exit=0 | visible=zeroed-counts | mitigation=expected-when-no-determinism-section
+# contract: tolerates-bolded-and-backticked-slug-shapes
+# contract: silent-when-no-prior-stasis
+# anchor: BTS-232 (carry-forward substrate)
+# anchor: BTS-241 (manifest seed)
 cmd_stasis_carry_forward() {
   local project_dir="." input_json="" read_stdin=0
   while [[ $# -gt 0 ]]; do
@@ -5405,11 +5509,13 @@ cmd_stasis_carry_forward() {
         if [[ "${2:-}" == "-" ]]; then
           read_stdin=1; shift 2
         else
+          # @failure-mode: bad-stasis-content-flag
           echo "ERROR: stasis-carry-forward: --stasis-content only accepts '-' (stdin)" >&2
           return 2
         fi
         ;;
       --) shift; break ;;
+      # @failure-mode: unknown-flag
       --*) echo "Usage: docs-check.sh stasis-carry-forward [--project-dir <path>] [--stasis-content -] [--input-json <path>]" >&2; exit 2 ;;
       *) shift ;;
     esac
@@ -5432,6 +5538,8 @@ cmd_stasis_carry_forward() {
       fi
     fi
     if [[ -z "$stasis_content" ]]; then
+      # @failure-mode: empty-result
+      # @side-effect: reads-prior-stasis
       jq -n '{candidates:[], count_total:0, count_carry_forward:0, note:"no prior stasis"}'
       return 0
     fi
@@ -5526,6 +5634,7 @@ cmd_stasis_carry_forward() {
     }
     issues=$(cat "$input_json")
   else
+    # @side-effect: queries-linear-ideas
     local ops="$(dirname "$0")/operations.sh"
     local resolution
     resolution=$(bash "$ops" resolve idea.list --project-dir "$project_dir" 2>/dev/null) || resolution=""
@@ -5915,6 +6024,25 @@ _doc_concurrent_edit_check() {
 # BTS-204 Phase 6: ssot-migrate — operator-driven, idempotent migration of
 # lifecycle artifacts between local files and Linear Documents. Bidirectional.
 # Never auto-triggered. Per AC-12.
+# @manifest
+# purpose: BTS-204 — migrate spec/plan/stasis routing between local-only and Linear-routed for a single feature; --to direction inverts the route, with content moved between docs/specs/<id>.md and the corresponding Linear Document
+# input: --to {linear|local}
+# input: --feature <id>
+# input: --project-dir <path>
+# output: stdout migration plan + summary JSON
+# output: exit-codes 0 ok, 1 missing-feature/route-error, 2 unknown-flag/missing-direction
+# depends-on: cmd_artifact_read
+# depends-on: cmd_artifact_write
+# depends-on: jq
+# side-effect: writes-or-deletes-local-archive
+# side-effect: writes-or-deletes-linear-document
+# failure-mode: unknown-flag | exit=2 | visible=stderr-Usage
+# failure-mode: missing-direction | exit=2 | visible=stderr-error | mitigation=pass-to-flag
+# failure-mode: missing-feature | exit=2 | visible=stderr-error | mitigation=pass-feature-flag
+# failure-mode: write-error | exit=0 | visible=errors-field-in-envelope | mitigation=retry-after-fixing-credentials
+# contract: idempotent-on-already-migrated
+# anchor: BTS-204 (SSOT-Linear)
+# anchor: BTS-241 (manifest seed)
 cmd_ssot_migrate() {
   local direction="" feature="" project_dir="."
   while [[ $# -gt 0 ]]; do
@@ -5923,15 +6051,19 @@ cmd_ssot_migrate() {
       --feature)    feature="$2";   shift 2 ;;
       --project-dir) project_dir="${2:-.}"; shift 2 ;;
       --) shift; break ;;
+      # @failure-mode: unknown-flag
       --*) echo "Usage: docs-check.sh ssot-migrate --to {linear|local} [--feature <id>] [--project-dir <path>]" >&2; exit 2 ;;
       *) shift ;;
     esac
   done
   case "$direction" in
     linear|local) ;;
-    *) echo "ERROR: ssot-migrate requires --to {linear|local}" >&2; return 2 ;;
+    *)
+       # @failure-mode: missing-direction
+       echo "ERROR: ssot-migrate requires --to {linear|local}" >&2; return 2 ;;
   esac
   if [[ -z "$feature" ]]; then
+    # @failure-mode: missing-feature
     echo "ERROR: ssot-migrate requires --feature <BTS-N> (or feature-id)" >&2
     return 2
   fi
@@ -5956,10 +6088,13 @@ cmd_ssot_migrate() {
         skipped=$((skipped + 1))
         continue
       fi
+      # @side-effect: writes-or-deletes-linear-document
       if cmd_artifact_write --kind "$kind" --feature "$feature" < "$local_path" >/dev/null 2>&1; then
+        # @side-effect: writes-or-deletes-local-archive
         rm -f "$local_path"
         migrated=$((migrated + 1))
       else
+        # @failure-mode: write-error
         errors=$((errors + 1))
       fi
     done

@@ -106,3 +106,9 @@
 .ccanvil/scripts/ccanvil-sync.sh:cmd_pull_auto
 .ccanvil/scripts/ccanvil-sync.sh:cmd_pull_apply
 .ccanvil/scripts/ccanvil-sync.sh:cmd_pull_finalize
+# Batch 5 — push + promote/demote.
+.ccanvil/scripts/ccanvil-sync.sh:cmd_push_candidates
+.ccanvil/scripts/ccanvil-sync.sh:cmd_push_apply
+.ccanvil/scripts/ccanvil-sync.sh:cmd_push_finalize
+.ccanvil/scripts/ccanvil-sync.sh:cmd_promote
+.ccanvil/scripts/ccanvil-sync.sh:cmd_demote

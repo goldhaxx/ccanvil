@@ -2241,7 +2241,25 @@ cmd_pull_finalize() {
 
 # push-candidates: List files eligible for push with current state
 # Output: JSON array of {file, status, has_diff, first_lines}
+# @manifest
+# purpose: List every modified, local-only, or already-promoted lockfile entry that's eligible for hub-side promotion (with hub-vs-local has_diff flag) so /ccanvil-push can present an actionable classification queue
+# input: positional <file> (optional; restrict listing to one entry)
+# output: stdout JSON array [{file, status, has_diff}]
+# output: exit-codes 0 ok, 1 missing-lockfile
+# caller: skill:/ccanvil-push
+# depends-on: jq
+# depends-on: require_lockfile
+# depends-on: get_hub_source
+# depends-on: is_node_only
+# depends-on: diff
+# side-effect: reads-lockfile-and-hub-files
+# failure-mode: missing-lockfile | exit=1 | visible=stderr-die-from-require_lockfile | mitigation=run-init-first
+# contract: emits-empty-array-when-no-candidates
+# contract: skips-node-only-and-clean-entries
+# anchor: BTS-243 (manifest seed)
 cmd_push_candidates() {
+  # @failure-mode: missing-lockfile
+  # @side-effect: reads-lockfile-and-hub-files
   require_lockfile
   local hub_source
   hub_source=$(get_hub_source)
@@ -2287,8 +2305,35 @@ cmd_push_candidates() {
 
 # push-apply: Push a single file to the hub
 # Usage: push-apply <file> [description] [--dry-run]
+# @manifest
+# purpose: Copy one node-side file into the hub tree and update the lockfile (status promoted for local-only origin, clean for modified) so /ccanvil-push can stage promotion-candidate files in batches before the hub-side commit
+# input: positional <file> [description]
+# input: --dry-run (optional; describe-only mode)
+# output: stdout PUSHED log line per applied push; DRY-RUN line in dry-run mode
+# output: writes hub-side file + lockfile entry
+# output: exit-codes 0 ok, 1 missing-lockfile-or-file-not-found-or-missing-positional
+# caller: skill:/ccanvil-push
+# depends-on: jq
+# depends-on: require_lockfile
+# depends-on: get_hub_source
+# depends-on: file_hash
+# depends-on: safe_lock_mv
+# depends-on: mktemp
+# depends-on: mkdir
+# depends-on: cp
+# depends-on: die
+# side-effect: writes-hub-files
+# side-effect: writes-lockfile-entries
+# failure-mode: missing-lockfile | exit=1 | visible=stderr-die-from-require_lockfile | mitigation=run-init-first
+# failure-mode: missing-positional | exit=1 | visible=stderr-Usage | mitigation=supply-file-arg
+# failure-mode: file-not-found | exit=1 | visible=stderr-die-File-not-found | mitigation=verify-local-path
+# contract: dry-run-makes-no-mutations
+# contract: status-transition-depends-on-prior-origin
+# anchor: BTS-243 (manifest seed)
 cmd_push_apply() {
+  # @failure-mode: missing-lockfile
   require_lockfile
+  # @failure-mode: missing-positional
   local file="${1:?Usage: ccanvil-sync.sh push-apply <file> [description]}"
   local description=""
   local dry_run=false
@@ -2309,6 +2354,7 @@ cmd_push_apply() {
   local status
   status=$(jq -r --arg f "$file" '.files[$f].status // "unknown"' "$LOCKFILE")
 
+  # @failure-mode: file-not-found
   [[ -f "$file" ]] || die "File not found: $file"
 
   if $dry_run; then
@@ -2320,6 +2366,7 @@ cmd_push_apply() {
   mkdir -p "$(dirname "$hub_source/$file")"
 
   # Copy to hub
+  # @side-effect: writes-hub-files
   cp "$file" "$hub_source/$file"
 
   # Update lockfile based on current status
@@ -2338,6 +2385,7 @@ cmd_push_apply() {
       '.files[$f].hub_hash = $h | .files[$f].local_hash = $h | .files[$f].status = "clean"' \
       "$LOCKFILE" > "$tmp" || true
   fi
+  # @side-effect: writes-lockfile-entries
   safe_lock_mv "$tmp" "$LOCKFILE" "push-apply $file"
 
   echo "PUSHED: $file ($status → pushed)"
@@ -2345,7 +2393,29 @@ cmd_push_apply() {
 
 # push-finalize: Commit in hub repo, update version
 # Usage: push-finalize <commit-message> [--dry-run]
+# @manifest
+# purpose: Stage and commit every staged push in the hub working tree with the operator-supplied message, then stamp the lockfile with the new hub HEAD so /ccanvil-push leaves both sides on a matching version
+# input: positional <commit-message>
+# input: --dry-run (optional; describe-only mode)
+# output: stdout Committed-in-hub status line + Push finalized banner with new version
+# output: writes hub git commit + lockfile hub_version + synced_at
+# output: exit-codes 0 ok, 1 missing-lockfile-or-missing-message
+# caller: skill:/ccanvil-push
+# depends-on: require_lockfile
+# depends-on: get_hub_source
+# depends-on: get_hub_source_raw
+# depends-on: cmd_lock_set_version
+# depends-on: git
+# depends-on: die
+# side-effect: writes-hub-commit
+# side-effect: writes-lockfile-version
+# failure-mode: missing-lockfile | exit=1 | visible=stderr-die-from-require_lockfile | mitigation=run-init-first
+# failure-mode: missing-message | exit=1 | visible=stderr-die-Usage | mitigation=supply-commit-message
+# contract: dry-run-makes-no-mutations
+# contract: warns-when-no-new-commit-produced
+# anchor: BTS-243 (manifest seed)
 cmd_push_finalize() {
+  # @failure-mode: missing-lockfile
   require_lockfile
   local message=""
   local dry_run=false
@@ -2357,6 +2427,7 @@ cmd_push_finalize() {
       message="$arg"
     fi
   done
+  # @failure-mode: missing-message
   [[ -n "$message" ]] || die "Usage: ccanvil-sync.sh push-finalize <commit-message>"
 
   local hub_source
@@ -2373,6 +2444,7 @@ cmd_push_finalize() {
   # Stage and commit in hub
   local head_before
   head_before=$(git -C "$hub_root" rev-parse HEAD)
+  # @side-effect: writes-hub-commit
   git -C "$hub_root" add -A
   git -C "$hub_root" commit -m "$message" || true
   local head_after
@@ -2391,6 +2463,7 @@ cmd_push_finalize() {
     new_version="unknown"
   fi
 
+  # @side-effect: writes-lockfile-version
   cmd_lock_set_version "$new_version"
 
   echo "Push finalized. Hub version: $new_version"
@@ -2398,8 +2471,41 @@ cmd_push_finalize() {
 
 # promote: Full promote workflow for a single file
 # Usage: promote <file>
+# @manifest
+# purpose: Run the end-to-end promote-a-local-only-file workflow — copy the file into the hub tree, flip the lockfile entry to origin=hub status=promoted, commit in the hub repo, then stamp the lockfile version — so operators can promote in one verb without orchestrating push-apply + push-finalize manually
+# input: positional <file>
+# output: stdout PROMOTED log line with new hub version (or SKIP when already clean/promoted)
+# output: writes hub-side file + lockfile entry + hub commit + lockfile hub_version
+# output: exit-codes 0 ok-or-skip, 1 missing-lockfile-or-missing-positional-or-non-local-only-status-or-file-not-found
+# caller: skill:/ccanvil-promote
+# depends-on: jq
+# depends-on: require_lockfile
+# depends-on: get_hub_source
+# depends-on: get_hub_source_raw
+# depends-on: file_hash
+# depends-on: safe_lock_mv
+# depends-on: cmd_lock_set_version
+# depends-on: mktemp
+# depends-on: mkdir
+# depends-on: cp
+# depends-on: basename
+# depends-on: pwd
+# depends-on: git
+# depends-on: die
+# side-effect: writes-hub-files
+# side-effect: writes-lockfile-entries
+# side-effect: writes-hub-commit
+# failure-mode: missing-lockfile | exit=1 | visible=stderr-die-from-require_lockfile | mitigation=run-init-first
+# failure-mode: missing-positional | exit=1 | visible=stderr-Usage | mitigation=supply-file-arg
+# failure-mode: status-not-local-only | exit=1 | visible=stderr-die-Cannot-promote | mitigation=use-push-apply-for-modified-files
+# failure-mode: file-not-found | exit=1 | visible=stderr-die-File-not-found | mitigation=verify-local-path
+# contract: idempotent-on-already-promoted-or-clean
+# contract: end-to-end-promote-in-one-call
+# anchor: BTS-243 (manifest seed)
 cmd_promote() {
+  # @failure-mode: missing-lockfile
   require_lockfile
+  # @failure-mode: missing-positional
   local file="${1:?Usage: ccanvil-sync.sh promote <file>}"
 
   local status
@@ -2411,9 +2517,11 @@ cmd_promote() {
   fi
 
   if [[ "$status" != "local-only" ]]; then
+    # @failure-mode: status-not-local-only
     die "Cannot promote: $file has status '$status'. Only local-only files can be promoted."
   fi
 
+  # @failure-mode: file-not-found
   [[ -f "$file" ]] || die "File not found: $file"
 
   local hub_source
@@ -2423,6 +2531,7 @@ cmd_promote() {
 
   # Copy to hub
   mkdir -p "$(dirname "$hub_source/$file")"
+  # @side-effect: writes-hub-files
   cp "$file" "$hub_source/$file"
 
   # Update lockfile
@@ -2432,9 +2541,11 @@ cmd_promote() {
   jq --arg f "$file" --arg h "$new_hash" \
     '.files[$f].origin = "hub" | .files[$f].hub_hash = $h | .files[$f].local_hash = $h | .files[$f].status = "promoted"' \
     "$LOCKFILE" > "$tmp" || true
+  # @side-effect: writes-lockfile-entries
   safe_lock_mv "$tmp" "$LOCKFILE" "promote $file"
 
   # Commit in hub
+  # @side-effect: writes-hub-commit
   git -C "$hub_root" add -A
   git -C "$hub_root" commit -m "chore(sync): add $(basename "$file") from $(basename "$(pwd)")"
 
@@ -2448,8 +2559,28 @@ cmd_promote() {
 
 # demote: Full demote workflow for a single file
 # Usage: demote <file>
+# @manifest
+# purpose: Flip a clean lockfile entry to status=modified so the next /ccanvil-pull surfaces a diff instead of auto-updating — operators use this to take ownership of a hub-tracked file without immediately diverging the content
+# input: positional <file>
+# output: stdout DEMOTED log line (or SKIP when already modified/local-only)
+# output: writes lockfile status field for the entry
+# output: exit-codes 0 ok-or-skip, 1 missing-lockfile-or-missing-positional-or-non-clean-status
+# caller: skill:/ccanvil-demote
+# depends-on: jq
+# depends-on: require_lockfile
+# depends-on: safe_lock_mv
+# depends-on: mktemp
+# depends-on: die
+# side-effect: writes-lockfile-status
+# failure-mode: missing-lockfile | exit=1 | visible=stderr-die-from-require_lockfile | mitigation=run-init-first
+# failure-mode: missing-positional | exit=1 | visible=stderr-Usage | mitigation=supply-file-arg
+# failure-mode: status-not-clean | exit=1 | visible=stderr-die-Cannot-demote | mitigation=only-clean-files-can-be-demoted
+# contract: idempotent-on-already-modified-or-local-only
+# anchor: BTS-243 (manifest seed)
 cmd_demote() {
+  # @failure-mode: missing-lockfile
   require_lockfile
+  # @failure-mode: missing-positional
   local file="${1:?Usage: ccanvil-sync.sh demote <file>}"
 
   local status
@@ -2461,12 +2592,14 @@ cmd_demote() {
   fi
 
   if [[ "$status" != "clean" ]]; then
+    # @failure-mode: status-not-clean
     die "Cannot demote: $file has status '$status'. Only clean files can be demoted."
   fi
 
   # Mark as modified (prevents auto-update on future pulls)
   local tmp; tmp=$(mktemp)
   jq --arg f "$file" '.files[$f].status = "modified"' "$LOCKFILE" > "$tmp" || true
+  # @side-effect: writes-lockfile-status
   safe_lock_mv "$tmp" "$LOCKFILE" "demote $file"
 
   # Log

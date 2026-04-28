@@ -25,9 +25,13 @@ PROJECT_DIR="."
 # Operations registry — all 17 defined operations
 # ---------------------------------------------------------------------------
 
+# BTS-183: removed dead-code MCP-only verbs idea.{promote,defer,dismiss,merge},
+# backlog.get, ticket.find-by-title — zero live callers in skills or scripts.
+# State transitions go through ticket.transition (http); backlog.list covers
+# read paths; ad-hoc title lookups belong in interactive MCP, not substrate.
 is_valid_operation() {
   case "$1" in
-    backlog.list|backlog.create|backlog.prioritize|backlog.get) return 0 ;;
+    backlog.list|backlog.create|backlog.prioritize) return 0 ;;
     spec.read|spec.write|spec.list|spec.activate|spec.complete) return 0 ;;
     plan.read|plan.write) return 0 ;;
     stasis.read|stasis.write) return 0 ;;
@@ -35,11 +39,9 @@ is_valid_operation() {
     pr.create|pr.list) return 0 ;;
     review.run) return 0 ;;
     idea.add|idea.list|idea.count|idea.triage|idea.sync) return 0 ;;
-    idea.promote|idea.defer|idea.dismiss|idea.merge) return 0 ;;
     idea.review-icebox) return 0 ;;
     work.resolve) return 0 ;;
     ticket.transition|ticket.get) return 0 ;;
-    ticket.find-by-title) return 0 ;;
     *) return 1 ;;
   esac
 }
@@ -75,10 +77,6 @@ CMD=""
 OPERATION=""
 OP_ARGS=""
 OP_ARG2=""
-# EXACT is only consumed by ticket.find-by-title. Other operations ignore it
-# harmlessly. Do not add new operations that read $EXACT without also
-# renaming/scoping this variable.
-EXACT=0
 
 [[ $# -eq 0 ]] && usage
 
@@ -102,8 +100,6 @@ while [[ $# -gt 0 ]]; do
       ;;
     --project-dir)
       PROJECT_DIR="$2"; shift 2 ;;
-    --exact)
-      EXACT=1; shift ;;
     -h|--help)
       usage ;;
     *)
@@ -253,10 +249,6 @@ local_adapter() {
       cmd=".ccanvil/scripts/docs-check.sh list-specs"
       output_contract='["feature_id","status","priority"]'
       ;;
-    backlog.get)
-      cmd="cat docs/specs/${OP_ARGS}.md"
-      output_contract='["feature_id","status","created","body"]'
-      ;;
     # --- spec ---
     spec.read)
       cmd="cat docs/spec.md"
@@ -355,42 +347,16 @@ local_adapter() {
       cmd=".ccanvil/scripts/docs-check.sh idea-review-icebox"
       output_contract='["uid","created","title","status"]'
       ;;
-    # --- triage-outcome mutations ---
-    # Each verb maps to idea-update <uid> <target-status>. OP_ARGS is the
-    # source idea uid; the skill substitutes it at dispatch time.
-    idea.promote)
-      cmd=".ccanvil/scripts/docs-check.sh idea-update ${OP_ARGS} backlog"
-      output_contract='["uid","status"]'
-      ;;
-    idea.defer)
-      cmd=".ccanvil/scripts/docs-check.sh idea-update ${OP_ARGS} icebox"
-      output_contract='["uid","status"]'
-      ;;
-    idea.dismiss)
-      cmd=".ccanvil/scripts/docs-check.sh idea-update ${OP_ARGS} canceled"
-      output_contract='["uid","status"]'
-      ;;
-    idea.merge)
-      # OP_ARGS is the SOURCE item uid being marked duplicate (uniform with
-      # promote/defer/dismiss). Merge target (duplicateOf) is only
-      # meaningful for Linear; the local log has no cross-entry link.
-      cmd=".ccanvil/scripts/docs-check.sh idea-update ${OP_ARGS} duplicate"
-      output_contract='["uid","status"]'
-      ;;
+    # BTS-183: idea.{promote,defer,dismiss,merge}, ticket.find-by-title
+    # removed — zero live callers. Idea state mutations route through
+    # ticket.transition on Linear-routed nodes; local-routed nodes use
+    # `idea-update <uid> <target>` directly via the skill.
     ticket.transition)
       # ticket.transition is a Linear-specific primitive (state-ID based).
       # On local-provider nodes there is no equivalent surface — fail loud
       # rather than silently succeeding with an empty command.
       echo "ERROR: provider 'local' does not support ticket.transition — configure a Linear provider in .claude/ccanvil.json to enable" >&2
       exit 1
-      ;;
-    ticket.find-by-title)
-      # Local-provider fast path — no Linear backend means no tickets to
-      # find. Emit a bash command that prints an empty array so callers get
-      # a deterministic `[]` and can proceed with the capture (e.g. /idea
-      # sync treating "no duplicates found" as green light).
-      cmd="echo '[]'"
-      output_contract='[]'
       ;;
   esac
 
@@ -503,14 +469,7 @@ linear_mcp_adapter() {
           contract: { output: $output }
         }'
       ;;
-    backlog.get)
-      tool="mcp__claude_ai_Linear__get_issue"
-      output_contract='["id","title","status","priority","description"]'
-      field_map='{"identifier":"id","title":"title","state.name":"status","priority":"priority"}'
-      jq -n --arg tool "$tool" --arg id "$op_args" \
-        --argjson output "$output_contract" --argjson fmap "$field_map" \
-        '{"provider":"linear","mechanism":"mcp","invocation":{"tool":$tool,"params":{"id":$id}},"contract":{"output":$output,"field_map":$fmap}}'
-      ;;
+    # BTS-183: backlog.get removed — dead code. Use backlog.list.
     # --- idea operations ---
     # BTS-166: migrated from MCP to http. The wrapper (linear-query.sh) emits
     # GraphQL directly; resolvers describe the structural shape (team/project/
@@ -630,74 +589,9 @@ linear_mcp_adapter() {
     # fallback (or surfaces the config gap as a visible error at dispatch).
     # Passing `state: ""` to Linear is silently no-op / API error — always
     # gate with the conditional merge pattern.
-    idea.promote)
-      tool="mcp__claude_ai_Linear__save_issue"
-      output_contract='["id","status","priority"]'
-      local backlog_state_id
-      backlog_state_id=$(linear_state_id "$provider_config" "backlog")
-      jq -n --arg tool "$tool" --arg state_id "$backlog_state_id" \
-        --argjson output "$output_contract" \
-        '{
-          "provider":"linear","mechanism":"mcp",
-          "invocation":{
-            "tool":$tool,
-            "params":(if $state_id != "" then {"state":$state_id} else {} end)
-          },
-          "contract":{"output":$output}
-        }'
-      ;;
-    idea.defer)
-      tool="mcp__claude_ai_Linear__save_issue"
-      output_contract='["id","status"]'
-      local icebox_state_id
-      icebox_state_id=$(linear_state_id "$provider_config" "icebox")
-      jq -n --arg tool "$tool" --arg state_id "$icebox_state_id" \
-        --argjson output "$output_contract" \
-        '{
-          "provider":"linear","mechanism":"mcp",
-          "invocation":{
-            "tool":$tool,
-            "params":(if $state_id != "" then {"state":$state_id} else {} end)
-          },
-          "contract":{"output":$output}
-        }'
-      ;;
-    idea.dismiss)
-      tool="mcp__claude_ai_Linear__save_issue"
-      output_contract='["id","status"]'
-      local canceled_state_id
-      canceled_state_id=$(linear_state_id "$provider_config" "canceled")
-      jq -n --arg tool "$tool" --arg state_id "$canceled_state_id" \
-        --argjson output "$output_contract" \
-        '{
-          "provider":"linear","mechanism":"mcp",
-          "invocation":{
-            "tool":$tool,
-            "params":(if $state_id != "" then {"state":$state_id} else {} end)
-          },
-          "contract":{"output":$output}
-        }'
-      ;;
-    idea.merge)
-      # OP_ARGS is the source item uid (uniform with promote/defer/dismiss).
-      # The merge target (duplicateOf) is NOT resolver-known — the skill
-      # pairs it in at dispatch time from user input. The resolver only
-      # tells the skill which tool + state to use.
-      tool="mcp__claude_ai_Linear__save_issue"
-      output_contract='["id","status","duplicateOf"]'
-      local dup_state_id
-      dup_state_id=$(linear_state_id "$provider_config" "duplicate")
-      jq -n --arg tool "$tool" --arg state_id "$dup_state_id" \
-        --argjson output "$output_contract" \
-        '{
-          "provider":"linear","mechanism":"mcp",
-          "invocation":{
-            "tool":$tool,
-            "params":(if $state_id != "" then {"state":$state_id} else {} end)
-          },
-          "contract":{"output":$output}
-        }'
-      ;;
+    # BTS-183: idea.{promote,defer,dismiss,merge} removed — dead-code MCP
+    # branches. Idea state mutations on Linear-routed nodes route through
+    # `ticket.transition <id> <role>` (http) per the /idea triage skill.
     idea.review-icebox)
       # BTS-166: state-id when configured, else literal "icebox" filter.
       output_contract='["id","title","status","createdAt"]'
@@ -797,48 +691,9 @@ linear_mcp_adapter() {
           contract: { output: $output }
         }'
       ;;
-    ticket.find-by-title)
-      # BTS-129 — resolve emits a list_issues invocation + a client-side jq
-      # filter template. Callers dispatch the MCP tool, then apply the
-      # template with `jq --arg title "<raw title>" -e "$template"` on the
-      # result. Splitting invocation from filter keeps operations.sh pure
-      # bash and the title-quoting safe (jq --arg, not string interpolation).
-      if [[ -z "$op_args" ]]; then
-        echo "ERROR: ticket.find-by-title requires a title as the first argument" >&2
-        echo "" >&2
-        echo "  Usage:" >&2
-        echo "    operations.sh resolve ticket.find-by-title \"<title>\" [--exact]" >&2
-        exit 1
-      fi
-      tool="mcp__claude_ai_Linear__list_issues"
-      output_contract='["id","title","status","url"]'
-      local filter_mode filter_template
-      # The template accepts either the wrapped Linear MCP response
-      # ({issues: [...], hasNextPage}) or a bare array — `(.issues? // .)`
-      # unwraps the former, passes the latter through.
-      # For status, use `.status // .state.name` so the template works
-      # against both the MCP-level shape (top-level `.status` string) and
-      # any internal GraphQL shape (`.state.name`) that older tooling emits.
-      if (( EXACT )); then
-        filter_mode="exact"
-        filter_template='[ (.issues? // .) | .[] | select(.title == $title) | {id, title, status: (.status // .state.name), url} ]'
-      else
-        filter_mode="substring"
-        filter_template='[ (.issues? // .) | .[] | select((.title | ascii_downcase) | contains($title | ascii_downcase)) | {id, title, status: (.status // .state.name), url} ]'
-      fi
-      jq -n --arg tool "$tool" --arg project "$project" --arg team "$team" \
-        --arg query "$op_args" --arg mode "$filter_mode" \
-        --arg template "$filter_template" --argjson output "$output_contract" \
-        '{
-          "provider":"linear","mechanism":"mcp",
-          "invocation":{
-            "tool":$tool,
-            "params":{"project":$project,"team":$team,"query":$query}
-          },
-          "client_filter":{"mode":$mode,"jq_template":$template,"title_arg":$query},
-          "contract":{"output":$output}
-        }'
-      ;;
+    # BTS-183: ticket.find-by-title removed — dead-code MCP branch. Title
+    # lookups belong in interactive operator queries via claude.ai connectors,
+    # not the substrate path.
     # ---------------------------------------------------------------------
     # SSOT-Linear: route spec/plan/stasis lifecycle artifacts to Linear
     # Documents (BTS-204). Each verb resolves to a linear-query.sh
@@ -1016,7 +871,7 @@ cmd_resolve() {
       # Linear adapter (BTS-175). The Linear backlog.list resolver still
       # validates state_ids.backlog presence and errors loudly if absent.
       #
-      # Intentional only for read-side backlog ops (backlog.list, backlog.get).
+      # Intentional only for read-side backlog ops (backlog.list).
       # backlog.create / backlog.prioritize fall through to the linear adapter's
       # *) branch and bounce to local_adapter — correct today, but a future
       # Linear case for those verbs would activate via the inheritance without

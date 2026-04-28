@@ -107,83 +107,11 @@ EOF
   echo "$output" | jq -e '.invocation.command | contains("--state") and contains("aaaaaaaa-0000-0000-0000-000000000001")'
 }
 
-# =========================================================================
-# Step 5 — Four mutation resolvers: idea.{promote,defer,dismiss,merge}.
-# Covers AC-3 + AC-4: each verb targets the correct state by ID (Linear)
-# or status string (local). Merge carries duplicateOf.
-# =========================================================================
-
-@test "Step 5: is_valid_operation recognizes idea.promote" {
-  run bash "$OPS" resolve idea.promote --project-dir "$PROJECT"
-  [ "$status" -eq 0 ]
-}
-
-@test "Step 5: is_valid_operation recognizes idea.defer" {
-  run bash "$OPS" resolve idea.defer --project-dir "$PROJECT"
-  [ "$status" -eq 0 ]
-}
-
-@test "Step 5: is_valid_operation recognizes idea.dismiss" {
-  run bash "$OPS" resolve idea.dismiss --project-dir "$PROJECT"
-  [ "$status" -eq 0 ]
-}
-
-@test "Step 5: is_valid_operation recognizes idea.merge" {
-  run bash "$OPS" resolve idea.merge --project-dir "$PROJECT"
-  [ "$status" -eq 0 ]
-}
-
-@test "Step 5: local idea.promote maps to idea-update <uid> backlog" {
-  set -e
-  run bash "$OPS" resolve idea.promote --project-dir "$PROJECT"
-  [ "$status" -eq 0 ]
-  echo "$output" | jq -e '.provider == "local"'
-  echo "$output" | jq -e '.invocation.command | test("idea-update.*backlog")'
-}
-
-@test "Step 5: local idea.defer maps to idea-update <uid> icebox" {
-  run bash "$OPS" resolve idea.defer --project-dir "$PROJECT"
-  [ "$status" -eq 0 ]
-  echo "$output" | jq -e '.invocation.command | test("idea-update.*icebox")'
-}
-
-@test "Step 5: local idea.dismiss maps to idea-update <uid> canceled" {
-  run bash "$OPS" resolve idea.dismiss --project-dir "$PROJECT"
-  [ "$status" -eq 0 ]
-  echo "$output" | jq -e '.invocation.command | test("idea-update.*canceled")'
-}
-
-@test "Step 5: local idea.merge maps to idea-update <uid> duplicate" {
-  run bash "$OPS" resolve idea.merge --project-dir "$PROJECT"
-  [ "$status" -eq 0 ]
-  echo "$output" | jq -e '.invocation.command | test("idea-update.*duplicate")'
-}
-
-@test "Step 5: Linear idea.promote returns save_issue with state=backlog" {
-  set -e
-  _linear_config_with_state_ids
-  run bash "$OPS" resolve idea.promote --project-dir "$PROJECT"
-  [ "$status" -eq 0 ]
-  echo "$output" | jq -e '.provider == "linear"'
-  echo "$output" | jq -e '.invocation.tool == "mcp__claude_ai_Linear__save_issue"'
-  echo "$output" | jq -e '.invocation.params.state == "bbbbbbbb-0000-0000-0000-000000000002"'
-}
-
-@test "Step 5: Linear idea.defer returns save_issue with state=icebox" {
-  set -e
-  _linear_config_with_state_ids
-  run bash "$OPS" resolve idea.defer --project-dir "$PROJECT"
-  [ "$status" -eq 0 ]
-  echo "$output" | jq -e '.invocation.tool == "mcp__claude_ai_Linear__save_issue"'
-  echo "$output" | jq -e '.invocation.params.state == "cccccccc-0000-0000-0000-000000000003"'
-}
-
-@test "Step 5: Linear idea.dismiss returns save_issue with state=canceled" {
-  _linear_config_with_state_ids
-  run bash "$OPS" resolve idea.dismiss --project-dir "$PROJECT"
-  [ "$status" -eq 0 ]
-  echo "$output" | jq -e '.invocation.params.state == "dddddddd-0000-0000-0000-000000000004"'
-}
+# BTS-183: Step 5 idea.{promote,defer,dismiss,merge} mutation resolver tests
+# removed — those verbs swept from operations.sh as dead code. Idea state
+# mutations on Linear-routed nodes route through ticket.transition (http);
+# local-routed nodes invoke `idea-update <uid> <target>` via the skill
+# directly. ticket.transition resolver tests live in ticket-transition.bats.
 
 # =========================================================================
 # Step 13 — command-reference.md documents new subcommands + five-state model.
@@ -463,55 +391,8 @@ EOF
   echo "$output" | grep -q 'ERROR'
 }
 
-@test "Step 5: Linear idea.merge returns save_issue with state=duplicate (no duplicateOf in resolver)" {
-  set -e
-  # OP_ARGS is the source uid (uniform with promote/defer/dismiss); the
-  # skill pairs duplicateOf in at dispatch time from user input. The
-  # resolver returns only the invariant dispatch shape.
-  _linear_config_with_state_ids
-  run bash "$OPS" resolve idea.merge src-uid --project-dir "$PROJECT"
-  [ "$status" -eq 0 ]
-  echo "$output" | jq -e '.invocation.params.state == "eeeeeeee-0000-0000-0000-000000000005"'
-  echo "$output" | jq -e '.invocation.params | has("duplicateOf") | not'
-}
-
-@test "Step 5: Linear idea.promote omits state when state_ids absent" {
-  _linear_config_no_state_ids
-  run bash "$OPS" resolve idea.promote --project-dir "$PROJECT"
-  [ "$status" -eq 0 ]
-  echo "$output" | jq -e '.invocation.params | has("state") | not'
-}
-
-@test "Step 5: Linear idea.defer omits state when state_ids absent" {
-  _linear_config_no_state_ids
-  run bash "$OPS" resolve idea.defer --project-dir "$PROJECT"
-  [ "$status" -eq 0 ]
-  echo "$output" | jq -e '.invocation.params | has("state") | not'
-}
-
-@test "Step 5: Linear idea.dismiss omits state when state_ids absent" {
-  _linear_config_no_state_ids
-  run bash "$OPS" resolve idea.dismiss --project-dir "$PROJECT"
-  [ "$status" -eq 0 ]
-  echo "$output" | jq -e '.invocation.params | has("state") | not'
-}
-
-@test "Step 5: Linear idea.merge omits state when state_ids absent" {
-  _linear_config_no_state_ids
-  run bash "$OPS" resolve idea.merge src-uid --project-dir "$PROJECT"
-  [ "$status" -eq 0 ]
-  echo "$output" | jq -e '.invocation.params | has("state") | not'
-}
-
-@test "Step 5: local idea.merge resolves to idea-update <source-uid> duplicate" {
-  set -e
-  # Verifies the resolver emits the right command shape (source = OP_ARGS).
-  # The end-to-end rewrite is already covered by Step 6's update vocab tests.
-  run bash "$OPS" resolve idea.merge src1 --project-dir "$PROJECT"
-  [ "$status" -eq 0 ]
-  echo "$output" | jq -e '.provider == "local"'
-  echo "$output" | jq -e '.invocation.command | test("idea-update src1 duplicate")'
-}
+# BTS-183: additional Step 5 merge/state-ids-absent tests removed — see
+# the swept-block comment above for the rationale.
 
 # =========================================================================
 # Step 4 — Local idea.triage adapter uses --status triage (not legacy "new").

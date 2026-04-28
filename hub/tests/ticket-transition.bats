@@ -104,13 +104,13 @@ _local_config() {
 @test "BTS-128 AC-8: single-arg operations still parse unchanged (regression)" {
   set -e
   _local_config
-  # backlog.get is a long-standing single-arg op. The parser extension
-  # MUST NOT change its behavior — emits the same JSON shape with
-  # command substituting OP_ARGS into "cat docs/specs/BTS-42.md".
-  run bash "$OPS" resolve backlog.get BTS-42 --project-dir "$PROJECT"
+  # BTS-183: backlog.get was a single-arg op — swept as dead code. Use
+  # work.resolve with a local-shaped id as the still-live single-arg
+  # parser regression.
+  run bash "$OPS" resolve work.resolve idea-42 --project-dir "$PROJECT"
   [ "$status" -eq 0 ]
-  echo "$output" | jq -e '.mechanism == "bash"'
-  echo "$output" | jq -e '.invocation.command == "cat docs/specs/BTS-42.md"'
+  echo "$output" | jq -e '.id == "idea-42"'
+  echo "$output" | jq -e '.provider == "local"'
 }
 
 # ===========================================================================

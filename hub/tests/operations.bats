@@ -78,10 +78,11 @@ teardown() {
 # Step 3: Full operations taxonomy — all 17 local resolves (AC-1)
 # =========================================================================
 
-@test "all 17 operations resolve to local bash adapter with no config" {
+@test "all configured operations resolve to local bash adapter with no config" {
   set -e
+  # BTS-183: backlog.get removed from registry as dead code.
   local ops=(
-    backlog.list backlog.create backlog.prioritize backlog.get
+    backlog.list backlog.create backlog.prioritize
     spec.read spec.write spec.list spec.activate spec.complete
     plan.read plan.write
     stasis.read stasis.write
@@ -268,36 +269,9 @@ SPEC
   rm -rf "$FIXTURE_DIR"
 }
 
-# =========================================================================
-# Step 7: backlog.get with Linear MCP routing + contract mapping (AC-6)
-# =========================================================================
-
-@test "backlog.get with linear routing returns MCP adapter with id param" {
-  set -e
-  mkdir -p "$PROJECT/.claude"
-  cat > "$PROJECT/.claude/ccanvil.json" <<'JSON'
-{
-  "integrations": {
-    "providers": {
-      "linear": { "mechanism": "mcp", "project": "P", "team": "T" }
-    },
-    "routing": {
-      "backlog": "linear"
-    }
-  }
-}
-JSON
-  run bash "$SCRIPT" resolve backlog.get BTS-19 --project-dir "$PROJECT"
-  [ "$status" -eq 0 ]
-  echo "$output" | jq -e '.mechanism == "mcp"'
-  echo "$output" | jq -e '.tool == "mcp__claude_ai_Linear__get_issue" or .invocation.tool == "mcp__claude_ai_Linear__get_issue"'
-  echo "$output" | jq -e '.invocation.params.id == "BTS-19"'
-  echo "$output" | jq -e '.contract.field_map'
-  echo "$output" | jq -e '.contract.field_map.identifier == "id"'
-  echo "$output" | jq -e '.contract.field_map.title == "title"'
-  echo "$output" | jq -e '.contract.field_map["state.name"] == "status"'
-  echo "$output" | jq -e '.contract.field_map.priority == "priority"'
-}
+# BTS-183: Step 7 backlog.get linear-routing + contract-mapping test
+# removed — backlog.get swept as dead code. Title/state lookups belong
+# in interactive operator MCP queries, not the substrate path.
 
 # =========================================================================
 # Step 8: Extensible mechanism field (AC-12)
@@ -369,14 +343,9 @@ JSON
 # =========================================================================
 
 # =========================================================================
-# Review fixes: JSON safety, hyphenated providers, backlog.get local
+# Review fixes: JSON safety, hyphenated providers
+# BTS-183: backlog.get local-adapter test removed — verb swept as dead code.
 # =========================================================================
-
-@test "backlog.get local adapter includes the feature ID in command" {
-  run bash "$SCRIPT" resolve backlog.get my-feature --project-dir "$PROJECT"
-  [ "$status" -eq 0 ]
-  echo "$output" | jq -e '.invocation.command | test("my-feature")'
-}
 
 @test "hyphenated provider name resolves correctly" {
   mkdir -p "$PROJECT/.claude"
@@ -465,33 +434,9 @@ JSON
   echo "$output" | jq -e '.status == "not_implemented"'
 }
 
-@test "exec: mcp mechanism outputs resolution JSON instead of executing" {
-  set -e
-  mkdir -p "$PROJECT/.claude"
-  cat > "$PROJECT/.claude/ccanvil.json" <<'JSON'
-{
-  "integrations": {
-    "providers": {
-      "linear": {
-        "mechanism": "mcp",
-        "project": "test",
-        "team": "test-team"
-      }
-    },
-    "routing": {
-      "backlog": "linear"
-    }
-  }
-}
-JSON
-  # BTS-175 migrated backlog.list to http; backlog.get is still mcp-mechanism.
-  # Positional op-args precede --project-dir per operations.sh argv parser.
-  run bash "$SCRIPT" exec backlog.get SOME-ID --project-dir "$PROJECT"
-  [ "$status" -eq 0 ]
-  # Should output the resolution JSON (same as resolve) since MCP can't be executed from bash
-  echo "$output" | jq -e '.mechanism == "mcp"'
-  echo "$output" | jq -e '.invocation.tool'
-}
+# BTS-183: mcp-mechanism exec test removed — backlog.get was the only
+# remaining mcp-mechanism resolver in the substrate, and it's been swept.
+# operations-exec-http.bats AC-4 covers the mcp branch via source-grep.
 
 @test "exec: unknown operation exits with error" {
   run bash "$SCRIPT" exec unknown.op --project-dir "$PROJECT"

@@ -101,3 +101,8 @@
 .ccanvil/scripts/ccanvil-sync.sh:cmd_track
 .ccanvil/scripts/ccanvil-sync.sh:cmd_classify
 .ccanvil/scripts/ccanvil-sync.sh:cmd_pre_check
+# Batch 4 — pull cluster.
+.ccanvil/scripts/ccanvil-sync.sh:cmd_pull_plan
+.ccanvil/scripts/ccanvil-sync.sh:cmd_pull_auto
+.ccanvil/scripts/ccanvil-sync.sh:cmd_pull_apply
+.ccanvil/scripts/ccanvil-sync.sh:cmd_pull_finalize

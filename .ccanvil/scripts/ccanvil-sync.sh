@@ -1688,7 +1688,28 @@ cmd_pre_check() {
 # pull-plan: Compute the full pull plan as JSON
 # Output: JSON array of {file, action, reason} objects
 # Actions: auto-update, section-merge, conflict, new, removed, skip
+# @manifest
+# purpose: Walk every tracked lockfile entry plus every hub-tracked file not yet in the lockfile and classify each into a pull action (auto-update, section-merge, conflict, new, removed, adopt-clean, adopt-conflict) so /ccanvil-pull can preview every change before applying
+# input: (none)
+# output: stdout JSON array [{file, action, reason, local_hash}]
+# output: exit-codes 0 ok, 1 missing-lockfile
+# caller: skill:/ccanvil-pull
+# caller: cmd_pull_auto
+# depends-on: jq
+# depends-on: require_lockfile
+# depends-on: get_hub_source
+# depends-on: file_hash
+# depends-on: is_node_only
+# depends-on: scan_hub_files
+# depends-on: grep
+# side-effect: reads-lockfile-and-hub-files
+# failure-mode: missing-lockfile | exit=1 | visible=stderr-die-from-require_lockfile | mitigation=run-init-first
+# contract: read-only-classification
+# contract: skips-node-only-and-local-only-and-non-hub-origins
+# anchor: BTS-243 (manifest seed)
 cmd_pull_plan() {
+  # @failure-mode: missing-lockfile
+  # @side-effect: reads-lockfile-and-hub-files
   require_lockfile
   local hub_source
   hub_source=$(get_hub_source)
@@ -1812,12 +1833,35 @@ cmd_pull_plan() {
 # pull-auto: Execute all auto-updates in one pass
 # Processes only files with action "auto-update" from pull-plan
 # Usage: pull-auto [--dry-run]
+# @manifest
+# purpose: Apply every auto-update and adopt-clean action from a fresh pull-plan in one batch — copy hub files into the node tree and refresh lockfile hashes — so /ccanvil-pull's safe path completes without per-file operator interaction
+# input: --dry-run (optional; describe-only mode)
+# output: stdout one AUTO-UPDATED log line per applied file plus a final summary banner
+# output: writes target files + lockfile entries
+# output: exit-codes 0 ok, 1 missing-lockfile
+# caller: skill:/ccanvil-pull
+# depends-on: jq
+# depends-on: require_lockfile
+# depends-on: get_hub_source
+# depends-on: cmd_pull_plan
+# depends-on: file_hash
+# depends-on: safe_lock_mv
+# depends-on: mktemp
+# depends-on: mkdir
+# depends-on: cp
+# side-effect: writes-target-files
+# side-effect: writes-lockfile-entries
+# failure-mode: missing-lockfile | exit=1 | visible=stderr-die-from-require_lockfile | mitigation=run-init-first
+# contract: dry-run-makes-no-mutations
+# contract: skips-non-auto-actions
+# anchor: BTS-243 (manifest seed)
 cmd_pull_auto() {
   local dry_run=false
   if [[ "${1:-}" == "--dry-run" ]]; then
     dry_run=true
   fi
 
+  # @failure-mode: missing-lockfile
   require_lockfile
   local hub_source
   hub_source=$(get_hub_source)
@@ -1842,6 +1886,7 @@ cmd_pull_auto() {
     mkdir -p "$(dirname "$file")"
 
     # Copy hub version
+    # @side-effect: writes-target-files
     cp "$hub_file" "$file"
 
     # Update lockfile in one pass (works for both existing and new entries)
@@ -1850,6 +1895,7 @@ cmd_pull_auto() {
     jq --arg f "$file" --arg h "$new_hash" \
       '.files[$f].hub_hash = $h | .files[$f].local_hash = $h | .files[$f].status = "clean" | .files[$f].origin = "hub" | .files[$f].sync = "tracked"' \
       "$LOCKFILE" > "$tmp" || true
+    # @side-effect: writes-lockfile-entries
     safe_lock_mv "$tmp" "$LOCKFILE" "pull-auto $file"
 
     # Log
@@ -1868,8 +1914,49 @@ cmd_pull_auto() {
 # pull-apply: Apply a specific resolution for a single file
 # Usage: pull-apply <file> <action> [merged-content-file] [--dry-run]
 # Actions: take-hub, keep-local, section-merge, accept-new, adopt-conflict, delete, write-merged <path>
+# @manifest
+# purpose: Execute the operator-chosen resolution action for a single file in a pull-plan (take-hub, keep-local, section-merge, accept-new, adopt-conflict, delete, write-merged) so /ccanvil-pull can drive per-file conflict handling without re-deriving plan logic
+# input: positional <file> <action> [merged-content-file]
+# input: --dry-run (optional; describe-only mode)
+# input: env PLAN_LOCAL_HASH (optional; gates against post-plan local mutation)
+# input: env PLAN_LOCAL_STATUS (optional; gates against post-plan lockfile mutation for delete)
+# output: stdout APPLIED log line per applied action; DRY-RUN line in dry-run mode
+# output: writes target files + lockfile entries (or rm + lock-remove for delete)
+# output: exit-codes 0 ok, 1 missing-args-or-hub-file-or-unknown-action-or-stale-plan-hash
+# caller: skill:/ccanvil-pull
+# depends-on: jq
+# depends-on: require_lockfile
+# depends-on: get_hub_source
+# depends-on: cmd_section_merge
+# depends-on: cmd_lock_add
+# depends-on: cmd_lock_remove
+# depends-on: cmd_stack_apply
+# depends-on: file_hash
+# depends-on: safe_lock_mv
+# depends-on: guard_fail
+# depends-on: mktemp
+# depends-on: mkdir
+# depends-on: cp
+# depends-on: rm
+# depends-on: die
+# side-effect: writes-target-files
+# side-effect: writes-lockfile-entries
+# side-effect: removes-target-files-on-delete
+# failure-mode: missing-lockfile | exit=1 | visible=stderr-die-from-require_lockfile | mitigation=run-init-first
+# failure-mode: missing-positional | exit=1 | visible=stderr-Usage | mitigation=supply-file-and-action
+# failure-mode: hub-file-missing | exit=1 | visible=stderr-die-Hub-file-not-found | mitigation=verify-hub-source
+# failure-mode: stale-plan-local-hash | exit=1 | visible=stderr-from-guard_fail | mitigation=re-run-pull-plan
+# failure-mode: stale-plan-local-status | exit=1 | visible=stderr-from-guard_fail | mitigation=re-run-pull-plan
+# failure-mode: accept-new-on-existing-file | exit=1 | visible=stderr-die-Refusing-to-overwrite | mitigation=use-take-hub-or-section-merge
+# failure-mode: missing-merged-file | exit=1 | visible=stderr-die-Merged-content-file-not-found | mitigation=supply-valid-merged-path
+# failure-mode: unknown-action | exit=1 | visible=stderr-die-Unknown-action | mitigation=use-documented-action-name
+# contract: dry-run-makes-no-mutations
+# contract: stack-reapply-runs-after-take-hub-on-settings-json
+# anchor: BTS-243 (manifest seed)
 cmd_pull_apply() {
+  # @failure-mode: missing-lockfile
   require_lockfile
+  # @failure-mode: missing-positional
   local file="${1:?Usage: ccanvil-sync.sh pull-apply <file> <action> [merged-content-file]}"
   local action="${2:?}"
   local merged_file=""
@@ -1894,6 +1981,7 @@ cmd_pull_apply() {
     local current_hash
     current_hash=$(file_hash "$file")
     if [[ "$current_hash" != "$PLAN_LOCAL_HASH" ]]; then
+      # @failure-mode: stale-plan-local-hash
       guard_fail "cp" "$file" "file changed after plan (expected $PLAN_LOCAL_HASH, got $current_hash)"
     fi
   fi
@@ -1906,8 +1994,10 @@ cmd_pull_apply() {
 
   case "$action" in
     take-hub)
+      # @failure-mode: hub-file-missing
       [[ -f "$hub_file" ]] || die "Hub file not found: $hub_file"
       mkdir -p "$(dirname "$file")"
+      # @side-effect: writes-target-files
       cp "$hub_file" "$file"
       local new_hash
       new_hash=$(file_hash "$file")
@@ -1915,6 +2005,7 @@ cmd_pull_apply() {
       jq --arg f "$file" --arg h "$new_hash" \
         '.files[$f].hub_hash = $h | .files[$f].local_hash = $h | .files[$f].status = "clean"' \
         "$LOCKFILE" > "$tmp" || true
+      # @side-effect: writes-lockfile-entries
       safe_lock_mv "$tmp" "$LOCKFILE" "pull-apply take-hub $file"
       echo "APPLIED: $file (took hub)"
 
@@ -1984,6 +2075,7 @@ cmd_pull_apply() {
       [[ -f "$hub_file" ]] || die "Hub file not found: $hub_file"
       if [[ -f "$file" ]]; then
         echo "WARNING: $file already exists locally. Use 'take-hub', 'adopt-conflict', or 'section-merge' instead." >&2
+        # @failure-mode: accept-new-on-existing-file
         die "Refusing to overwrite existing file with accept-new. File: $file"
       fi
       mkdir -p "$(dirname "$file")"
@@ -2001,10 +2093,12 @@ cmd_pull_apply() {
         local current_status
         current_status=$(jq -r --arg f "$file" '.files[$f].status // "unknown"' "$LOCKFILE")
         if [[ "$current_status" != "$PLAN_LOCAL_STATUS" ]]; then
+          # @failure-mode: stale-plan-local-status
           guard_fail "rm" "$file" "lockfile status changed after plan (expected $PLAN_LOCAL_STATUS, got $current_status)"
         fi
       fi
       if [[ -f "$file" ]]; then
+        # @side-effect: removes-target-files-on-delete
         rm "$file"
       fi
       cmd_lock_remove "$file"
@@ -2013,6 +2107,7 @@ cmd_pull_apply() {
 
     write-merged)
       [[ -n "$merged_file" ]] || die "Usage: pull-apply <file> write-merged <merged-content-file>"
+      # @failure-mode: missing-merged-file
       [[ -f "$merged_file" ]] || die "Merged content file not found: $merged_file"
       mkdir -p "$(dirname "$file")"
       cp "$merged_file" "$file"
@@ -2029,6 +2124,7 @@ cmd_pull_apply() {
       ;;
 
     *)
+      # @failure-mode: unknown-action
       die "Unknown action: $action. Use: take-hub, keep-local, section-merge, accept-new, delete, write-merged"
       ;;
   esac
@@ -2036,12 +2132,36 @@ cmd_pull_apply() {
 
 # pull-finalize: Update version, commit all changes, output summary
 # Usage: pull-finalize [--dry-run]
+# @manifest
+# purpose: Stamp the lockfile with the current hub HEAD version, stage every node-side change from the pull, and create a single chore(sync) commit summarizing the file delta so /ccanvil-pull leaves the node tree in a committed, audit-friendly state
+# input: --dry-run (optional; describe-only mode)
+# output: stdout DRY-RUN preview lines OR a Committed status with the new short-sha and a final summary
+# output: writes lockfile hub_version + synced_at; creates one git commit on the current branch
+# output: exit-codes 0 ok, 1 missing-lockfile
+# caller: skill:/ccanvil-pull
+# depends-on: require_lockfile
+# depends-on: get_hub_source
+# depends-on: get_hub_source_raw
+# depends-on: get_hub_source_display
+# depends-on: cmd_lock_set_version
+# depends-on: git
+# depends-on: wc
+# depends-on: tr
+# depends-on: sort
+# depends-on: grep
+# side-effect: writes-lockfile-version
+# side-effect: stages-and-commits-pull
+# failure-mode: missing-lockfile | exit=1 | visible=stderr-die-from-require_lockfile | mitigation=run-init-first
+# contract: dry-run-makes-no-mutations
+# contract: skips-commit-when-no-file-changes
+# anchor: BTS-243 (manifest seed)
 cmd_pull_finalize() {
   local dry_run=false
   if [[ "${1:-}" == "--dry-run" ]]; then
     dry_run=true
   fi
 
+  # @failure-mode: missing-lockfile
   require_lockfile
   local hub_source
   hub_source=$(get_hub_source)
@@ -2056,6 +2176,7 @@ cmd_pull_finalize() {
   fi
 
   if ! $dry_run; then
+    # @side-effect: writes-lockfile-version
     cmd_lock_set_version "$new_version"
   fi
 
@@ -2094,6 +2215,7 @@ cmd_pull_finalize() {
 
         local head_before
         head_before=$(git rev-parse HEAD)
+        # @side-effect: stages-and-commits-pull
         git add -A
         git commit -m "chore(sync): pull from hub @ $new_version" -m "$commit_body" \
           || true

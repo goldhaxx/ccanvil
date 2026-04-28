@@ -151,13 +151,109 @@ _compose_block() {
   ' >> "$tmp"
 }
 
+_file_mtime() {
+  # macOS BSD vs GNU stat compatibility shim.
+  if stat -f %m "$1" >/dev/null 2>&1; then
+    stat -f %m "$1"
+  else
+    stat --format=%Y "$1"
+  fi
+}
+
+_maybe_regenerate_index() {
+  local out="$1"
+  local src_dirs=(".ccanvil/scripts" ".claude/hooks" ".claude/hooks/_lib")
+
+  if [[ ! -f "$out" ]]; then
+    cmd_index || return $?
+    return 0
+  fi
+
+  local index_mtime newest=0 d f m
+  index_mtime=$(_file_mtime "$out")
+
+  for d in "${src_dirs[@]}"; do
+    [[ ! -d "$d" ]] && continue
+    for f in "$d"/*.sh; do
+      [[ ! -f "$f" ]] && continue
+      m=$(_file_mtime "$f")
+      if [[ "$m" -gt "$newest" ]]; then newest="$m"; fi
+    done
+  done
+
+  if [[ "$newest" -gt "$index_mtime" ]]; then
+    cmd_index || return $?
+  fi
+}
+
+cmd_query() {
+  local expr="${1:-}"
+  if [[ -z "$expr" ]]; then
+    echo "Usage: module-manifest.sh query <key>:<value>" >&2
+    return 2
+  fi
+  if [[ "$expr" != *":"* ]]; then
+    echo "ERROR: query expression must be <key>:<value>" >&2
+    return 2
+  fi
+  local key="${expr%%:*}"
+  local val="${expr#*:}"
+
+  local out=".ccanvil/state/manifests.json"
+  _maybe_regenerate_index "$out" || return $?
+
+  jq --arg k "$key" --arg v "$val" '
+    [ to_entries[] | .value | select(
+        (.[$k] | type == "string" and contains($v))
+        or
+        (.[$k] | type == "array" and any(.[]; contains($v)))
+    ) ]
+  ' "$out"
+}
+
+cmd_index() {
+  local out=".ccanvil/state/manifests.json"
+  local src_dirs=(".ccanvil/scripts" ".claude/hooks" ".claude/hooks/_lib")
+
+  mkdir -p "$(dirname "$out")"
+
+  local tmp
+  tmp=$(mktemp)
+  # shellcheck disable=SC2064
+  trap "rm -f '$tmp' '$tmp.merged'" RETURN
+
+  : > "$tmp"
+
+  local d f
+  for d in "${src_dirs[@]}"; do
+    [[ ! -d "$d" ]] && continue
+    for f in "$d"/*.sh; do
+      [[ ! -f "$f" ]] && continue
+      local entries
+      entries=$(cmd_extract "$f") || return 2
+      # Skip empty arrays (no manifest blocks in this file).
+      if [[ "$entries" == "[]" ]]; then
+        continue
+      fi
+      printf '%s' "$entries" | jq -c --arg p "$f" '.[] | {key: ($p + ":" + .id), val: .}' >> "$tmp"
+    done
+  done
+
+  if [[ ! -s "$tmp" ]]; then
+    printf '{}\n' > "$out.tmp"
+  else
+    jq -s 'map({(.key): .val}) | add | to_entries | sort_by(.key) | from_entries' < "$tmp" > "$out.tmp"
+  fi
+  mv "$out.tmp" "$out"
+}
+
 cmd="${1:-}"
 shift || true
 case "$cmd" in
   extract)  cmd_extract "$@" ;;
   validate) echo "TODO: validate not implemented yet (BTS-239 Step 4-5)" >&2; exit 1 ;;
-  query)    echo "TODO: query not implemented yet (BTS-239 Step 3)" >&2; exit 1 ;;
-  index)    echo "TODO: index not implemented yet (BTS-239 Step 2)" >&2; exit 1 ;;
+  query)    cmd_query "$@" ;;
+  index)    cmd_index "$@" ;;
   "")       echo "Usage: module-manifest.sh {extract|validate|query|index} [args]" >&2; exit 2 ;;
   *)        echo "Usage: module-manifest.sh {extract|validate|query|index} [args]" >&2; exit 2 ;;
 esac

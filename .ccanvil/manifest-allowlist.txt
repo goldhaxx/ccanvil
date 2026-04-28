@@ -1,0 +1,11 @@
+# Module manifest allowlist (BTS-239).
+#
+# Each non-blank, non-comment line is a manifest target:
+#   <path>:<function>   — for function-level manifests in shell scripts
+#   <path>              — for file-level manifests
+#
+# Drift-guard test (hub/tests/module-manifest-drift-guard.bats) enforces
+# 100% manifest validity on every entry below. Adding a new entry without
+# a complete `# @manifest` block will fail CI.
+
+.ccanvil/scripts/docs-check.sh:cmd_artifact_write

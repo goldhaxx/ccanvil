@@ -5232,6 +5232,43 @@ cmd_artifact_read() {
 # cmd_artifact_write — write artifact content to the routed destination.
 # Reads content from stdin. For Linear, performs upsert via document-updated-at
 # pre-check, then save-document with --create-with-id on first write.
+# @manifest
+# purpose: Provider-aware write of feature artifact (spec/plan/stasis) — local file on local-routed projects, Linear Document upsert on Linear-routed.
+# routes-by: integrations.routing.<kind>
+# input: stdin (artifact body, raw markdown)
+# input: --kind {spec|plan|stasis}
+# input: --feature <id>
+# input: --stasis-kind {feature|session}
+# input: --project-dir <path>
+# output: stdout JSON envelope on Linear path
+# output: empty stdout on local path
+# output: exit-codes 0|2|3|4
+# caller: cmd_activate
+# caller: cmd_ssot_migrate
+# caller: skill:/spec
+# caller: skill:/stasis
+# caller: skill:/plan
+# depends-on: linear-query.sh
+# depends-on: _lifecycle_route
+# depends-on: _normalize_feature_to_ticket
+# depends-on: _session_stasis_ticket
+# depends-on: _doc_concurrent_edit_check
+# depends-on: _doc_cache_set_updated_at
+# side-effect: writes-local-doc
+# side-effect: upserts-linear-document
+# side-effect: sets-doc-cache-updated-at
+# failure-mode: validation-error | exit=2 | visible=stderr | mitigation=caller-fixes-args
+# failure-mode: dispatch-error | exit=3 | visible=stderr | mitigation=verify-provider-config
+# failure-mode: concurrent-edit | exit=4 | visible=stderr-with-history-hint | mitigation=ALLOW_CONCURRENT_EDIT_OVERRIDE=1
+# failure-mode: save-failure | exit=passthrough | visible=stderr | mitigation=retry-or-pending-log
+# contract: idempotent-on-byte-identical-input
+# contract: never-corrupts-on-mid-flight-failure
+# contract: skips-cache-on-CREATE-path
+# contract: normalizes-feature-id-input
+# anchor: BTS-204 (origin)
+# anchor: BTS-213 (route-aware spec dispatch)
+# anchor: BTS-217 (feature-id normalization)
+# anchor: BTS-237 (CREATE-cache fix)
 cmd_artifact_write() {
   local kind="" feature="" stasis_kind="feature" project_dir="."
   while [[ $# -gt 0 ]]; do
@@ -5245,6 +5282,7 @@ cmd_artifact_write() {
       *) shift ;;
     esac
   done
+  # @failure-mode: validation-error
   [[ -z "$kind" ]] && { echo "ERROR: artifact-write --kind is required" >&2; return 2; }
 
   local content
@@ -5261,6 +5299,7 @@ cmd_artifact_write() {
       stasis) target="docs/stasis.md" ;;
       *) echo "ERROR: artifact-write unknown kind '$kind'" >&2; return 2 ;;
     esac
+    # @side-effect: writes-local-doc
     printf '%s' "$content" > "$target"
     return 0
   fi
@@ -5302,6 +5341,7 @@ cmd_artifact_write() {
   esac
   [[ -z "$ticket" ]] && { echo "ERROR: artifact-write $kind requires --feature" >&2; return 2; }
 
+  # @failure-mode: dispatch-error
   if [[ "$parent_field" == "issueId" ]]; then
     parent_value=$(bash "$lq" get-issue "$feature_ticket" 2>/dev/null | jq -r '.uuid // empty')
     [[ -z "$parent_value" ]] && { echo "ERROR: artifact-write could not resolve issue UUID for $feature_ticket (input: $feature)" >&2; return 3; }
@@ -5317,6 +5357,7 @@ cmd_artifact_write() {
   # If the cache has a known updatedAt and Linear's current updatedAt has
   # advanced past it, refuse the write — surface document-history hint.
   # When ALLOW_CONCURRENT_EDIT_OVERRIDE=1, skip the check (operator escape).
+  # @failure-mode: concurrent-edit
   if [[ "${ALLOW_CONCURRENT_EDIT_OVERRIDE:-0}" != "1" ]]; then
     if ! _doc_concurrent_edit_check "$doc_id" "$project_dir"; then
       cat >&2 <<EOF
@@ -5335,6 +5376,8 @@ EOF
 
   local result
   local was_create=0
+  # @side-effect: upserts-linear-document
+  # @failure-mode: save-failure
   if bash "$lq" document-updated-at "$doc_id" >/dev/null 2>&1; then
     # Update path
     result=$(jq -n --arg id "$doc_id" --arg content "$content" '{id:$id, content:$content}' \
@@ -5360,6 +5403,7 @@ EOF
     local new_ts
     new_ts=$(printf '%s' "$result" | jq -r '.updatedAt // empty')
     if [[ -n "$new_ts" ]]; then
+      # @side-effect: sets-doc-cache-updated-at
       _doc_cache_set_updated_at "$doc_id" "$new_ts" "$project_dir"
     fi
   fi

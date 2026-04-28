@@ -34,13 +34,8 @@ _validate_failure_mode_value() {
         echo "MALFORMED: $path:$lineno: failure-mode segment '$seg' not key=value" >&2
         return 2
       fi
-      if [[ "$seg" =~ ^exit=(.+)$ ]]; then
-        local n="${BASH_REMATCH[1]}"
-        if ! [[ "$n" =~ ^[0-9]+$ ]]; then
-          echo "MALFORMED: $path:$lineno: failure-mode exit=$n not numeric" >&2
-          return 2
-        fi
-      fi
+      # exit= accepts numeric exit codes or special tokens (passthrough,
+      # propagate, *) when the exit code varies by called subcommand.
     done
   fi
   return 0
@@ -180,16 +175,28 @@ _function_body_grep() {
 }
 
 # Verify that <caller_ref> actually invokes <primitive_id> somewhere.
+# Matches either the function name directly OR the dispatch-verb form
+# (cmd_foo_bar → foo-bar) used by skills/hooks invoking via `bash <script> <verb>`.
 # Returns 0 if call relationship found, 1 otherwise.
 _caller_actually_calls_primitive() {
   local caller_ref="$1" primitive_id="$2" project_dir="${3:-.}"
+  local verb="${primitive_id#cmd_}"
+  verb="${verb//_/-}"
+  local pattern="\\b${primitive_id}\\b|\\b${verb}\\b"
 
   if [[ "$caller_ref" == skill:/* ]]; then
     local skill_name="${caller_ref#skill:/}"
-    local skill_md="$project_dir/.claude/skills/$skill_name/SKILL.md"
-    if [[ -f "$skill_md" ]] && grep -qE "\\b${primitive_id}\\b" "$skill_md"; then
-      return 0
-    fi
+    # Skills may live under .claude/skills/<name>/SKILL.md OR .claude/commands/<name>.md.
+    local candidates=(
+      "$project_dir/.claude/skills/$skill_name/SKILL.md"
+      "$project_dir/.claude/commands/$skill_name.md"
+    )
+    local m
+    for m in "${candidates[@]}"; do
+      if [[ -f "$m" ]] && grep -qE "$pattern" "$m"; then
+        return 0
+      fi
+    done
     return 1
   fi
 
@@ -200,7 +207,7 @@ _caller_actually_calls_primitive() {
     for f in "$project_dir/$d"/*.sh; do
       [[ ! -f "$f" ]] && continue
       if ! grep -qE "^${caller_ref}\\(\\)" "$f"; then continue; fi
-      if _function_body_grep "$f" "$caller_ref" "\\b${primitive_id}\\b"; then
+      if _function_body_grep "$f" "$caller_ref" "$pattern"; then
         return 0
       fi
     done

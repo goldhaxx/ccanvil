@@ -3,7 +3,7 @@
 > Feature: bts-234-guard-workspace-apostrophe-s-tolerance
 > Work: linear:BTS-234
 > Created: 1777335556
-> Status: In Progress
+> Status: Complete
 
 ## Summary
 

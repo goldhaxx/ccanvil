@@ -53,3 +53,33 @@
 .ccanvil/scripts/docs-check.sh:cmd_archive_stasis
 .ccanvil/scripts/docs-check.sh:cmd_sessions_list
 .ccanvil/scripts/docs-check.sh:cmd_stamp_spec
+
+# BTS-242 — Session 3: docs-check.sh capture+audit cluster.
+# Batch 1 — artifact + route + config primitives.
+.ccanvil/scripts/docs-check.sh:cmd_artifact_read
+.ccanvil/scripts/docs-check.sh:cmd_route_of
+.ccanvil/scripts/docs-check.sh:cmd_config_get
+.ccanvil/scripts/docs-check.sh:cmd_remote_presence
+.ccanvil/scripts/docs-check.sh:cmd_radar_gather
+.ccanvil/scripts/docs-check.sh:cmd_legacy_refs_scan
+# Batch 2 — idea capture/list/count/update.
+.ccanvil/scripts/docs-check.sh:cmd_idea_add
+.ccanvil/scripts/docs-check.sh:cmd_idea_template_body
+.ccanvil/scripts/docs-check.sh:cmd_idea_list
+.ccanvil/scripts/docs-check.sh:cmd_idea_count_local
+.ccanvil/scripts/docs-check.sh:cmd_idea_count
+.ccanvil/scripts/docs-check.sh:cmd_idea_update
+# Batch 3 — idea sync/migrate/setup/upgrade.
+.ccanvil/scripts/docs-check.sh:cmd_idea_migrate_state
+.ccanvil/scripts/docs-check.sh:cmd_idea_review_icebox
+.ccanvil/scripts/docs-check.sh:cmd_idea_sync
+.ccanvil/scripts/docs-check.sh:cmd_idea_migrate
+.ccanvil/scripts/docs-check.sh:cmd_idea_setup
+.ccanvil/scripts/docs-check.sh:cmd_idea_upgrade
+# Batch 4 — pending log + evidence/title/ssot.
+.ccanvil/scripts/docs-check.sh:cmd_idea_pending_append
+.ccanvil/scripts/docs-check.sh:cmd_idea_pending_validate
+.ccanvil/scripts/docs-check.sh:cmd_evidence_scan_session
+.ccanvil/scripts/docs-check.sh:cmd_stasis_carry_forward
+.ccanvil/scripts/docs-check.sh:cmd_title_from_body
+.ccanvil/scripts/docs-check.sh:cmd_ssot_migrate

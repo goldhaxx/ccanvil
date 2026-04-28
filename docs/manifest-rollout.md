@@ -19,16 +19,16 @@ This document sequences the program so each session has a tight, completable obj
 
 | Container | Units | Done | Remaining |
 |---|---:|---:|---:|
-| Shell function-level (`cmd_*` in mega-scripts) | 130 | 31 | 99 |
+| Shell function-level (`cmd_*` in mega-scripts) | 130 | 55 | 75 |
 | Shell file-level (single-purpose scripts) | 5 | 0 | 5 |
 | Hooks (file-level) | 12 | 0 | 12 |
 | Markdown — skills | 9 | 1 | 8 |
 | Markdown — rules | 7 | 1 | 6 |
 | Markdown — agents | 5 | 1 | 4 |
 | Markdown — commands | 16 | 1 | 15 |
-| **Total** | **184** | **35** | **149** |
+| **Total** | **184** | **59** | **125** |
 
-**Last updated:** 2026-04-28 — BTS-241 Session 2 shipped (24 lifecycle-cluster primitives in `docs-check.sh`).
+**Last updated:** 2026-04-28 — BTS-242 Session 3 shipped (24 capture+audit primitives in `docs-check.sh`). `docs-check.sh` is now 100% manifest-covered (51/51 cmd_*).
 
 Per-mega-script breakdown (function-level):
 | Script | cmd_* | Done |

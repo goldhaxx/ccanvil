@@ -2404,6 +2404,21 @@ merge_config() {
 # (ccanvil.json + ccanvil.local.json). Returns "false" if files are
 # missing, key is missing, or features object doesn't exist.
 # ---------------------------------------------------------------------------
+# @manifest
+# purpose: Read a single feature flag (or any features.* boolean) from the merged ccanvil.json + ccanvil.local.json config; returns "false" for missing keys so callers can branch with `[[ $(config-get ...) == "true" ]]`
+# input: --project-dir <path>
+# input: positional <key>
+# input: positional <project-dir> (legacy)
+# output: stdout boolean string ("true" / "false")
+# output: exit-codes 0 ok, 1 merge-failure, 2 unknown-flag/missing-key
+# depends-on: merge_config
+# depends-on: jq
+# side-effect: reads-config-files
+# failure-mode: unknown-flag | exit=2 | visible=stderr-Usage
+# failure-mode: missing-key | exit=2 | visible=stderr-Usage
+# failure-mode: merge-failure | exit=1 | visible=propagated-from-merge_config | mitigation=verify-config-json
+# contract: missing-feature-key-returns-false-string
+# anchor: BTS-241 (manifest seed)
 cmd_config_get() {
   # BTS-212: arg loop — accepts --project-dir or legacy positional position 2.
   local project_dir_flag=""
@@ -2411,17 +2426,21 @@ cmd_config_get() {
     case "$1" in
       --project-dir) project_dir_flag="${2:-.}"; shift 2 ;;
       --) shift; break ;;
+      # @failure-mode: unknown-flag
       --*) echo "Usage: docs-check.sh config-get [--project-dir <path>] <key> [<project-dir>]" >&2; exit 2 ;;
       *) break ;;
     esac
   done
   local key="${1:-}"
   if [[ -z "$key" ]]; then
+    # @failure-mode: missing-key
     echo "Usage: docs-check.sh config-get [--project-dir <path>] <key> [<project-dir>]" >&2
     exit 2
   fi
   local project_dir="${project_dir_flag:-${2:-.}}"
 
+  # @side-effect: reads-config-files
+  # @failure-mode: merge-failure
   local merged
   merged=$(merge_config "$project_dir") || return 1
 
@@ -2439,6 +2458,21 @@ cmd_config_get() {
 # Radar — deterministic data gathering for /radar skill
 # ---------------------------------------------------------------------------
 
+# @manifest
+# purpose: Gather strategic project state for the /radar skill — active spec, recent completed specs, idea count, ccanvil-status, lifecycle envelope — into a single JSON envelope so /radar can render without orchestrating multiple shell calls
+# input: --project-dir <path>
+# input: positional <docs-dir> (legacy)
+# output: stdout JSON envelope {active_spec, completed_recent, idea_count, status, lifecycle}
+# output: exit-codes 0 always, 2 unknown-flag
+# caller: skill:/radar
+# depends-on: parse_metadata
+# depends-on: cmd_idea_count
+# depends-on: jq
+# side-effect: reads-spec-archive
+# side-effect: queries-idea-provider
+# failure-mode: unknown-flag | exit=2 | visible=stderr-Usage
+# contract: never-fails-on-missing-files
+# anchor: BTS-241 (manifest seed)
 cmd_radar_gather() {
   # BTS-212: arg loop — accepts --project-dir <path> or legacy positional
   # docs_dir. Unknown flags emit Usage + exit 2.
@@ -2447,6 +2481,7 @@ cmd_radar_gather() {
     case "$1" in
       --project-dir) project_dir="${2:-.}"; shift 2 ;;
       --) shift; break ;;
+      # @failure-mode: unknown-flag
       --*) echo "Usage: docs-check.sh radar-gather [--project-dir <path>] [<docs-dir>]" >&2; exit 2 ;;
       *) break ;;
     esac
@@ -2459,6 +2494,7 @@ cmd_radar_gather() {
   fi
   local result="{}"
 
+  # @side-effect: reads-spec-archive
   # Active spec
   if [[ -f "$docs_dir/spec.md" ]]; then
     local spec_meta
@@ -2499,6 +2535,7 @@ cmd_radar_gather() {
   local project_dir
   project_dir=$(dirname "$docs_dir")
   local fresh_counts
+  # @side-effect: queries-idea-provider
   if fresh_counts=$(cmd_idea_count "$project_dir" 2>/dev/null) && [[ -n "$fresh_counts" ]]; then
     idea_counts="$fresh_counts"
     # Icebox-stale augmentation only makes sense for local routing today
@@ -2566,6 +2603,22 @@ cmd_radar_gather() {
 # Idea management
 # ---------------------------------------------------------------------------
 
+# @manifest
+# purpose: Append a new idea to the local provider's gitignored .ccanvil/ideas.log JSONL store with status="triage" and an epoch UID; counterpart to the http (Linear) capture path resolved by operations.sh idea.add
+# input: positional <body>
+# input: --title <title>
+# input: --parent <ref> (capture-time parent link)
+# input: positional <project-dir>
+# output: stdout JSON {id, title, status:"triage"}
+# output: exit-codes 0 ok, 2 missing-body
+# caller: skill:/idea
+# depends-on: jq
+# side-effect: appends-ideas-log
+# failure-mode: missing-body | exit=2 | visible=stderr-Usage
+# contract: epoch-UID-monotonic
+# anchor: BTS-70 (idea UID schema)
+# anchor: BTS-162 (capture-time parent)
+# anchor: BTS-241 (manifest seed)
 cmd_idea_add() {
   local body=""
   local title=""
@@ -2604,6 +2657,7 @@ cmd_idea_add() {
     esac
   done
 
+  # @failure-mode: missing-body
   [[ -n "$body" ]] || { echo "Usage: docs-check.sh idea-add <body> [--title TITLE] [--parent REF] [--project-dir <path>]" >&2; exit 2; }
 
   # Defense-in-depth: on Linear-configured nodes, captures must route
@@ -2630,6 +2684,7 @@ cmd_idea_add() {
   uid=$(head -c 2 /dev/urandom | xxd -p)
   epoch=$(date +%s)
 
+  # @side-effect: appends-ideas-log
   if [[ -n "$parent" ]]; then
     jq -cn --arg uid "$uid" --argjson created "$epoch" \
            --arg title "$title" --arg body "$body" --arg parent "$parent" \
@@ -2656,6 +2711,23 @@ cmd_idea_add() {
 #     [--source-skill NAME] [--context TEXT] [--family A,B,C] \
 #     [project-dir]
 # ---------------------------------------------------------------------------
+# @manifest
+# purpose: BTS-172 — compose an idea body from a base body plus optional decoration flags (source-skill anchor, surfaced-at context, family cross-reference); deterministic + side-effect-free for testability
+# input: --body <text>
+# input: --source-skill <name>
+# input: --context <text>
+# input: --family <BTS-A,BTS-B,...>
+# output: stdout templated body string
+# output: exit-codes 0 ok, 2 missing-body/empty-flag-arg
+# caller: skill:/idea
+# depends-on: printf
+# side-effect: emits-templated-body-stdout
+# failure-mode: missing-body | exit=1 | visible=stderr-Usage
+# failure-mode: empty-flag-arg | exit=2 | visible=stderr-error | mitigation=pass-non-empty-arg
+# contract: deterministic-given-same-input
+# contract: testable-in-isolation
+# anchor: BTS-172 (idea-template-body substrate)
+# anchor: BTS-241 (manifest seed)
 cmd_idea_template_body() {
   local body=""
   local source_skill=""
@@ -2669,6 +2741,7 @@ cmd_idea_template_body() {
         body="$2"; shift 2 ;;
       --source-skill)
         if [[ -z "$2" ]]; then
+          # @failure-mode: empty-flag-arg
           echo "ERROR: idea-template-body: --source-skill requires a non-empty value" >&2
           return 2
         fi
@@ -2696,6 +2769,7 @@ cmd_idea_template_body() {
     esac
   done
 
+  # @failure-mode: missing-body
   [[ -n "$body" ]] || { echo "Usage: idea-template-body --body BODY [--source-skill X] [--context X] [--family A,B] [project-dir]" >&2; return 1; }
 
   # Compose output. Each section is emitted only when its flag is set;
@@ -2734,9 +2808,25 @@ cmd_idea_template_body() {
   [[ "$need_blank" == true ]] && out+=$'\n'
   out+="$body"
 
+  # @side-effect: emits-templated-body-stdout
   printf '%s\n' "$out"
 }
 
+# @manifest
+# purpose: List ideas from the local provider's gitignored .ccanvil/ideas.log JSONL store, with optional status filter and archive inclusion; default view excludes terminal (canceled, duplicate) and deferred (icebox) states
+# input: --status <s>
+# input: --include-archive
+# input: --project-dir <path>
+# input: positional <project-dir> (legacy)
+# output: stdout JSON array [{id, title, status, createdAt}]
+# output: exit-codes 0 ok, 2 unknown-flag
+# depends-on: jq
+# side-effect: reads-ideas-log
+# failure-mode: unknown-flag | exit=2 | visible=stderr-Usage
+# failure-mode: missing-log | exit=0 | visible=empty-array | mitigation=expected-on-fresh-projects
+# contract: empty-array-when-no-ideas
+# contract: excludes-terminal-and-deferred-by-default
+# anchor: BTS-241 (manifest seed)
 cmd_idea_list() {
   local filter_status=""
   local project_dir="."
@@ -2748,6 +2838,7 @@ cmd_idea_list() {
       --include-archive) include_archive=1; shift ;;
       --project-dir)     project_dir="${2:-.}"; shift 2 ;;
       --) shift; break ;;
+      # @failure-mode: unknown-flag
       --*) echo "Usage: docs-check.sh idea-list [--status <s>] [--include-archive] [--project-dir <path>] [<project-dir>]" >&2; exit 2 ;;
       *)                 project_dir="$1"; shift ;;
     esac
@@ -2769,8 +2860,10 @@ cmd_idea_list() {
       echo "ARCHIVE:"
       local ideas_log="$project_dir/.ccanvil/ideas.log"
       if [[ -f "$ideas_log" ]]; then
+        # @side-effect: reads-ideas-log
         grep -v '^# ' "$ideas_log" | jq -s "[.[] | {id: .uid, created: .created, title: .title, body: .body, status: .status}]" 2>/dev/null || echo "[]"
       else
+        # @failure-mode: missing-log
         echo "[]"
       fi
     fi
@@ -2807,6 +2900,20 @@ cmd_idea_list() {
   fi
 }
 
+# @manifest
+# purpose: Aggregate the gitignored .ccanvil/ideas.log JSONL into per-status counts ({total, triage, backlog, icebox, ...}); renamed from cmd_idea_count in BTS-164 when cmd_idea_count became a provider-aware dispatcher
+# input: --project-dir <path>
+# input: positional <project-dir>
+# output: stdout JSON {total, <status>: <count>, ...}
+# output: exit-codes 0 ok, 2 unknown-flag
+# caller: cmd_idea_count
+# depends-on: jq
+# side-effect: reads-ideas-log
+# failure-mode: unknown-flag | exit=2 | visible=stderr-Usage
+# failure-mode: missing-log | exit=0 | visible=zeroed-counts
+# contract: zeroed-counts-when-log-absent
+# anchor: BTS-164 (provider-aware idea-count split)
+# anchor: BTS-241 (manifest seed)
 cmd_idea_count_local() {
   # Reads the gitignored .ccanvil/ideas.log JSONL and aggregates by status.
   # Renamed from cmd_idea_count in BTS-164 — cmd_idea_count is now a thin
@@ -2818,6 +2925,7 @@ cmd_idea_count_local() {
     case "$1" in
       --project-dir) project_dir_flag="${2:-.}"; shift 2 ;;
       --) shift; break ;;
+      # @failure-mode: unknown-flag
       --*) echo "Usage: docs-check.sh idea-count-local [--project-dir <path>] [<project-dir>]" >&2; exit 2 ;;
       *) break ;;
     esac
@@ -2831,10 +2939,12 @@ cmd_idea_count_local() {
   # for the triage counter so existing callers (radar-gather et al.) don't
   # regress.
   if [[ ! -f "$ideas_log" ]]; then
+    # @failure-mode: missing-log
     jq -n '{total:0, triage:0, backlog:0, icebox:0, canceled:0, duplicate:0, new:0, promoted:0, parked:0, dismissed:0, merged:0}'
     return 0
   fi
 
+  # @side-effect: reads-ideas-log
   grep -v '^# ' "$ideas_log" | jq -s '
     def triage_set: ["triage", "new"];
     def backlog_set: ["backlog", "promoted"];
@@ -2857,6 +2967,22 @@ cmd_idea_count_local() {
     }'
 }
 
+# @manifest
+# purpose: BTS-164 — provider-aware idea counter; dispatches to cmd_idea_count_local on local-routed projects or to linear-query.sh aggregation on linear-routed; same output shape regardless of mechanism so radar-gather and /recall stay provider-neutral
+# input: --project-dir <path>
+# input: positional <project-dir>
+# output: stdout JSON {total, triage, backlog, icebox, canceled, duplicate, new, promoted, parked, dismissed, merged}
+# output: exit-codes 0 ok, 1 resolver-failure, 2 unknown-flag
+# caller: cmd_radar_gather
+# depends-on: cmd_idea_count_local
+# depends-on: jq
+# side-effect: reads-config-files
+# side-effect: queries-provider
+# failure-mode: unknown-flag | exit=2 | visible=stderr-Usage
+# failure-mode: resolver-failure | exit=1 | visible=propagated-from-operations.sh | mitigation=verify-config-and-LINEAR_API_KEY
+# contract: provider-neutral-output-shape
+# anchor: BTS-164 (provider-aware idea-count)
+# anchor: BTS-241 (manifest seed)
 cmd_idea_count() {
   # BTS-164: provider-aware idea counter. Resolves idea.count to determine
   # whether to read the local JSONL log (mechanism=bash) or shell out to
@@ -2869,6 +2995,7 @@ cmd_idea_count() {
     case "$1" in
       --project-dir) project_dir_flag="${2:-.}"; shift 2 ;;
       --) shift; break ;;
+      # @failure-mode: unknown-flag
       --*) echo "Usage: docs-check.sh idea-count [--project-dir <path>] [<project-dir>]" >&2; exit 2 ;;
       *) break ;;
     esac
@@ -2876,6 +3003,8 @@ cmd_idea_count() {
   local project_dir="${project_dir_flag:-${1:-.}}"
   local ops="$(dirname "$0")/operations.sh"
 
+  # @side-effect: reads-config-files
+  # @side-effect: queries-provider
   local resolution
   resolution=$(bash "$ops" resolve idea.count --project-dir "$project_dir" 2>/dev/null) || {
     # Resolver failure → fall back to local-log read. Keeps radar-gather
@@ -2928,6 +3057,7 @@ cmd_idea_count() {
         }'
       ;;
     *)
+      # @failure-mode: resolver-failure
       echo "ERROR: idea-count: unknown mechanism '$mechanism'" >&2
       return 1
       ;;
@@ -2939,6 +3069,19 @@ cmd_idea_count() {
 # Translates new→triage, promoted→backlog, parked→icebox, dismissed→canceled,
 # merged→duplicate. Writes a timestamped backup before mutating. Idempotent:
 # a second run against a log with no legacy entries reports 0 migrations.
+# @manifest
+# purpose: One-shot rewrite of legacy-vocab status values in .ccanvil/ideas.log (new→triage, promoted→backlog, parked→icebox, dismissed→canceled, merged→duplicate); writes timestamped backup before mutating; idempotent on already-migrated logs
+# input: --project-dir <path>
+# input: positional <project-dir>
+# output: stdout migration count summary
+# output: exit-codes 0 ok, 2 unknown-flag
+# depends-on: jq
+# side-effect: writes-backup-and-rewrites-ideas-log
+# failure-mode: unknown-flag | exit=2 | visible=stderr-Usage
+# failure-mode: missing-log | exit=0 | visible=zero-migrations | mitigation=expected-on-fresh-projects
+# contract: idempotent
+# contract: backup-before-mutate
+# anchor: BTS-241 (manifest seed)
 cmd_idea_migrate_state() {
   # BTS-212: arg loop
   local project_dir_flag=""
@@ -2946,6 +3089,7 @@ cmd_idea_migrate_state() {
     case "$1" in
       --project-dir) project_dir_flag="${2:-.}"; shift 2 ;;
       --) shift; break ;;
+      # @failure-mode: unknown-flag
       --*) echo "Usage: docs-check.sh idea-migrate-state [--project-dir <path>] [<project-dir>]" >&2; exit 2 ;;
       *) break ;;
     esac
@@ -2954,6 +3098,7 @@ cmd_idea_migrate_state() {
   local ideas_log="$project_dir/.ccanvil/ideas.log"
 
   if [[ ! -f "$ideas_log" ]]; then
+    # @failure-mode: missing-log
     echo "0 entries migrated (no ideas.log at $ideas_log)"
     return 0
   fi
@@ -2970,6 +3115,7 @@ cmd_idea_migrate_state() {
   # Timestamped backup before mutation.
   local ts
   ts=$(date +%Y%m%d-%H%M%S)
+  # @side-effect: writes-backup-and-rewrites-ideas-log
   cp "$ideas_log" "${ideas_log}.${ts}.bak"
 
   local tmp
@@ -2996,6 +3142,19 @@ cmd_idea_migrate_state() {
 # is icebox (or legacy alias "parked") and whose `created` epoch is at
 # least 60 days (5184000s) in the past. Used by /idea review-icebox and
 # surfaced as a count via radar-gather.
+# @manifest
+# purpose: Surface Icebox-state ideas older than 60 days from the local ideas.log so /idea review-icebox can re-evaluate (promote / keep / dismiss / merge); prevents graveyard drift
+# input: --project-dir <path>
+# input: positional <project-dir>
+# output: stdout JSON array of stale icebox entries
+# output: exit-codes 0 ok, 2 unknown-flag
+# caller: skill:/idea
+# depends-on: jq
+# side-effect: reads-ideas-log
+# failure-mode: unknown-flag | exit=2 | visible=stderr-Usage
+# failure-mode: missing-log | exit=0 | visible=empty-array
+# contract: 60-day-staleness-threshold
+# anchor: BTS-241 (manifest seed)
 cmd_idea_review_icebox() {
   # BTS-212: arg loop
   local project_dir_flag=""
@@ -3003,6 +3162,7 @@ cmd_idea_review_icebox() {
     case "$1" in
       --project-dir) project_dir_flag="${2:-.}"; shift 2 ;;
       --) shift; break ;;
+      # @failure-mode: unknown-flag
       --*) echo "Usage: docs-check.sh idea-review-icebox [--project-dir <path>] [<project-dir>]" >&2; exit 2 ;;
       *) break ;;
     esac
@@ -3014,10 +3174,12 @@ cmd_idea_review_icebox() {
   threshold=$((now - 5184000))
 
   if [[ ! -f "$ideas_log" ]]; then
+    # @failure-mode: missing-log
     echo "[]"
     return 0
   fi
 
+  # @side-effect: reads-ideas-log
   grep -v '^# ' "$ideas_log" | jq -s --argjson t "$threshold" '
     [ .[]
       | select((.status == "icebox" or .status == "parked") and .created <= $t)
@@ -3026,6 +3188,22 @@ cmd_idea_review_icebox() {
   '
 }
 
+# @manifest
+# purpose: Update an idea's status field in the local provider's ideas.log via deterministic in-place rewrite (preserves order, tolerates blank lines, no jq -c re-encode that could mangle existing fields)
+# input: --project-dir <path>
+# input: positional <uid>
+# input: positional <status>
+# input: positional <project-dir>
+# output: stdout success message
+# output: exit-codes 0 ok, 1 missing-args/uid-not-found, 2 unknown-flag
+# caller: skill:/idea
+# depends-on: jq
+# side-effect: rewrites-ideas-log
+# failure-mode: unknown-flag | exit=2 | visible=stderr-Usage
+# failure-mode: missing-args | exit=2 | visible=stderr-Usage
+# failure-mode: uid-not-found | exit=1 | visible=stderr-error | mitigation=verify-uid-via-/idea-list
+# contract: status-transition-tolerant-no-validation
+# anchor: BTS-241 (manifest seed)
 cmd_idea_update() {
   # BTS-212: arg loop
   local project_dir_flag=""
@@ -3033,6 +3211,7 @@ cmd_idea_update() {
     case "$1" in
       --project-dir) project_dir_flag="${2:-.}"; shift 2 ;;
       --) shift; break ;;
+      # @failure-mode: unknown-flag
       --*) echo "Usage: docs-check.sh idea-update [--project-dir <path>] <uid> <status> [<project-dir>]" >&2; exit 2 ;;
       *) break ;;
     esac
@@ -3040,10 +3219,12 @@ cmd_idea_update() {
   local uid="${1:-}"
   local new_status="${2:-}"
   if [[ -z "$uid" || -z "$new_status" ]]; then
+    # @failure-mode: missing-args
     echo "Usage: docs-check.sh idea-update [--project-dir <path>] <uid> <status> [<project-dir>]" >&2
     exit 2
   fi
   local project_dir="${project_dir_flag:-${3:-.}}"
+  # @side-effect: rewrites-ideas-log
   local ideas_log="$project_dir/.ccanvil/ideas.log"
 
   # Accept new vocab (triage/backlog/icebox/canceled/duplicate) and legacy
@@ -3062,6 +3243,7 @@ cmd_idea_update() {
 
   # Confirm the uid exists before rewriting.
   if ! grep -q "\"uid\":\"$uid\"" "$ideas_log"; then
+    # @failure-mode: uid-not-found
     echo "ERROR: idea with uid '$uid' not found" >&2
     exit 1
   fi
@@ -3107,6 +3289,20 @@ cmd_idea_update() {
 #   idea-sync [project-dir]             → print {pending, entries} JSON
 #   idea-sync --ack <ts> [project-dir]  → remove entry matching ts
 # ---------------------------------------------------------------------------
+# @manifest
+# purpose: List pending idea-sync entries from .ccanvil/ideas-pending.log as JSON, OR ack a specific entry by timestamp removing it from the log; full replay-and-dispatch flow lives in the separate idea-pending-replay verb
+# input: --ack <ts>
+# input: --project-dir <path>
+# input: positional <project-dir>
+# output: stdout JSON {pending, entries} on default; "ACKED: <ts>" on --ack
+# output: exit-codes 0 ok, 2 unknown-flag
+# depends-on: jq
+# side-effect: rewrites-pending-log-on-ack
+# failure-mode: unknown-flag | exit=2 | visible=stderr-Usage
+# failure-mode: missing-pending-log | exit=0 | visible=zeroed-output | mitigation=expected-state
+# contract: ack-removes-by-ts-match
+# anchor: BTS-179 (replay substrate split)
+# anchor: BTS-241 (manifest seed)
 cmd_idea_sync() {
   local project_dir="."
   local ack_ts=""
@@ -3116,6 +3312,7 @@ cmd_idea_sync() {
       --ack)         ack_ts="$2"; shift 2 ;;
       --project-dir) project_dir="${2:-.}"; shift 2 ;;
       --) shift; break ;;
+      # @failure-mode: unknown-flag
       --*) echo "Usage: docs-check.sh idea-sync [--ack <ts>] [--project-dir <path>] [<project-dir>]" >&2; exit 2 ;;
       *) project_dir="$1"; shift ;;
     esac
@@ -3128,6 +3325,7 @@ cmd_idea_sync() {
       echo "ACKED: $ack_ts (pending log absent — no-op)"
       return 0
     fi
+    # @side-effect: rewrites-pending-log-on-ack
     local tmp
     tmp=$(mktemp)
     jq -c --argjson ts "$ack_ts" 'select(.ts != $ts)' "$pending" > "$tmp"
@@ -3137,6 +3335,7 @@ cmd_idea_sync() {
   fi
 
   if [[ ! -f "$pending" || ! -s "$pending" ]]; then
+    # @failure-mode: missing-pending-log
     jq -n '{pending: 0, entries: []}'
     return 0
   fi
@@ -4032,6 +4231,22 @@ cmd_idea_pending_replay() {
 #   idea-migrate --finalize [project-dir]
 #     git rm docs/ideas.md + update .gitignore. No parsing.
 # ---------------------------------------------------------------------------
+# @manifest
+# purpose: One-shot migration of legacy docs/ideas.md (markdown checkbox format) into the new .ccanvil/ideas.log JSONL store; --extract emits parsed JSONL only, --finalize removes legacy file + gitignores artifacts, default --full does both
+# input: --extract / --finalize
+# input: --project-dir <path>
+# input: positional <project-dir>
+# output: stdout migration progress + count
+# output: exit-codes 0 ok (also when nothing to migrate), 2 unknown-flag
+# depends-on: jq
+# side-effect: appends-ideas-log
+# side-effect: removes-legacy-ideas-md
+# side-effect: updates-gitignore
+# failure-mode: unknown-flag | exit=2 | visible=stderr-Usage
+# failure-mode: nothing-to-migrate | exit=0 | visible=stdout-message | mitigation=expected-when-no-legacy-file
+# contract: extract-and-finalize-can-run-separately
+# contract: idempotent-no-op-on-already-migrated
+# anchor: BTS-241 (manifest seed)
 cmd_idea_migrate() {
   local project_dir="."
   local mode="full"   # full | extract | finalize
@@ -4042,6 +4257,7 @@ cmd_idea_migrate() {
       --finalize)    mode="finalize"; shift ;;
       --project-dir) project_dir="${2:-.}"; shift 2 ;;
       --) shift; break ;;
+      # @failure-mode: unknown-flag
       --*) echo "Usage: docs-check.sh idea-migrate [--extract|--finalize] [--project-dir <path>] [<project-dir>]" >&2; exit 2 ;;
       *) project_dir="$1"; shift ;;
     esac
@@ -4057,12 +4273,14 @@ cmd_idea_migrate() {
          git -C "$project_dir" ls-files --error-unmatch docs/ideas.md >/dev/null 2>&1; then
         git -C "$project_dir" rm -q docs/ideas.md
       else
+        # @side-effect: removes-legacy-ideas-md
         rm -f "$ideas_md"
       fi
     fi
     touch "$gitignore"
     for entry in "docs/ideas.md" ".ccanvil/ideas-pending.log" ".ccanvil/ideas.log"; do
       if ! grep -qxF "$entry" "$gitignore" 2>/dev/null; then
+        # @side-effect: updates-gitignore
         echo "$entry" >> "$gitignore"
       fi
     done
@@ -4097,6 +4315,7 @@ cmd_idea_migrate() {
       _idea_migrate_finalize
       ;;
     extract)
+      # @failure-mode: nothing-to-migrate
       [[ -f "$ideas_md" ]] || { echo "Nothing to migrate: $ideas_md not found"; return 0; }
       _idea_migrate_extract
       ;;
@@ -4106,6 +4325,7 @@ cmd_idea_migrate() {
         return 0
       fi
       mkdir -p "$(dirname "$ideas_log")"
+      # @side-effect: appends-ideas-log
       # Write each parsed entry as a local JSONL idea (title=body, status preserved).
       _idea_migrate_extract >> "$ideas_log"
       local migrated
@@ -4126,6 +4346,21 @@ cmd_idea_migrate() {
 #   idea-setup --provider local                                  [project-dir]
 #   idea-setup --provider linear --team TEAM --project PROJECT   [project-dir]
 # ---------------------------------------------------------------------------
+# @manifest
+# purpose: Initialize idea-routing config (.claude/ccanvil.local.json) for a new provider — writes integrations.routing.idea, scoping team/project, and resolves Linear state IDs by name; supports `--provider linear` and `--provider local`
+# input: --provider <name>
+# input: --team <id>
+# input: --project <id>
+# input: --project-dir <path>
+# output: stdout config write summary
+# output: exit-codes 0 ok, 1 provider-error/missing-required, 2 unknown-flag
+# depends-on: jq
+# side-effect: writes-ccanvil-local-json
+# failure-mode: unknown-flag | exit=2 | visible=stderr-Usage
+# failure-mode: missing-required | exit=1 | visible=stderr-error | mitigation=pass-required-flags
+# failure-mode: provider-error | exit=1 | visible=stderr-error | mitigation=verify-provider-credentials
+# contract: idempotent-on-existing-config
+# anchor: BTS-241 (manifest seed)
 cmd_idea_setup() {
   local provider=""
   local team=""
@@ -4139,6 +4374,7 @@ cmd_idea_setup() {
       --project)     project="$2";  shift 2 ;;
       --project-dir) project_dir="${2:-.}"; shift 2 ;;
       --) shift; break ;;
+      # @failure-mode: unknown-flag
       --*) echo "Usage: docs-check.sh idea-setup [--provider <p>] [--team <t>] [--project <p>] [--project-dir <path>] [<project-dir>]" >&2; exit 2 ;;
       *)             project_dir="$1"; shift ;;
     esac
@@ -4147,11 +4383,14 @@ cmd_idea_setup() {
   case "$provider" in
     local) ;;
     linear)
+      # @failure-mode: missing-required
       [[ -n "$team" ]]    || { echo "ERROR: --provider linear requires --team TEAM" >&2; exit 1; }
       [[ -n "$project" ]] || { echo "ERROR: --provider linear requires --project PROJECT" >&2; exit 1; }
       ;;
     "")  echo "ERROR: --provider is required (local|linear)" >&2; exit 1 ;;
-    *)   echo "ERROR: unknown provider '$provider' (must be local|linear)" >&2; exit 1 ;;
+    *)
+         # @failure-mode: provider-error
+         echo "ERROR: unknown provider '$provider' (must be local|linear)" >&2; exit 1 ;;
   esac
 
   mkdir -p "$project_dir/.claude" "$project_dir/.ccanvil"
@@ -4171,6 +4410,7 @@ cmd_idea_setup() {
   [[ -f "$cfg" ]] && existing=$(cat "$cfg")
 
   echo "$existing" | jq --argjson slice "$slice" '. * $slice' > "$cfg.tmp"
+  # @side-effect: writes-ccanvil-local-json
   mv "$cfg.tmp" "$cfg"
 
   # .gitignore hygiene — both stores live under the repo and must never be
@@ -4221,6 +4461,24 @@ cmd_idea_setup() {
 # Output: JSON array [{file, line, match, scope}].
 # Exit: 0 if empty; 1 if any matches found.
 # ---------------------------------------------------------------------------
+# @manifest
+# purpose: Scan the project tree for retired-vocab references (legacy command names from earlier ccanvil migrations) and emit JSON matches with optional allowlist pre-filter; pattern lives in the substrate so this manifest stays vocab-free
+# input: --respect-allowlist <path>
+# input: --project-dir <path>
+# input: positional <project-dir> (legacy)
+# output: stdout JSON array of {file, line, match} or empty []
+# output: exit-codes 0 ok, 2 unknown-flag/missing-allowlist-arg/allowlist-not-found
+# caller: skill:/stasis
+# depends-on: grep
+# depends-on: jq
+# side-effect: reads-project-tree
+# failure-mode: unknown-flag | exit=2 | visible=stderr-Usage
+# failure-mode: allowlist-not-found | exit=2 | visible=stderr-error | mitigation=verify-allowlist-path
+# failure-mode: missing-allowlist-arg | exit=2 | visible=stderr-error | mitigation=pass-path-after-flag
+# contract: empty-array-on-no-matches
+# contract: skips-git-node_modules-dist-generated
+# anchor: BTS-132 (respect-allowlist filter)
+# anchor: BTS-241 (manifest seed)
 cmd_legacy_refs_scan() {
   # BTS-132: optional --respect-allowlist <path> pre-filters raw matches
   # against a user-supplied allowlist (same ERE format as
@@ -4234,16 +4492,19 @@ cmd_legacy_refs_scan() {
       --respect-allowlist)
         allowlist="${2:-}"
         if [[ -z "$allowlist" ]]; then
+          # @failure-mode: missing-allowlist-arg
           echo "ERROR: --respect-allowlist requires a path argument" >&2
           return 2
         fi
         if [[ ! -f "$allowlist" ]]; then
+          # @failure-mode: allowlist-not-found
           echo "ERROR: allowlist file not found: $allowlist" >&2
           return 2
         fi
         shift 2 ;;
       --project-dir) project_dir_flag="${2:-.}"; shift 2 ;;
       --) shift; break ;;
+      # @failure-mode: unknown-flag
       --*) echo "Usage: docs-check.sh legacy-refs-scan [--respect-allowlist <path>] [--project-dir <path>] [<project-dir>]" >&2; exit 2 ;;
       *) break ;;
     esac
@@ -4256,6 +4517,7 @@ cmd_legacy_refs_scan() {
   # Collect matches via grep -rnE; skip .git, node_modules, and binary files.
   # -I: skip binary; -n: line numbers; --exclude-dir: skip common noise.
   # Tolerate empty grep output (exit 1 when no matches).
+  # @side-effect: reads-project-tree
   local raw_matches
   raw_matches=$(cd "$project_dir" && grep -rnIE \
     --exclude-dir=.git \
@@ -4344,6 +4606,27 @@ cmd_legacy_refs_scan() {
 #   idea-upgrade --provider local                                  [project-dir]
 #   idea-upgrade --provider linear --team TEAM --project PROJECT   [project-dir]
 # ---------------------------------------------------------------------------
+# @manifest
+# purpose: Upgrade an existing idea-routing config — validate provider state IDs against live Linear, optionally create new project, optionally migrate from legacy local-only setup; --dry-run shows the diff without writing
+# input: --provider <name>
+# input: --team <id>
+# input: --project <id>
+# input: --dry-run
+# input: --create-project
+# input: --from-legacy
+# input: --project-dir <path>
+# output: stdout upgrade plan + summary JSON
+# output: exit-codes 0 ok, 1 provider-error/missing-required, 2 unknown-flag
+# depends-on: cmd_idea_setup
+# depends-on: jq
+# side-effect: writes-via-cmd_idea_setup
+# side-effect: commits-config-changes
+# failure-mode: unknown-flag | exit=2 | visible=stderr-Usage
+# failure-mode: missing-required | exit=1 | visible=stderr-error | mitigation=pass-required-flags
+# failure-mode: provider-error | exit=1 | visible=stderr-error | mitigation=verify-provider-credentials
+# contract: dry-run-never-mutates
+# contract: idempotent-on-already-upgraded
+# anchor: BTS-241 (manifest seed)
 cmd_idea_upgrade() {
   local provider=""
   local team=""
@@ -4363,6 +4646,7 @@ cmd_idea_upgrade() {
       --create-project) create_project=1; shift ;;
       --from-legacy)    from_legacy=1; shift ;;
       --) shift; break ;;
+      # @failure-mode: unknown-flag
       --*) echo "Usage: docs-check.sh idea-upgrade [--provider <p>] [--team <t>] [--project <p>] [--project-dir <path>] [--dry-run] [--create-project] [--from-legacy] [<project-dir>]" >&2; exit 2 ;;
       *)                project_dir="$1"; shift ;;
     esac
@@ -4372,12 +4656,15 @@ cmd_idea_upgrade() {
     local) ;;
     linear)
       [[ -n "$team" && -n "$project" ]] || {
+        # @failure-mode: missing-required
         echo "ERROR: --provider linear requires --team and --project" >&2
         return 1
       }
       ;;
     "")  echo "ERROR: --provider is required (local|linear)" >&2; return 1 ;;
-    *)   echo "ERROR: unknown provider '$provider' (must be local|linear)" >&2; return 1 ;;
+    *)
+         # @failure-mode: provider-error
+         echo "ERROR: unknown provider '$provider' (must be local|linear)" >&2; return 1 ;;
   esac
 
   if [[ $create_project -eq 1 && "$provider" != "linear" ]]; then
@@ -4464,6 +4751,7 @@ cmd_idea_upgrade() {
   # Delegate the config + gitignore write to cmd_idea_setup. Suppress its
   # next-step text (idea-upgrade emits its own summary).
   if [[ "$provider" == "linear" ]]; then
+    # @side-effect: writes-via-cmd_idea_setup
     cmd_idea_setup --provider linear --team "$team" --project "$project" "$project_dir" >/dev/null
   else
     cmd_idea_setup --provider local "$project_dir" >/dev/null
@@ -4497,6 +4785,7 @@ cmd_idea_upgrade() {
     if [[ $legacy_present -eq 1 ]]; then
       git rm -q docs/ideas.md 2>/dev/null || rm -f docs/ideas.md
     fi
+    # @side-effect: commits-config-changes
     git add .claude/ccanvil.local.json .gitignore
     if [[ $legacy_present -eq 1 ]]; then
       git commit -q -m "chore(idea-upgrade): configure $provider provider + migrate $migrated_count legacy entries"
@@ -4525,6 +4814,18 @@ cmd_idea_upgrade() {
 #                                  truncate the reply to 80 chars.
 #   - Longer / multi-line, no CLI → first 80 chars of first line
 #                                    (deterministic fallback).
+# @manifest
+# purpose: Generate a concise ≤80-char title from a multi-line idea body via deterministic heuristics (first sentence, strip leading bullet/markup, truncate on word boundary); used by /idea capture flow when title not provided
+# input: stdin <body>
+# input: --title-map <path>
+# output: stdout single-line title string ≤80 chars
+# output: exit-codes 0 ok, 1 title-map-not-found
+# depends-on: jq
+# side-effect: emits-title-stdout
+# failure-mode: title-map-not-found | exit=1 | visible=stderr-error | mitigation=verify-title-map-path
+# contract: deterministic-no-llm
+# contract: title-≤-80-chars
+# anchor: BTS-241 (manifest seed)
 cmd_title_from_body() {
   local title_map=''
   while [[ $# -gt 0 ]]; do
@@ -4544,6 +4845,7 @@ cmd_title_from_body() {
   done
 
   if [[ -n "$title_map" && ! -f "$title_map" ]]; then
+    # @failure-mode: title-map-not-found
     echo "ERROR: --title-map file not found: $title_map" >&2
     return 1
   fi
@@ -4559,6 +4861,7 @@ cmd_title_from_body() {
     local mapped
     mapped=$(jq -r --arg b "$body" '.[$b] // empty' "$title_map" 2>/dev/null || echo '')
     if [[ -n "$mapped" ]]; then
+      # @side-effect: emits-title-stdout
       printf '%s' "$mapped"
       return 0
     fi
@@ -4726,6 +5029,18 @@ cmd_stamp_spec() {
 # Output (stdout, JSON): {has_origin: bool, url: string|null, git_repo: bool}
 # Exit code: always 0 (callers branch on has_origin, not status).
 # ---------------------------------------------------------------------------
+# @manifest
+# purpose: Probe whether the working tree is a git repo and whether origin is configured; emits {has_origin, url, git_repo} JSON envelope used by repo-type classification and init flows
+# input: --project-dir <path>
+# input: positional <repo-dir>
+# output: stdout JSON {has_origin, url, git_repo}
+# output: exit-codes 0 always, 2 unknown-flag
+# depends-on: git
+# depends-on: jq
+# side-effect: reads-git-config
+# failure-mode: unknown-flag | exit=2 | visible=stderr-Usage
+# contract: never-fails-on-non-git-repo
+# anchor: BTS-241 (manifest seed)
 cmd_remote_presence() {
   # BTS-212: arg loop
   local project_dir_flag=""
@@ -4733,12 +5048,14 @@ cmd_remote_presence() {
     case "$1" in
       --project-dir) project_dir_flag="${2:-.}"; shift 2 ;;
       --) shift; break ;;
+      # @failure-mode: unknown-flag
       --*) echo "Usage: docs-check.sh remote-presence [--project-dir <path>] [<repo-dir>]" >&2; exit 2 ;;
       *) break ;;
     esac
   done
   local repo_dir="${project_dir_flag:-${1:-.}}"
 
+  # @side-effect: reads-git-config
   local git_repo="false"
   local has_origin="false"
   local url="null"
@@ -4782,6 +5099,33 @@ cmd_remote_presence() {
 #   merge             --id <ID> --duplicate-of <DID>
 #   ticket.transition --id <ID> --role <ROLE>
 # ---------------------------------------------------------------------------
+# @manifest
+# purpose: BTS-123 — deterministically append one entry to .ccanvil/ideas-pending.log when a Linear dispatch fails (network, auth, GraphQL); replaces hand-rolled echo+jq pipelines that produced malformed JSON; BTS-205 dead-letter via dual-capture-emergency.log on validate failure
+# input: --op {add|promote|defer|dismiss|merge|ticket.transition}
+# input: --title <title> (op=add)
+# input: --body <body> (op=add)
+# input: --id <BTS-N> (transition ops)
+# input: --priority <1-4> (op=promote)
+# input: --role <todo|in_progress|backlog|done> (op=ticket.transition)
+# input: --duplicate-of <BTS-N> (op=merge)
+# input: --parent <ref> (op=add, BTS-162)
+# input: --project-dir <path>
+# output: stdout JSON {appended:true, ts}
+# output: exit-codes 0 ok, 2 unknown-flag/missing-required
+# caller: skill:/idea
+# caller: skill:/activate
+# caller: skill:/land
+# depends-on: jq
+# side-effect: appends-pending-log
+# side-effect: maybe-writes-emergency-log
+# failure-mode: unknown-flag | exit=2 | visible=stderr-Usage
+# failure-mode: missing-op | exit=2 | visible=stderr-error | mitigation=pass-required-op
+# failure-mode: validate-failure | exit=0 | visible=stdout-emergency-message | mitigation=BTS-205-dual-capture
+# contract: deterministic-jq-shape-no-echo
+# contract: never-fails-fallback-path
+# anchor: BTS-123 (deterministic helper origin)
+# anchor: BTS-205 (dual-capture emergency)
+# anchor: BTS-241 (manifest seed)
 cmd_idea_pending_append() {
   local op="" title="" body="" id="" priority="" role="" duplicate_of="" parent=""
   local project_dir="."
@@ -4808,11 +5152,14 @@ cmd_idea_pending_append() {
         fi
         parent="$2"; shift 2 ;;
       --project-dir)    project_dir="$2"; shift 2 ;;
-      *)                echo "ERROR: unknown flag: $1" >&2; return 2 ;;
+      *)
+                        # @failure-mode: unknown-flag
+                        echo "ERROR: unknown flag: $1" >&2; return 2 ;;
     esac
   done
 
   if [[ -z "$op" ]]; then
+    # @failure-mode: missing-op
     echo "ERROR: idea-pending-append requires --op" >&2
     return 2
   fi
@@ -4880,8 +5227,11 @@ cmd_idea_pending_append() {
   # determinism candidates evaporated silently. Now the helper writes
   # to .ccanvil/dual-capture-emergency.log as a last-resort, with a
   # WARN to stderr so /stasis surfaces the degradation.
+  # @side-effect: appends-pending-log
   if ! printf '%s\n' "$entry" >> "$pending" 2>/dev/null; then
     local emergency="$project_dir/.ccanvil/dual-capture-emergency.log"
+    # @side-effect: maybe-writes-emergency-log
+    # @failure-mode: validate-failure
     if printf '%s\n' "$entry" >> "$emergency" 2>/dev/null; then
       echo "WARN: idea-pending-append: primary log write failed; entry written to emergency log ($emergency)" >&2
       return 0
@@ -4898,11 +5248,27 @@ cmd_idea_pending_append() {
 # Output (stdout, JSON): {count: N, valid: bool, errors: [<line-num>...]}
 # Exit codes: 0 when valid (or empty/missing), non-zero when any line fails to parse.
 # ---------------------------------------------------------------------------
+# @manifest
+# purpose: BTS-123 — count and structurally validate the entries in .ccanvil/ideas-pending.log; emits {count, valid, errors:[]} envelope so callers (skill:/idea, /stasis) can compute totals via JSON path rather than `wc -l` (physical lines ≠ JSON entries)
+# input: positional <project-dir>
+# output: stdout JSON {count, valid, errors:[]}
+# output: exit-codes 0 always (errors encoded in JSON)
+# caller: skill:/idea
+# depends-on: jq
+# side-effect: reads-pending-log
+# failure-mode: missing-log | exit=0 | visible=zeroed-output
+# failure-mode: malformed-entry | exit=0 | visible=errors-array-non-empty | mitigation=manual-cleanup-or-resync
+# contract: never-fails-on-invalid-content
+# contract: count-matches-entry-count-not-line-count
+# anchor: BTS-123 (deterministic-helper-pattern)
+# anchor: BTS-241 (manifest seed)
 cmd_idea_pending_validate() {
   local project_dir="${1:-.}"
+  # @side-effect: reads-pending-log
   local pending="$project_dir/.ccanvil/ideas-pending.log"
 
   if [[ ! -f "$pending" ]]; then
+    # @failure-mode: missing-log
     jq -n '{count: 0, valid: true, errors: []}'
     return 0
   fi
@@ -4917,6 +5283,7 @@ cmd_idea_pending_validate() {
     if echo "$line" | jq -e . >/dev/null 2>&1; then
       count=$((count + 1))
     else
+      # @failure-mode: malformed-entry
       errors_json=$(echo "$errors_json" | jq --argjson n "$lineno" '. + [$n]')
     fi
   done < "$pending"
@@ -4944,6 +5311,24 @@ cmd_idea_pending_validate() {
 #   --project-dir <path>  — defaults to "."
 #   --input-json <file>   — bypass live idea.list resolver; read canned issues array
 #   --no-time-filter      — skip createdAt filter (test mode)
+# @manifest
+# purpose: BTS-201 — scan the current session's idea captures for bug-shape language without the four evidence anchors (Command/Output/Exit/Reproduce) and emit a list for /stasis to surface as Evidence Gaps; closes the failure mode that almost shipped a phantom regex carve-out (BTS-198)
+# input: --since <ref>
+# input: --project-dir <path>
+# input: --input-json <path>
+# input: --no-time-filter
+# output: stdout JSON array of gap entries [{id, title, reason}]
+# output: exit-codes 0 always, 2 unknown-flag
+# caller: skill:/stasis
+# depends-on: jq
+# side-effect: reads-ideas-log-and-pending
+# failure-mode: unknown-flag | exit=2 | visible=stderr-Usage
+# failure-mode: linear-fetch-fallback | exit=0 | visible=fallback-field-in-envelope | mitigation=expected-on-network-flake
+# contract: bug-shape-heuristic-deterministic
+# contract: empty-array-when-no-gaps
+# anchor: BTS-198 (origin failure mode)
+# anchor: BTS-201 (evidence-required rule)
+# anchor: BTS-241 (manifest seed)
 cmd_evidence_scan_session() {
   local since="" project_dir="." input_json="" no_time_filter=0
   while [[ $# -gt 0 ]]; do
@@ -4953,6 +5338,7 @@ cmd_evidence_scan_session() {
       --input-json) input_json="${2:-}"; shift 2 ;;
       --no-time-filter) no_time_filter=1; shift ;;
       --) shift; break ;;
+      # @failure-mode: unknown-flag
       --*) echo "Usage: docs-check.sh evidence-scan-session [--since <ref>] [--project-dir <path>] [--input-json <path>] [--no-time-filter]" >&2; exit 2 ;;
       *) shift ;;
     esac
@@ -4965,6 +5351,7 @@ cmd_evidence_scan_session() {
   fi
   if [[ -z "$since_epoch" ]]; then
     since_epoch=$(( $(date +%s) - 86400 ))
+    # @failure-mode: linear-fetch-fallback
     [[ -n "$since" ]] && fallback="24h"
     # Empty --since with no resolution also implies fallback at first-stasis
     # nodes; we mark fallback only when the operator explicitly passed an
@@ -5063,6 +5450,7 @@ cmd_evidence_scan_session() {
       gaps=$(echo "$gaps" | jq --arg id "$id" --arg t "$title" \
         '. + [{id:$id, title:$t, reason:"missing-evidence-anchors"}]')
     fi
+  # @side-effect: reads-ideas-log-and-pending
   done < <(echo "$issues" | jq -c '.[]')
 
   if [[ -n "$fallback" ]]; then
@@ -5092,6 +5480,25 @@ cmd_evidence_scan_session() {
 #   {candidates:[{slug, has_idea, idea_id|null}], count_total, count_carry_forward}
 #   Plus optional `note: "no prior stasis"` when no stasis is found.
 # ---------------------------------------------------------------------------
+# @manifest
+# purpose: BTS-232 — parse the prior stasis's `## Determinism Review` section, extract candidate slugs, and cross-check each against current Linear ideas; surfaces candidates whose dual-capture didn't land for /recall to flag as carry-forward
+# input: --project-dir <path>
+# input: --input-json <path>
+# input: --stasis-content - (read from stdin)
+# output: stdout JSON {candidates, count_total, count_carry_forward}
+# output: exit-codes 0 always, 2 unknown-flag/bad-stasis-content
+# caller: skill:/recall
+# depends-on: cmd_artifact_read
+# depends-on: jq
+# side-effect: reads-prior-stasis
+# side-effect: queries-linear-ideas
+# failure-mode: unknown-flag | exit=2 | visible=stderr-error
+# failure-mode: bad-stasis-content-flag | exit=2 | visible=stderr-error | mitigation=use-dash-for-stdin
+# failure-mode: empty-result | exit=0 | visible=zeroed-counts | mitigation=expected-when-no-determinism-section
+# contract: tolerates-bolded-and-backticked-slug-shapes
+# contract: silent-when-no-prior-stasis
+# anchor: BTS-232 (carry-forward substrate)
+# anchor: BTS-241 (manifest seed)
 cmd_stasis_carry_forward() {
   local project_dir="." input_json="" read_stdin=0
   while [[ $# -gt 0 ]]; do
@@ -5102,11 +5509,13 @@ cmd_stasis_carry_forward() {
         if [[ "${2:-}" == "-" ]]; then
           read_stdin=1; shift 2
         else
+          # @failure-mode: bad-stasis-content-flag
           echo "ERROR: stasis-carry-forward: --stasis-content only accepts '-' (stdin)" >&2
           return 2
         fi
         ;;
       --) shift; break ;;
+      # @failure-mode: unknown-flag
       --*) echo "Usage: docs-check.sh stasis-carry-forward [--project-dir <path>] [--stasis-content -] [--input-json <path>]" >&2; exit 2 ;;
       *) shift ;;
     esac
@@ -5129,6 +5538,8 @@ cmd_stasis_carry_forward() {
       fi
     fi
     if [[ -z "$stasis_content" ]]; then
+      # @failure-mode: empty-result
+      # @side-effect: reads-prior-stasis
       jq -n '{candidates:[], count_total:0, count_carry_forward:0, note:"no prior stasis"}'
       return 0
     fi
@@ -5223,6 +5634,7 @@ cmd_stasis_carry_forward() {
     }
     issues=$(cat "$input_json")
   else
+    # @side-effect: queries-linear-ideas
     local ops="$(dirname "$0")/operations.sh"
     local resolution
     resolution=$(bash "$ops" resolve idea.list --project-dir "$project_dir" 2>/dev/null) || resolution=""
@@ -5612,6 +6024,25 @@ _doc_concurrent_edit_check() {
 # BTS-204 Phase 6: ssot-migrate — operator-driven, idempotent migration of
 # lifecycle artifacts between local files and Linear Documents. Bidirectional.
 # Never auto-triggered. Per AC-12.
+# @manifest
+# purpose: BTS-204 — migrate spec/plan/stasis routing between local-only and Linear-routed for a single feature; --to direction inverts the route, with content moved between docs/specs/<id>.md and the corresponding Linear Document
+# input: --to {linear|local}
+# input: --feature <id>
+# input: --project-dir <path>
+# output: stdout migration plan + summary JSON
+# output: exit-codes 0 ok, 1 missing-feature/route-error, 2 unknown-flag/missing-direction
+# depends-on: cmd_artifact_read
+# depends-on: cmd_artifact_write
+# depends-on: jq
+# side-effect: writes-or-deletes-local-archive
+# side-effect: writes-or-deletes-linear-document
+# failure-mode: unknown-flag | exit=2 | visible=stderr-Usage
+# failure-mode: missing-direction | exit=2 | visible=stderr-error | mitigation=pass-to-flag
+# failure-mode: missing-feature | exit=2 | visible=stderr-error | mitigation=pass-feature-flag
+# failure-mode: write-error | exit=0 | visible=errors-field-in-envelope | mitigation=retry-after-fixing-credentials
+# contract: idempotent-on-already-migrated
+# anchor: BTS-204 (SSOT-Linear)
+# anchor: BTS-241 (manifest seed)
 cmd_ssot_migrate() {
   local direction="" feature="" project_dir="."
   while [[ $# -gt 0 ]]; do
@@ -5620,15 +6051,19 @@ cmd_ssot_migrate() {
       --feature)    feature="$2";   shift 2 ;;
       --project-dir) project_dir="${2:-.}"; shift 2 ;;
       --) shift; break ;;
+      # @failure-mode: unknown-flag
       --*) echo "Usage: docs-check.sh ssot-migrate --to {linear|local} [--feature <id>] [--project-dir <path>]" >&2; exit 2 ;;
       *) shift ;;
     esac
   done
   case "$direction" in
     linear|local) ;;
-    *) echo "ERROR: ssot-migrate requires --to {linear|local}" >&2; return 2 ;;
+    *)
+       # @failure-mode: missing-direction
+       echo "ERROR: ssot-migrate requires --to {linear|local}" >&2; return 2 ;;
   esac
   if [[ -z "$feature" ]]; then
+    # @failure-mode: missing-feature
     echo "ERROR: ssot-migrate requires --feature <BTS-N> (or feature-id)" >&2
     return 2
   fi
@@ -5653,10 +6088,13 @@ cmd_ssot_migrate() {
         skipped=$((skipped + 1))
         continue
       fi
+      # @side-effect: writes-or-deletes-linear-document
       if cmd_artifact_write --kind "$kind" --feature "$feature" < "$local_path" >/dev/null 2>&1; then
+        # @side-effect: writes-or-deletes-local-archive
         rm -f "$local_path"
         migrated=$((migrated + 1))
       else
+        # @failure-mode: write-error
         errors=$((errors + 1))
       fi
     done
@@ -5695,21 +6133,38 @@ cmd_ssot_migrate() {
 # Usage:
 #   docs-check.sh route-of <spec|plan|stasis> [--project-dir <dir>]
 # Outputs "linear" or "local" on stdout. Exit 2 on missing/unknown kind.
+# @manifest
+# purpose: Resolve which routing target (local|linear) governs a given lifecycle artifact (spec|plan|stasis) per ccanvil.json + ccanvil.local.json — read-only delegate to _lifecycle_route helper, exposed as a CLI surface for skills
+# input: --project-dir <path>
+# input: positional <kind> ∈ {spec, plan, stasis}
+# output: stdout routing target string ("local" or "linear")
+# output: exit-codes 0 ok, 2 unknown-flag/missing-kind
+# caller: skill:/spec
+# depends-on: _lifecycle_route
+# side-effect: reads-config-files
+# failure-mode: unknown-flag | exit=2 | visible=stderr-Usage
+# failure-mode: missing-kind | exit=2 | visible=stderr-Usage
+# contract: returns-local-by-default-when-unconfigured
+# anchor: BTS-204 (route-aware lifecycle)
+# anchor: BTS-241 (manifest seed)
 cmd_route_of() {
   local kind="" project_dir="."
   while [[ $# -gt 0 ]]; do
     case "$1" in
       --project-dir) project_dir="${2:-.}"; shift 2 ;;
       --) shift; break ;;
+      # @failure-mode: unknown-flag
       --*) echo "Usage: docs-check.sh route-of <spec|plan|stasis> [--project-dir <path>]" >&2; exit 2 ;;
       spec|plan|stasis) kind="$1"; shift ;;
       *) shift ;;
     esac
   done
   if [[ -z "$kind" ]]; then
+    # @failure-mode: missing-kind
     echo "Usage: docs-check.sh route-of <spec|plan|stasis> [--project-dir <dir>]" >&2
     return 2
   fi
+  # @side-effect: reads-config-files
   _lifecycle_route "$kind" "$project_dir"
 }
 
@@ -5719,6 +6174,24 @@ cmd_route_of() {
 #   --feature <BTS-N>           required when http-routed (or --stasis-kind feature)
 #   --stasis-kind <feature|session>  defaults to "feature"
 # Output: artifact content on stdout (markdown). Exit 0 on found, 2 on missing.
+# @manifest
+# purpose: BTS-204 — read spec/plan/stasis content from the routed source (local file system on local-routed nodes, Linear Document on linear-routed) and emit on stdout; provider-aware reader counterpart to cmd_artifact_write
+# input: --kind {spec|plan|stasis}
+# input: --feature <id>
+# input: --stasis-kind {feature|session}
+# input: --project-dir <path>
+# output: stdout markdown content
+# output: exit-codes 0 found, 2 missing/usage-error
+# caller: skill:/plan
+# caller: skill:/recall
+# caller: cmd_archive_stasis
+# depends-on: _lifecycle_route
+# side-effect: reads-local-doc-or-queries-linear
+# failure-mode: missing-kind | exit=2 | visible=stderr-error
+# failure-mode: not-found | exit=2 | visible=stderr-error
+# contract: route-aware-by-kind
+# anchor: BTS-204 (provider-aware artifact-read substrate)
+# anchor: BTS-241 (manifest seed)
 cmd_artifact_read() {
   local kind="" feature="" stasis_kind="feature" project_dir="."
   while [[ $# -gt 0 ]]; do
@@ -5732,6 +6205,8 @@ cmd_artifact_read() {
       *) shift ;;
     esac
   done
+  # @failure-mode: missing-kind
+  # @side-effect: reads-local-doc-or-queries-linear
   [[ -z "$kind" ]] && { echo "ERROR: artifact-read --kind is required" >&2; return 2; }
 
   local route
@@ -5818,6 +6293,7 @@ cmd_artifact_read() {
         ;;
     esac
     rm -f "$err"
+    # @failure-mode: not-found
     [[ "$warn_class" == "not-found" ]] && return 2
     return 3
   fi

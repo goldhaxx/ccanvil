@@ -13,6 +13,7 @@
 ^hub/specs/
 ^docs/specs/
 ^docs/sessions/
+^docs/research/
 ^docs/ideas\.md:
 
 # --- Node-local, per-user settings (not shipped) ---

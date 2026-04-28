@@ -315,19 +315,21 @@ cmd_session_info() {
     fi
   fi
 
-  epoch="null"; iso="null"; tz="null"
-  if [[ -f "$boundary_path" ]] && jq -e . < "$boundary_path" >/dev/null 2>&1; then
-    epoch=$(jq -c '.epoch // null' < "$boundary_path")
-    iso=$(jq -c '.iso // null' < "$boundary_path")
-    tz=$(jq -c '.tz // null' < "$boundary_path")
+  # BTS-207: single-fork read regardless of boundary file state. The previous
+  # shape (validity check + 3 field reads + assembly = 5 forks per call)
+  # violates deterministic-first.md without offering anything in return —
+  # /stasis and /recall both call this on every invocation. The new shape:
+  # one jq with try/fromjson catches invalid-JSON at the language level;
+  # the only branch is missing-file (skip jq entirely is impossible, so
+  # we still need one fork to emit the empty envelope).
+  if [[ -f "$boundary_path" ]]; then
+    jq -n --argjson counter "$counter" --rawfile raw "$boundary_path" \
+      'try ($raw | fromjson | {counter:$counter, epoch:(.epoch//null), iso:(.iso//null), tz:(.tz//null)})
+       catch {counter:$counter, epoch:null, iso:null, tz:null}'
+  else
+    jq -n --argjson counter "$counter" \
+      '{counter:$counter, epoch:null, iso:null, tz:null}'
   fi
-
-  jq -n \
-    --argjson counter "$counter" \
-    --argjson epoch "$epoch" \
-    --argjson iso "$iso" \
-    --argjson tz "$tz" \
-    '{counter:$counter, epoch:$epoch, iso:$iso, tz:$tz}'
 }
 
 # ---------------------------------------------------------------------------

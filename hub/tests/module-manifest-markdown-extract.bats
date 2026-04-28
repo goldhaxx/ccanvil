@@ -88,9 +88,8 @@ EOF
   echo "$output" | jq -e 'type == "array" and length == 0'
 }
 
-@test "extract markdown: malformed yaml emits MALFORMED + exit 2 (AC-3)" {
-  malformed="$BATS_TEST_TMPDIR/malformed.md"
-  # Frontmatter opens with --- but never closes.
+@test "extract markdown: malformed yaml — unclosed frontmatter (AC-3)" {
+  malformed="$BATS_TEST_TMPDIR/unclosed.md"
   cat > "$malformed" <<'EOF'
 ---
 name: broken
@@ -99,7 +98,32 @@ manifest:
 EOF
   run bash "$SCRIPT" extract "$malformed"
   [ "$status" -eq 2 ]
-  echo "$output" | grep -qE '^MALFORMED:'
+  echo "$output" | grep -qE '^MALFORMED:.*unclosed frontmatter'
+}
+
+@test "extract markdown: malformed yaml — array item without parent key (AC-3)" {
+  malformed="$BATS_TEST_TMPDIR/orphan-array.md"
+  cat > "$malformed" <<'EOF'
+---
+manifest:
+    - orphaned-array-item
+  purpose: lol
+---
+
+body
+EOF
+  run bash "$SCRIPT" extract "$malformed"
+  [ "$status" -eq 2 ]
+  echo "$output" | grep -qE '^MALFORMED:.*array item without parent key'
+}
+
+@test "extract markdown: malformed yaml — unrecognized shape under manifest: (AC-3)" {
+  malformed="$BATS_TEST_TMPDIR/bad-shape.md"
+  # Tab-indent is not 2-space scalar nor 4-space array — must reject.
+  printf -- '---\nmanifest:\n\tnot-2-space-key: bad\n---\n\nbody\n' > "$malformed"
+  run bash "$SCRIPT" extract "$malformed"
+  [ "$status" -eq 2 ]
+  echo "$output" | grep -qE '^MALFORMED:.*unrecognized shape'
 }
 
 @test "extract markdown: explicit id: in manifest body overrides basename" {

@@ -455,7 +455,7 @@ cmd_validate() {
     else
       path="$entry"
       # BTS-240: extension-agnostic basename (handles .sh AND .md).
-      _vext="${path##*.}"
+      local _vext="${path##*.}"
       id="$(basename "$path" ".${_vext}")"
     fi
 
@@ -629,6 +629,23 @@ _maybe_regenerate_index() {
   for d in "${src_dirs[@]}"; do
     [[ ! -d "$d" ]] && continue
     for f in "$d"/*.sh; do
+      [[ ! -f "$f" ]] && continue
+      m=$(_file_mtime "$f")
+      if [[ "$m" -gt "$newest" ]]; then newest="$m"; fi
+    done
+  done
+
+  # BTS-240: also watch markdown source dirs so a manifest edit in
+  # .claude/skills/<n>/SKILL.md triggers index regeneration on next query.
+  local md_globs=(
+    ".claude/skills/*/SKILL.md"
+    ".claude/rules/*.md"
+    ".claude/agents/*.md"
+    ".claude/commands/*.md"
+  )
+  local g
+  for g in "${md_globs[@]}"; do
+    for f in $g; do
       [[ ! -f "$f" ]] && continue
       m=$(_file_mtime "$f")
       if [[ "$m" -gt "$newest" ]]; then newest="$m"; fi

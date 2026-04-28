@@ -22,13 +22,12 @@ setup() {
   echo "$manifest" | jq -e '.anchor | type == "array" and length > 0'
 }
 
-@test "seed/cmd_artifact_write: validate exits 0 with allowlist containing only this entry" {
+@test "seed/cmd_artifact_write: validate exits 0 against project allowlist" {
   set -e
   cd "$REPO_ROOT"
   run bash "$SCRIPT" validate --json
   [ "$status" -eq 0 ]
-  echo "$output" | jq -e '.coverage.covered == 1'
-  echo "$output" | jq -e '.coverage.total == 1'
+  echo "$output" | jq -e '.coverage.covered >= 1'
   echo "$output" | jq -e '.status == "ok"'
 }
 
@@ -38,9 +37,8 @@ setup() {
   manifest=$(echo "$output" | jq -c '.[] | select(.id == "cmd_artifact_write")')
   callers=$(echo "$manifest" | jq -r '.caller[]')
   [ -n "$callers" ]
-  # If validate already exited 0 (preceding test), every caller is verified.
   cd "$REPO_ROOT"
-  bash "$SCRIPT" validate --json | jq -e '.coverage.covered == 1'
+  bash "$SCRIPT" validate --json | jq -e '.coverage.covered >= 1'
 }
 
 @test "seed/cmd_artifact_write: failure-mode markers exist in body" {

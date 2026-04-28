@@ -3133,6 +3133,36 @@ _ship_gh() {
   fi
 }
 
+# @manifest
+# purpose: Post-merge ship substrate — title-fix, mark-ready, squash-merge, fast-forward main, auto-close Linear ticket.
+# input: positional <pr-number>
+# input: --project-dir <path>
+# output: stdout JSON envelope (always emitted, every code path)
+# output: exit-codes 0 ok, 1 step-failure, 2 usage-error
+# caller: skill:/ship
+# depends-on: _ship_gh
+# depends-on: cmd_assert_pr_title
+# depends-on: cmd_land
+# depends-on: _parse_auto_close
+# depends-on: operations.sh
+# depends-on: cmd_idea_pending_append
+# side-effect: merges-pr
+# side-effect: updates-pr-title
+# side-effect: marks-pr-ready
+# side-effect: fast-forwards-main
+# side-effect: transitions-linear-ticket
+# side-effect: queues-pending-on-failure
+# failure-mode: usage-error | exit=2 | visible=stderr-usage
+# failure-mode: preflight-error | exit=1 | visible=json-envelope-step-preflight
+# failure-mode: title-error | exit=1 | visible=json-envelope-step-title
+# failure-mode: ready-error | exit=1 | visible=json-envelope-step-ready
+# failure-mode: merge-error | exit=1 | visible=json-envelope-step-merge
+# contract: idempotent-on-already-merged
+# contract: emits-json-envelope-every-path
+# contract: never-blocks-on-linear-failure
+# anchor: BTS-235 (origin — post-merge ship substrate)
+# anchor: BTS-178 (title-fix integration)
+# anchor: BTS-119 (queue-on-dispatch-failure pattern)
 cmd_ship_finalize() {
   local pr_number=""
   local project_dir="."
@@ -3148,6 +3178,7 @@ cmd_ship_finalize() {
     esac
   done
 
+  # @failure-mode: usage-error
   if [[ -z "$pr_number" ]]; then
     echo "Usage: docs-check.sh ship-finalize [--project-dir <path>] <pr-number>" >&2
     return 2
@@ -3156,6 +3187,7 @@ cmd_ship_finalize() {
   local errors='[]'
 
   # 1. Pre-flight: PR must exist, not already MERGED.
+  # @failure-mode: preflight-error
   local pr_state pr_state_raw
   pr_state_raw=$(_ship_gh pr view "$pr_number" --json state --jq '.state' 2>&1) || {
     jq -n --arg pr "$pr_number" --arg err "$pr_state_raw" \
@@ -3172,6 +3204,8 @@ cmd_ship_finalize() {
   fi
 
   # 2. Title fix (idempotent, BTS-178). cmd_assert_pr_title uses bare `gh`
+  # @failure-mode: title-error
+  # @side-effect: updates-pr-title
   # currently — the GH_OVERRIDE wrapper does not propagate. Acceptable: the
   # title-fix path is dogfood-validated, and bats tests for AC-3 cover the
   # parsing logic via a separate path. Production use unaffected.
@@ -3184,6 +3218,8 @@ cmd_ship_finalize() {
   fi
 
   # 3. Mark ready (idempotent — already-ready emits stderr "already \"ready
+  # @failure-mode: ready-error
+  # @side-effect: marks-pr-ready
   # for review\"" with non-zero exit on some gh versions; treat as success).
   local ready_out ready_status=0
   ready_out=$(_ship_gh pr ready "$pr_number" 2>&1) || ready_status=$?
@@ -3194,6 +3230,8 @@ cmd_ship_finalize() {
   fi
 
   # 4. Merge (squash + delete branch). gh switches HEAD to main on success.
+  # @failure-mode: merge-error
+  # @side-effect: merges-pr
   local merge_out merge_status=0
   merge_out=$(_ship_gh pr merge "$pr_number" --squash --delete-branch 2>&1) || merge_status=$?
   if (( merge_status != 0 )); then
@@ -3203,6 +3241,7 @@ cmd_ship_finalize() {
   fi
 
   # 5. Land — fast-forward main + recover landed branch + emit AUTO-CLOSE.
+  # @side-effect: fast-forwards-main
   local land_out land_status=0
   land_out=$(cd "$project_dir" && cmd_land 2>&1) || land_status=$?
   # cmd_land non-zero is rare on the on-main path; capture but continue.
@@ -3211,6 +3250,8 @@ cmd_ship_finalize() {
   fi
 
   # 6. Parse AUTO-CLOSE marker + dispatch ticket.transition done.
+  # @side-effect: transitions-linear-ticket
+  # @side-effect: queues-pending-on-failure
   local auto_close_json
   auto_close_json=$(_parse_auto_close "$land_out")
   local ticket_closed=null

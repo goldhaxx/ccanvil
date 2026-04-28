@@ -9,3 +9,4 @@
 # a complete `# @manifest` block will fail CI.
 
 .ccanvil/scripts/docs-check.sh:cmd_artifact_write
+.ccanvil/scripts/docs-check.sh:cmd_ship_finalize

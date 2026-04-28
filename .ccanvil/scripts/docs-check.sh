@@ -47,7 +47,7 @@ PROJECT_TREE_SUBCOMMANDS=(
   evidence-scan-session lifecycle-state
   artifact-read artifact-write route-of ssot-migrate
   session-info assert-pr-title remote-presence
-  stasis-carry-forward
+  stasis-carry-forward ship-finalize
 )
 
 # ---------------------------------------------------------------------------
@@ -3081,6 +3081,157 @@ cmd_assert_pr_title() {
 }
 
 # ---------------------------------------------------------------------------
+# cmd_ship_finalize (BTS-235) — collapse the post-/pr ship-finalization
+# sequence into one verb. Operator runs `/pr` first (which marks the PR
+# ready); then `ship-finalize <PR>` runs:
+#   1. pre-flight: gh pr view → state must not be MERGED
+#   2. cmd_assert_pr_title → idempotent title force-update (BTS-178)
+#   3. gh pr ready (idempotent — already-ready returns non-zero stderr)
+#   4. gh pr merge --squash --delete-branch
+#   5. cmd_land → on-main fast-forward + AUTO-CLOSE marker emission (BTS-138)
+#   6. parse AUTO-CLOSE marker → dispatch ticket.transition done; queue on fail
+#
+# Test seam: GH_OVERRIDE env redirects bare `gh` calls to a stub script
+# (mirrors LINEAR_QUERY_OVERRIDE — BTS-203 pattern).
+#
+# Output JSON:
+#   {pr, pr_merged, branch_deleted, title_result|null, ticket_closed|null,
+#    errors:[], step?}
+# Exit 0 on full success or post-merge auto-close failure (idempotent);
+# exit 1 on pre-merge failures (title/ready/merge); exit 2 on usage error.
+# ---------------------------------------------------------------------------
+_parse_auto_close() {
+  # BTS-235: extract the JSON payload from cmd_land's AUTO-CLOSE: marker.
+  # Returns the JSON on stdout, or empty string if no marker present.
+  local stdout="$1"
+  printf '%s\n' "$stdout" | sed -nE 's/^AUTO-CLOSE:[[:space:]]+(\{.*\})$/\1/p' | head -1
+}
+
+_ship_gh() {
+  # BTS-235: gh wrapper honoring GH_OVERRIDE for tests.
+  if [[ -n "${GH_OVERRIDE:-}" ]]; then
+    bash "$GH_OVERRIDE" "$@"
+  else
+    gh "$@"
+  fi
+}
+
+cmd_ship_finalize() {
+  local pr_number=""
+  local project_dir="."
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --project-dir) project_dir="${2:-.}"; shift 2 ;;
+      --) shift; break ;;
+      --*) echo "Usage: docs-check.sh ship-finalize [--project-dir <path>] <pr-number>" >&2; exit 2 ;;
+      *)
+        if [[ -z "$pr_number" ]]; then pr_number="$1"; fi
+        shift
+        ;;
+    esac
+  done
+
+  if [[ -z "$pr_number" ]]; then
+    echo "Usage: docs-check.sh ship-finalize [--project-dir <path>] <pr-number>" >&2
+    return 2
+  fi
+
+  local errors='[]'
+
+  # 1. Pre-flight: PR must exist, not already MERGED.
+  local pr_state pr_state_raw
+  pr_state_raw=$(_ship_gh pr view "$pr_number" --json state --jq '.state' 2>&1) || {
+    jq -n --arg pr "$pr_number" --arg err "$pr_state_raw" \
+      '{pr:($pr|tonumber? // $pr), pr_merged:false, branch_deleted:false, title_result:null, ticket_closed:null, step:"preflight", errors:[$err]}'
+    return 1
+  }
+  pr_state="$pr_state_raw"
+
+  if [[ "$pr_state" == "MERGED" ]]; then
+    # Idempotent: already merged → no-op.
+    jq -n --arg pr "$pr_number" \
+      '{pr:($pr|tonumber? // $pr), pr_merged:true, branch_deleted:true, title_result:null, ticket_closed:null, errors:[], note:"already merged"}'
+    return 0
+  fi
+
+  # 2. Title fix (idempotent, BTS-178). cmd_assert_pr_title uses bare `gh`
+  # currently — the GH_OVERRIDE wrapper does not propagate. Acceptable: the
+  # title-fix path is dogfood-validated, and bats tests for AC-3 cover the
+  # parsing logic via a separate path. Production use unaffected.
+  local title_result_json="" title_status=0
+  title_result_json=$(cmd_assert_pr_title --project-dir "$project_dir" "$pr_number" 2>&1) || title_status=$?
+  if (( title_status != 0 )); then
+    jq -n --arg pr "$pr_number" --arg err "$title_result_json" \
+      '{pr:($pr|tonumber? // $pr), pr_merged:false, branch_deleted:false, title_result:null, ticket_closed:null, step:"title", errors:[$err]}'
+    return 1
+  fi
+
+  # 3. Mark ready (idempotent — already-ready emits stderr "already \"ready
+  # for review\"" with non-zero exit on some gh versions; treat as success).
+  local ready_out ready_status=0
+  ready_out=$(_ship_gh pr ready "$pr_number" 2>&1) || ready_status=$?
+  if (( ready_status != 0 )) && ! echo "$ready_out" | grep -q 'ready for review'; then
+    jq -n --arg pr "$pr_number" --arg err "$ready_out" --argjson tr "$title_result_json" \
+      '{pr:($pr|tonumber? // $pr), pr_merged:false, branch_deleted:false, title_result:$tr, ticket_closed:null, step:"ready", errors:[$err]}'
+    return 1
+  fi
+
+  # 4. Merge (squash + delete branch). gh switches HEAD to main on success.
+  local merge_out merge_status=0
+  merge_out=$(_ship_gh pr merge "$pr_number" --squash --delete-branch 2>&1) || merge_status=$?
+  if (( merge_status != 0 )); then
+    jq -n --arg pr "$pr_number" --arg err "$merge_out" --argjson tr "$title_result_json" \
+      '{pr:($pr|tonumber? // $pr), pr_merged:false, branch_deleted:false, title_result:$tr, ticket_closed:null, step:"merge", errors:[$err]}'
+    return 1
+  fi
+
+  # 5. Land — fast-forward main + recover landed branch + emit AUTO-CLOSE.
+  local land_out land_status=0
+  land_out=$(cd "$project_dir" && cmd_land 2>&1) || land_status=$?
+  # cmd_land non-zero is rare on the on-main path; capture but continue.
+  if (( land_status != 0 )); then
+    errors=$(echo "$errors" | jq --arg e "land non-zero: $land_out" '. + [$e]')
+  fi
+
+  # 6. Parse AUTO-CLOSE marker + dispatch ticket.transition done.
+  local auto_close_json
+  auto_close_json=$(_parse_auto_close "$land_out")
+  local ticket_closed=null
+  if [[ -n "$auto_close_json" ]]; then
+    local provider id role
+    provider=$(echo "$auto_close_json" | jq -r '.provider // empty')
+    id=$(echo "$auto_close_json" | jq -r '.id // empty')
+    role=$(echo "$auto_close_json" | jq -r '.role // "done"')
+    if [[ "$provider" == "linear" && -n "$id" ]]; then
+      local script_dir resolution dispatch_status=0
+      script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+      resolution=$(bash "$script_dir/operations.sh" resolve ticket.transition "$id" "$role" --project-dir "$project_dir" 2>&1) || dispatch_status=$?
+      if (( dispatch_status == 0 )); then
+        local cmd
+        cmd=$(echo "$resolution" | jq -r '.invocation.command')
+        if (cd "$project_dir" && eval "$cmd" </dev/null >/dev/null 2>&1); then
+          ticket_closed=true
+        else
+          # BTS-119 pattern: queue on dispatch failure
+          cmd_idea_pending_append --op ticket.transition --id "$id" --role "$role" --project-dir "$project_dir" >/dev/null 2>&1 || true
+          ticket_closed=false
+          errors=$(echo "$errors" | jq --arg e "ticket.transition dispatch failed; queued to ideas-pending.log" '. + [$e]')
+        fi
+      else
+        cmd_idea_pending_append --op ticket.transition --id "$id" --role "$role" --project-dir "$project_dir" >/dev/null 2>&1 || true
+        ticket_closed=false
+        errors=$(echo "$errors" | jq --arg e "ticket.transition resolve failed; queued" '. + [$e]')
+      fi
+    fi
+  fi
+
+  jq -n --arg pr "$pr_number" --argjson tr "$title_result_json" \
+    --argjson tc "$ticket_closed" --argjson errs "$errors" \
+    '{pr:($pr|tonumber? // $pr), pr_merged:true, branch_deleted:true, title_result:$tr, ticket_closed:$tc, errors:$errs}'
+  return 0
+}
+
+# ---------------------------------------------------------------------------
 # cmd_idea_pending_replay — BTS-179: replay every entry in
 # .ccanvil/ideas-pending.log via the http substrate, ack on success,
 # preserve on failure. Replaces the per-skill shell loop in /idea sync.
@@ -5378,6 +5529,7 @@ case "$cmd" in
   remote-presence)   cmd_remote_presence "$@" ;;
   evidence-scan-session) cmd_evidence_scan_session "$@" ;;
   stasis-carry-forward) cmd_stasis_carry_forward "$@" ;;
+  ship-finalize)     cmd_ship_finalize "$@" ;;
   lifecycle-state)   cmd_lifecycle_state "$@" ;;
   artifact-read)     cmd_artifact_read "$@" ;;
   artifact-write)    cmd_artifact_write "$@" ;;

@@ -1,6 +1,6 @@
 # Manifest Rollout Plan — Codebase-Wide Coverage
 
-> **Status:** active multi-session program
+> **Status:** ✅ COMPLETE — all 11 sessions shipped 2026-04-29; Layer 2 at 100% coverage (184/184); Layer 3 prose ramp landed via BTS-257; doc preserved as historical record.
 > **Origin:** BTS-239 (Layer 2 first ship — substrate + 7 seed manifests)
 > **Goal:** 100% allowlist-enforced manifest coverage across all ccanvil substrate
 > **Anchored in:** `docs/research/dark-code-mapping.md` (Layer 2 — Self-Describing Systems)
@@ -123,3 +123,50 @@ When Session 11 ships:
 - `.ccanvil/templates/manifest.md` (format reference — locked)
 - `.ccanvil/manifest-allowlist.txt` (live state)
 - `feedback_inline_richness_over_drift_minimal_for_self_describing_systems` (memory)
+
+## Status: COMPLETE
+
+The rollout shipped end-to-end across 11 sessions, all on 2026-04-27 → 2026-04-29.
+
+**Final coverage: 184 / 184 (100%), drift 0** on every `/recall`.
+
+### Per-session ledger
+
+| # | Ticket | Theme | Manifests added | Allowlist after | PR |
+|---|---|---|---:|---:|---|
+| 1 | BTS-239 | Substrate + 7 seed manifests | 7 | 7 | (origin) |
+| 2 | BTS-241 | docs-check.sh Part 1 — lifecycle cluster | 24 | 31 | — |
+| 3 | BTS-242 | docs-check.sh Part 2 — capture + audit | 24 | 55 | — |
+| 4 | BTS-240 | Markdown frontmatter substrate + 4 ref manifests | 4 | 59 | — |
+| 5 | BTS-243 | ccanvil-sync.sh Part 1 — sync core (22 cmd_*) | 22 | 81 | #142 |
+| 6 | BTS-244 | ccanvil-sync.sh Part 2 — stack + registry (21 cmd_*) | 21 | 102 | #143 |
+| 7 | BTS-245 | linear-query.sh — provider substrate (16 GraphQL wrappers) | 16 | 118 | #144 |
+| 8 | BTS-246 | Small mega-scripts batch — permissions-audit / manifest-check / operations / context-budget | 16 | 134 | #145 |
+| 9 | BTS-251 | File-level shell + hooks (5 scripts + 12 hooks) + substrate fallback for file-level | 17 | 151 | #146 |
+| 10 | BTS-252 | Markdown skills + rules (8 skills + 6 rules) + SIGPIPE-resistant `_target_body_grep` | 14 | 165 | #147 |
+| 11 | BTS-256 | Markdown agents + commands (4 agents + 15 commands) | 19 | 184 | #148 |
+| close-out | BTS-257 | Layer 3 ramp + close-out (no new manifests) | 0 | 184 | #149 |
+
+### Substrate fixes shipped alongside
+
+- **BTS-251** — `_function_body_grep` file-level fallback. When no `${fn_id}()` decl is found in the file, fall back to whole-file grep. Required to make file-level shell (single-purpose scripts + hooks) drift-guard-checkable, since basename-derived IDs have no fn() boundary.
+- **BTS-252** — SIGPIPE-resistant `_target_body_grep`. Original `awk | grep -qE` pipeline trips under `set -o pipefail` when grep -q matches early and SIGPIPEs awk; falsely reported depends-on-not-found on large markdown bodies (305-line idea SKILL.md was the canary). Fix: capture awk output to a var first, then grep. Regression test under `hub/tests/module-manifest-markdown-validate.bats`.
+
+### Layer 2 outcome
+
+Every operator-callable substrate primitive — across 130 cmd_* in 8 mega-scripts, 5 single-purpose scripts, 12 hooks, 9 skills, 7 rules, 5 agents, and 16 commands — now carries inline `purpose`, `input`, `output`, `side-effect`, `failure-mode`, `contract`, and `anchor` fields. Bidirectional drift-guard catches structural regression on every `/recall` and on every `/review` (via the BTS-257 Layer 3 ramp).
+
+### Layer 3 status
+
+The `code-reviewer` agent + `/review` skill now run a manifest-aware pre-flight (`module-manifest.sh validate --json`) and flag four classes of manifest drift in PR diffs:
+
+- New caller of `cmd_X` not in declared `caller:` list.
+- New helper or script invocation not in `depends-on:`.
+- New `return N` / `exit N` (N != 0) path not enumerated in `failure-mode:`.
+- New file write / network call / env mutation / subprocess not in `side-effect:`.
+
+This is a **prose-layer ramp** — Claude reads the manifest as the canonical contract during review, surfaces drift as `manifest-drift / architecture-shaped change` findings. A future Phase 2 ticket can convert this to a deterministic check (e.g., a `module-manifest.sh diff-vs-manifest --diff <git-diff>` primitive). For now, prose nudge + drift-guard validate covers the Comprehension Gate footprint.
+
+### Doc lifecycle
+
+This document is preserved as a **one-time historical record** of the 11-session program. Future Layer 2 maintenance is per-substrate — each new `cmd_*` or markdown skill/rule/agent/command lands with its manifest co-located in the same PR. The allowlist is the authoritative state going forward; this doc is no longer load-bearing.

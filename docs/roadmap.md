@@ -52,13 +52,25 @@ A separate, durable measure of system maturity: **opening the project shows tria
 
 ## Up Next — Dark Code Phase 1
 
-1. **Research lap** — read the Nate B Jones video transcript end-to-end. Map the three layers to ccanvil's current shape (questions in the Active Theme block above). Output: a research note in `docs/research/dark-code-mapping.md` (or similar) with one section per layer, current-state assessment, and proposed first-ship scope.
+✅ **Phase 1 SHIPPED — 2026-04-29.** All 11 sessions of the manifest rollout merged. Layer 2 at 100% coverage (184/184), drift 0; Layer 3 prose ramp landed via BTS-257. Doc preserved at `docs/manifest-rollout.md` as historical record.
 
-2. **Spec the first ship** — likely Layer 2 (Self-Describing Systems / module manifests). Open question: does the manifest live in-source as a comment block, in a sibling `.manifest.yaml`, in the ccanvil substrate metadata, or somewhere else? Research lap should answer.
+**Original Phase 1 plan preserved below for context.**
 
-3. **Implement the first ship** — manifest format + parser/validator + manifests for ~3 substrate primitives as the seed examples (likely cmd_artifact_write, cmd_ship_finalize, cmd_idea_pending_replay — the three that exercise the most contracts).
+1. **Research lap** ✅ — `docs/research/dark-code-mapping.md` shipped with three-layer mapping + current-state assessment.
 
-4. **Soak observation** — track new-capture cadence as Dark Code ships land. If captures stay <2/week, stabilization held and Dark Code's substrate growth is offset by its disconnection-prevention value. If captures spike, pause and re-stabilize.
+2. **Spec the first ship** ✅ — BTS-239 specced and shipped: in-source `# @manifest` comment block above each `cmd_*` (Option A from the research). Markdown frontmatter `manifest:` block for skills/rules/agents/commands (BTS-240).
+
+3. **Implement the first ship** ✅ — BTS-239 substrate (`module-manifest.sh` with extract / validate / query / index verbs) + 7 seed manifests. Subsequent 10 sessions extended coverage to 184/184.
+
+4. **Soak observation** ✅ — captures stayed <2/week throughout the rollout. Stabilization held; Dark Code's substrate growth was offset by its disconnection-prevention value as planned.
+
+### Phase 2 candidates (not yet committed)
+
+- **Layer 3 deterministic ramp** — convert the BTS-257 prose nudge to a deterministic check primitive (`module-manifest.sh diff-vs-manifest --diff <git-diff>`) so PR drift findings ride as machine-readable JSON rather than agent prose. ~55% → fully structural.
+- **Manifest-driven query helpers** — `module-manifest.sh query --by-caller <fn>` / `--by-side-effect <type>` to power `/recall` cold-start surfaces ("everything that writes to disk", "everything that calls Linear").
+- **Cross-substrate cohesion graph** — graph view of which manifests reference which others (callers + depends-on edges). Visualizable; useful for `/radar` strategic briefings.
+
+These are candidates only — operator decides whether to commit Phase 2 or rotate themes after Phase 1 closes.
 
 ## Next Theme — Direction (not yet committed)
 

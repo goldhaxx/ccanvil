@@ -172,3 +172,11 @@
 .ccanvil/scripts/permissions-audit.sh:cmd_apply
 .ccanvil/scripts/permissions-audit.sh:cmd_decision_append
 .ccanvil/scripts/permissions-audit.sh:cmd_entry_context
+# Batch 2 — manifest-check.sh.
+.ccanvil/scripts/manifest-check.sh:cmd_parse
+.ccanvil/scripts/manifest-check.sh:cmd_check_existence
+.ccanvil/scripts/manifest-check.sh:cmd_init
+.ccanvil/scripts/manifest-check.sh:cmd_hash_check
+.ccanvil/scripts/manifest-check.sh:cmd_extract_identity
+.ccanvil/scripts/manifest-check.sh:cmd_check
+.ccanvil/scripts/manifest-check.sh:cmd_verify

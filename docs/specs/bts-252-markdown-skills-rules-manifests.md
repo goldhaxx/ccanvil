@@ -4,7 +4,7 @@
 > Work: linear:BTS-252
 > Created: 1777482665
 > Subject: Markdown skills + rules manifests
-> Status: In Progress
+> Status: Complete
 
 ## Summary
 

@@ -148,3 +148,7 @@
 .ccanvil/scripts/linear-query.sh:cmd_list_states
 .ccanvil/scripts/linear-query.sh:cmd_list_labels
 .ccanvil/scripts/linear-query.sh:cmd_list_teams
+# Batch 2 — issue ops + project/doc listings.
+.ccanvil/scripts/linear-query.sh:cmd_get_issue
+.ccanvil/scripts/linear-query.sh:cmd_list_projects
+.ccanvil/scripts/linear-query.sh:cmd_list_documents

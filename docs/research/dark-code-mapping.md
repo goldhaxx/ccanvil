@@ -59,7 +59,13 @@ ccanvil already enforces:
 
 ### Layer 2 — Self-Describing Systems
 
-**Coverage: ~10% — biggest gap.**
+**Coverage: 100% — fully shipped 2026-04-29 (BTS-239 → BTS-256).**
+
+Original assessment (~10% coverage) is preserved below for historical reference. The 11-session rollout (`docs/manifest-rollout.md`) shipped the substrate (BTS-239), markdown frontmatter parser (BTS-240), file-level shell fallback (BTS-251), SIGPIPE-resistant body grep (BTS-252), and 184 manifests across every operator-callable substrate primitive. Bidirectional drift-guard (caller / depends-on / failure-mode / side-effect markers) catches regressions structurally on every `/recall` and `/review`.
+
+**What follows is the original assessment — kept verbatim for context.**
+
+**Coverage: ~10% — biggest gap.** *(Historical — superseded by the 100% shipment above.)*
 
 ccanvil substrate is dense (~51 `cmd_*` primitives in `docs-check.sh` alone) and currently *describes itself only through prose in scripts, skill markdown, and rules files*. Any of these:
 
@@ -81,7 +87,15 @@ Each of these has been hard-won — multiple sessions spent uncovering them via 
 
 ### Layer 3 — Comprehension Gate
 
-**Coverage: ~40% — partial.**
+**Coverage: ~55% — Layer 3 prose ramp landed in BTS-257 (2026-04-29). Original ~40% assessment preserved below for context.**
+
+The BTS-257 ramp augmented the `code-reviewer` agent + `/review` skill with manifest-aware drift checks: every PR review runs `module-manifest.sh validate` as a pre-flight and Claude flags four classes of architecture-shaped change (new caller / new dep / new failure-mode / new side-effect not declared in the touched manifest). This is a prose-layer ramp — the Comprehension Gate now reads manifests as the canonical contract for review.
+
+**Phase 2 (to ramp Layer 3 from ~55% to fully structural):** convert the prose nudge to a deterministic check primitive (e.g., `module-manifest.sh diff-vs-manifest --diff <git-diff>`) so drift findings ride as machine-readable JSON rather than agent prose. Tracked as a future ticket; not blocking.
+
+**Original assessment follows verbatim.**
+
+**Coverage: ~40% — partial.** *(Historical — superseded by the ramp above.)*
 
 ccanvil already has:
 - `code-reviewer` agent (`/review` skill, also gated by `pr_review` config in `.claude/ccanvil.json`) — runs file-level checks for correctness/security/conventions.

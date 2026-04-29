@@ -172,13 +172,56 @@ _post_graphql() {
 # Subcommand stubs (filled in by later steps in the BTS-164 plan)
 # -----------------------------------------------------------------------------
 
+# @manifest
+# purpose: Wrap the Linear GraphQL `viewer` query — used by /drift-watchdog preflight and operator smoke tests to verify LINEAR_API_KEY auth without side effects
+# input: env LINEAR_API_KEY
+# output: stdout JSON {id, name}
+# output: exit-codes 0 ok, 2 missing-api-key, 3 graphql-or-http-error
+# caller: cmd_drift_watchdog_preflight
+# depends-on: jq
+# depends-on: _require_api_key
+# depends-on: _post_graphql
+# side-effect: reads-env-LINEAR_API_KEY
+# side-effect: makes-graphql-http-call
+# failure-mode: missing-api-key | exit=2 | visible=stderr-LINEAR_API_KEY-not-set | mitigation=set-LINEAR_API_KEY-or-add-to-env
+# failure-mode: graphql-or-http-error | exit=3 | visible=stderr-linear-query-GraphQL-error-or-HTTP-request-failed | mitigation=verify-network-and-key-validity
+# contract: read-only-no-mutations
+# anchor: BTS-245 (manifest seed)
 cmd_viewer() {
+  # @failure-mode: missing-api-key
+  # @side-effect: reads-env-LINEAR_API_KEY
   _require_api_key
   local query='query { viewer { id name } }'
+  # @failure-mode: graphql-or-http-error
+  # @side-effect: makes-graphql-http-call
   _post_graphql "$query" | jq '.viewer'
 }
 
+# @manifest
+# purpose: Wrap the Linear GraphQL `issues` query with a composable IssueFilter (project/team/state/label/limit) — auto-detects UUID-shaped --state values and filters by state.id.eq vs state.type.eq so callers can use either form symmetrically
+# input: --project <name>
+# input: --team <name>
+# input: --state <type-or-uuid>
+# input: --label <name>
+# input: --limit <int>
+# input: env LINEAR_API_KEY
+# output: stdout JSON array [{id, title, status, statusType, priority, createdAt, updatedAt, labels[]}]
+# output: exit-codes 0 ok, 2 missing-api-key-or-unknown-flag, 3 graphql-or-http-error
+# depends-on: jq
+# depends-on: _require_api_key
+# depends-on: _post_graphql
+# depends-on: _die
+# side-effect: reads-env-LINEAR_API_KEY
+# side-effect: makes-graphql-http-call
+# failure-mode: missing-api-key | exit=2 | visible=stderr-LINEAR_API_KEY-not-set | mitigation=set-LINEAR_API_KEY
+# failure-mode: unknown-flag | exit=2 | visible=stderr-list-issues-unknown-flag | mitigation=use-documented-flag-name
+# failure-mode: graphql-or-http-error | exit=3 | visible=stderr-linear-query-GraphQL-error-or-HTTP-request-failed | mitigation=verify-filter-shape-and-key
+# contract: emits-empty-array-when-no-matches
+# contract: filter-uuid-state-by-id-eq-non-uuid-by-type-eq
+# anchor: BTS-245 (manifest seed)
 cmd_list_issues() {
+  # @failure-mode: missing-api-key
+  # @side-effect: reads-env-LINEAR_API_KEY
   _require_api_key
 
   local project="" team="" state="" label="" limit="50"
@@ -189,6 +232,7 @@ cmd_list_issues() {
       --state)   state="$2";   shift 2 ;;
       --label)   label="$2";   shift 2 ;;
       --limit)   limit="$2";   shift 2 ;;
+      # @failure-mode: unknown-flag
       *) _die 2 "list-issues: unknown flag: $1" ;;
     esac
   done
@@ -231,6 +275,8 @@ cmd_list_issues() {
     }
   }'
 
+  # @failure-mode: graphql-or-http-error
+  # @side-effect: makes-graphql-http-call
   _post_graphql "$query" "$variables" | jq '[.issues.nodes[] | {
     id: .identifier,
     title: .title,
@@ -275,12 +321,32 @@ cmd_get_issue() {
   }'
 }
 
+# @manifest
+# purpose: Wrap the Linear GraphQL `workflowStates` query — emits {id, name, type} per state for a given team so operations.sh ticket.transition resolvers can map role names to state UUIDs at config time
+# input: --team <name>
+# input: env LINEAR_API_KEY
+# output: stdout JSON array [{id, name, type}]
+# output: exit-codes 0 ok, 2 missing-api-key-or-unknown-flag, 3 graphql-or-http-error
+# depends-on: jq
+# depends-on: _require_api_key
+# depends-on: _post_graphql
+# depends-on: _die
+# side-effect: reads-env-LINEAR_API_KEY
+# side-effect: makes-graphql-http-call
+# failure-mode: missing-api-key | exit=2 | visible=stderr-LINEAR_API_KEY-not-set | mitigation=set-LINEAR_API_KEY
+# failure-mode: unknown-flag | exit=2 | visible=stderr-list-states-unknown-flag | mitigation=use-documented-flag-name
+# failure-mode: graphql-or-http-error | exit=3 | visible=stderr-linear-query-GraphQL-error | mitigation=verify-team-name-and-key
+# contract: emits-empty-array-when-no-matches
+# anchor: BTS-245 (manifest seed)
 cmd_list_states() {
+  # @failure-mode: missing-api-key
+  # @side-effect: reads-env-LINEAR_API_KEY
   _require_api_key
   local team=""
   while [[ $# -gt 0 ]]; do
     case "$1" in
       --team) team="$2"; shift 2 ;;
+      # @failure-mode: unknown-flag
       *) _die 2 "list-states: unknown flag: $1" ;;
     esac
   done
@@ -299,10 +365,35 @@ cmd_list_states() {
     }
   }'
 
+  # @failure-mode: graphql-or-http-error
+  # @side-effect: makes-graphql-http-call
   _post_graphql "$query" "$variables" | jq '[.workflowStates.nodes[] | {id, name, type}]'
 }
 
+# @manifest
+# purpose: Wrap the Linear GraphQL `issueLabels` query with optional team scoping (--team name, --team-id UUID, or --workspace-scoped for null-team labels) — used by save-issue label-resolution and BTS-170's workspace-vs-team label disambiguation
+# input: --team <name>
+# input: --team-id <uuid>
+# input: --workspace-scoped (mutually exclusive with --team / --team-id)
+# input: env LINEAR_API_KEY
+# output: stdout JSON array [{id, name}]
+# output: exit-codes 0 ok, 2 missing-api-key-or-unknown-flag-or-mutex-violation, 3 graphql-or-http-error
+# depends-on: jq
+# depends-on: _require_api_key
+# depends-on: _post_graphql
+# depends-on: _die
+# side-effect: reads-env-LINEAR_API_KEY
+# side-effect: makes-graphql-http-call
+# failure-mode: missing-api-key | exit=2 | visible=stderr-LINEAR_API_KEY-not-set | mitigation=set-LINEAR_API_KEY
+# failure-mode: unknown-flag | exit=2 | visible=stderr-list-labels-unknown-flag | mitigation=use-documented-flag-name
+# failure-mode: workspace-team-mutex | exit=2 | visible=stderr-workspace-scoped-is-mutually-exclusive | mitigation=pick-one-scoping-mode
+# failure-mode: graphql-or-http-error | exit=3 | visible=stderr-linear-query-GraphQL-error | mitigation=verify-filter-shape-and-key
+# contract: --team-id-wins-over-team-when-both-present
+# contract: workspace-scoped-uses-null-team-direct-boolean
+# anchor: BTS-245 (manifest seed)
 cmd_list_labels() {
+  # @failure-mode: missing-api-key
+  # @side-effect: reads-env-LINEAR_API_KEY
   _require_api_key
   local team="" team_id="" workspace_scoped=false
   while [[ $# -gt 0 ]]; do
@@ -310,6 +401,7 @@ cmd_list_labels() {
       --team)             team="$2";    shift 2 ;;
       --team-id)          team_id="$2"; shift 2 ;;
       --workspace-scoped) workspace_scoped=true; shift ;;
+      # @failure-mode: unknown-flag
       *) _die 2 "list-labels: unknown flag: $1" ;;
     esac
   done
@@ -317,6 +409,7 @@ cmd_list_labels() {
   # BTS-170: --workspace-scoped is mutually exclusive with team scoping —
   # workspace-scoped means "no team filter," not "team filter AND null."
   if $workspace_scoped && [[ -n "$team_id" || -n "$team" ]]; then
+    # @failure-mode: workspace-team-mutex
     _die 2 "list-labels: --workspace-scoped is mutually exclusive with --team / --team-id"
   fi
 
@@ -346,6 +439,8 @@ cmd_list_labels() {
     }
   }'
 
+  # @failure-mode: graphql-or-http-error
+  # @side-effect: makes-graphql-http-call
   _post_graphql "$query" "$variables" | jq '[.issueLabels.nodes[] | {id, name}]'
 }
 
@@ -353,12 +448,32 @@ cmd_list_labels() {
 # team and project. Both follow the same shape as list-labels: optional
 # --name filter, returns [{id, name}].
 
+# @manifest
+# purpose: Wrap the Linear GraphQL `teams` query with optional --name filter — emits {id, name, key} per team so save-issue can resolve team names to UUIDs without a name-lookup roundtrip per call
+# input: --name <name>
+# input: env LINEAR_API_KEY
+# output: stdout JSON array [{id, name, key}]
+# output: exit-codes 0 ok, 2 missing-api-key-or-unknown-flag, 3 graphql-or-http-error
+# depends-on: jq
+# depends-on: _require_api_key
+# depends-on: _post_graphql
+# depends-on: _die
+# side-effect: reads-env-LINEAR_API_KEY
+# side-effect: makes-graphql-http-call
+# failure-mode: missing-api-key | exit=2 | visible=stderr-LINEAR_API_KEY-not-set | mitigation=set-LINEAR_API_KEY
+# failure-mode: unknown-flag | exit=2 | visible=stderr-list-teams-unknown-flag | mitigation=use-documented-flag-name
+# failure-mode: graphql-or-http-error | exit=3 | visible=stderr-linear-query-GraphQL-error | mitigation=verify-team-name-and-key
+# contract: emits-empty-array-when-no-matches
+# anchor: BTS-245 (manifest seed)
 cmd_list_teams() {
+  # @failure-mode: missing-api-key
+  # @side-effect: reads-env-LINEAR_API_KEY
   _require_api_key
   local name=""
   while [[ $# -gt 0 ]]; do
     case "$1" in
       --name) name="$2"; shift 2 ;;
+      # @failure-mode: unknown-flag
       *) _die 2 "list-teams: unknown flag: $1" ;;
     esac
   done
@@ -377,6 +492,8 @@ cmd_list_teams() {
     }
   }'
 
+  # @failure-mode: graphql-or-http-error
+  # @side-effect: makes-graphql-http-call
   _post_graphql "$query" "$variables" | jq '[.teams.nodes[] | {id, name, key}]'
 }
 

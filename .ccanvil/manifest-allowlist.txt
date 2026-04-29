@@ -140,3 +140,11 @@
 .ccanvil/scripts/ccanvil-sync.sh:cmd_drift_watchdog_preflight
 .ccanvil/scripts/ccanvil-sync.sh:cmd_drift_watchdog_launchd_install
 .ccanvil/scripts/ccanvil-sync.sh:cmd_drift_watchdog_launchd_print
+
+# BTS-245 — Session 6: linear-query.sh GraphQL wrappers.
+# Batch 1 — viewer + simple listings.
+.ccanvil/scripts/linear-query.sh:cmd_viewer
+.ccanvil/scripts/linear-query.sh:cmd_list_issues
+.ccanvil/scripts/linear-query.sh:cmd_list_states
+.ccanvil/scripts/linear-query.sh:cmd_list_labels
+.ccanvil/scripts/linear-query.sh:cmd_list_teams

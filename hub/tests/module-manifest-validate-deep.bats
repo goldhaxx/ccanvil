@@ -68,3 +68,29 @@ _stage_fixture() {
   [[ "$output" =~ "missing-side-effect-marker" ]]
   [[ "$output" =~ "orphan-se" ]]
 }
+
+# BTS-251: file-level shell — depends-on + markers via whole-file fallback.
+
+@test "validate deep BTS-251: file-level shell with no fn() decl — covered" {
+  set -e
+  proj="$BATS_TEST_TMPDIR/proj"
+  _stage_fixture "$proj" "file-level-valid.sh" "file-level-valid.sh"
+  # path-only allowlist entry → id derives from basename ("file-level-valid").
+  echo ".ccanvil/scripts/file-level-valid.sh" > "$proj/.ccanvil/manifest-allowlist.txt"
+  cd "$proj"
+  run bash "$SCRIPT" validate --json
+  [ "$status" -eq 0 ]
+  echo "$output" | jq -e '.coverage.covered == 1'
+  echo "$output" | jq -e '.drift == []'
+}
+
+@test "validate deep BTS-251: file-level shell missing-failure-mode-marker drift" {
+  proj="$BATS_TEST_TMPDIR/proj"
+  _stage_fixture "$proj" "file-level-missing-marker.sh" "file-level-missing-marker.sh"
+  echo ".ccanvil/scripts/file-level-missing-marker.sh" > "$proj/.ccanvil/manifest-allowlist.txt"
+  cd "$proj"
+  run bash "$SCRIPT" validate --json
+  [ "$status" -eq 2 ]
+  [[ "$output" =~ "missing-failure-mode-marker" ]]
+  [[ "$output" =~ "declared-but-no-marker" ]]
+}

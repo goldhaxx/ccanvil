@@ -159,3 +159,7 @@
 .ccanvil/scripts/linear-query.sh:cmd_resolve_document_id
 .ccanvil/scripts/linear-query.sh:cmd_get_document
 .ccanvil/scripts/linear-query.sh:cmd_document_updated_at
+# Batch 5 — document mutations.
+.ccanvil/scripts/linear-query.sh:cmd_save_document
+.ccanvil/scripts/linear-query.sh:cmd_trash_document
+.ccanvil/scripts/linear-query.sh:cmd_document_history

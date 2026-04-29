@@ -1072,7 +1072,39 @@ cmd_get_document() {
   }'
 }
 
+# @manifest
+# purpose: Wrap the Linear GraphQL `documentCreate` and `documentUpdate` mutations under a single command — branches on --id presence (or stdin .id) for create-vs-update, supports --create-with-id for caller-supplied DocumentCreateInput.id (BTS-204 idempotent first-write), and layers stdin-JSON over CLI flags so the SSOT-Linear flow can upsert spec/plan/stasis Documents with deterministic resolved IDs
+# input: --id <doc-uuid-for-update>
+# input: --title / --content / --issue-id / --project-id / --initiative-id / --trashed / --input-json -
+# input: --create-with-id (treat stdin .id as DocumentCreateInput.id)
+# input: env LINEAR_API_KEY
+# input: stdin JSON object when --input-json - is supplied
+# output: stdout JSON {id, title, content, updatedAt}
+# output: exit-codes 0 ok, 2 missing-api-key-or-unknown-flag-or-bad-input-json-or-missing-required-on-create, 3 graphql-or-http-error
+# caller: cmd_artifact_write
+# depends-on: jq
+# depends-on: _require_api_key
+# depends-on: _post_graphql
+# depends-on: _die
+# depends-on: cat
+# depends-on: printf
+# side-effect: reads-env-LINEAR_API_KEY
+# side-effect: reads-stdin-when-input-json
+# side-effect: creates-or-updates-document-on-linear
+# failure-mode: missing-api-key | exit=2 | visible=stderr-LINEAR_API_KEY-not-set | mitigation=set-LINEAR_API_KEY
+# failure-mode: unknown-flag | exit=2 | visible=stderr-save-document-unknown-flag | mitigation=use-documented-flag-name
+# failure-mode: input-json-non-stdin | exit=2 | visible=stderr-save-document-input-json-only-supports-stdin | mitigation=use-input-json-dash
+# failure-mode: bad-input-json-shape | exit=2 | visible=stderr-save-document-input-json-not-valid-object | mitigation=supply-valid-json-object-on-stdin
+# failure-mode: missing-create-title | exit=2 | visible=stderr-save-document-create-requires-title | mitigation=supply-title-or-include-in-stdin-json
+# failure-mode: bad-parent-count | exit=2 | visible=stderr-save-document-create-requires-exactly-one-parent | mitigation=supply-exactly-one-of-issue-id-project-id-initiative-id
+# failure-mode: graphql-or-http-error | exit=3 | visible=stderr-linear-query-GraphQL-error | mitigation=verify-input-shape-and-key
+# contract: cli-flags-override-stdin-json-on-key-collision
+# contract: create-with-id-keeps-id-in-input-payload
+# contract: stdin-id-promotes-to-update-mode-by-default
+# anchor: BTS-245 (manifest seed)
 cmd_save_document() {
+  # @failure-mode: missing-api-key
+  # @side-effect: reads-env-LINEAR_API_KEY
   _require_api_key
 
   local id="" title="" content=""
@@ -1095,6 +1127,7 @@ cmd_save_document() {
       --trashed)        trashed="$2";        shift 2 ;;
       --input-json)     input_json="$2";     shift 2 ;;
       --create-with-id) create_with_id=1;    shift   ;;
+      # @failure-mode: unknown-flag
       *) _die 2 "save-document: unknown flag: $1" ;;
     esac
   done
@@ -1103,11 +1136,14 @@ cmd_save_document() {
   local stdin_input='{}'
   if [[ -n "$input_json" ]]; then
     if [[ "$input_json" == "-" ]]; then
+      # @side-effect: reads-stdin-when-input-json
       stdin_input=$(cat)
     else
+      # @failure-mode: input-json-non-stdin
       _die 2 "save-document: --input-json currently supports only '-' (stdin)"
     fi
     if ! printf '%s' "$stdin_input" | jq -e 'type == "object"' >/dev/null 2>&1; then
+      # @failure-mode: bad-input-json-shape
       _die 2 "save-document: --input-json - did not receive a valid JSON object on stdin"
     fi
   fi
@@ -1148,11 +1184,13 @@ cmd_save_document() {
   if [[ -z "$id" || "$create_with_id" -eq 1 ]]; then
     # Create. Title required; exactly one parent (issueId | projectId | initiativeId).
     if [[ -z "$(echo "$input" | jq -r '.title // ""')" ]]; then
+      # @failure-mode: missing-create-title
       _die 2 "save-document create requires --title"
     fi
     local parents
     parents=$(echo "$input" | jq '[.issueId, .projectId, .initiativeId] | map(select(. != null and . != "")) | length')
     if [[ "$parents" -ne 1 ]]; then
+      # @failure-mode: bad-parent-count
       _die 2 "save-document create requires exactly one parent: --issue-id, --project-id, or --initiative-id"
     fi
 
@@ -1164,6 +1202,8 @@ cmd_save_document() {
     }'
     local variables
     variables=$(jq -n --argjson i "$input" '{input:$i}')
+    # @failure-mode: graphql-or-http-error
+    # @side-effect: creates-or-updates-document-on-linear
     _post_graphql "$query" "$variables" | jq '.documentCreate.document | {
       id: .id,
       title: .title,
@@ -1237,9 +1277,30 @@ cmd_document_updated_at() {
   }'
 }
 
+# @manifest
+# purpose: Wrap the Linear GraphQL `documentDelete` mutation — soft-deletes a document by UUID or slug, used by `cmd_complete`'s archive flow to retire the spec/plan/feature-stasis triplet at PR-cleanup time so the SSOT-Linear flow leaves no orphaned in-flight Documents
+# input: positional <id-or-slug>
+# input: env LINEAR_API_KEY
+# output: stdout JSON {success}
+# output: exit-codes 0 ok, 2 missing-api-key-or-missing-positional, 3 graphql-or-http-error
+# caller: _complete_archive_linear
+# depends-on: jq
+# depends-on: _require_api_key
+# depends-on: _post_graphql
+# depends-on: _die
+# side-effect: reads-env-LINEAR_API_KEY
+# side-effect: deletes-document-on-linear
+# failure-mode: missing-api-key | exit=2 | visible=stderr-LINEAR_API_KEY-not-set | mitigation=set-LINEAR_API_KEY
+# failure-mode: missing-positional | exit=2 | visible=stderr-trash-document-requires-an-id | mitigation=supply-id-or-slug
+# failure-mode: graphql-or-http-error | exit=3 | visible=stderr-linear-query-GraphQL-error | mitigation=verify-id-and-key
+# contract: soft-delete-via-documentDelete-mutation
+# anchor: BTS-245 (manifest seed)
 cmd_trash_document() {
+  # @failure-mode: missing-api-key
+  # @side-effect: reads-env-LINEAR_API_KEY
   _require_api_key
   if [[ $# -lt 1 ]]; then
+    # @failure-mode: missing-positional
     _die 2 "trash-document requires an id or slug"
   fi
   local id="$1"
@@ -1251,6 +1312,8 @@ cmd_trash_document() {
     documentDelete(id: $id) { success }
   }'
 
+  # @failure-mode: graphql-or-http-error
+  # @side-effect: deletes-document-on-linear
   _post_graphql "$query" "$variables" | jq '.documentDelete | {success: .success}'
 }
 
@@ -1348,9 +1411,29 @@ cmd_list_documents() {
   _post_graphql "$query" "$variables" | jq "$projection"
 }
 
+# @manifest
+# purpose: Wrap the Linear GraphQL `documentContentHistory` query — emits per-snapshot {id, snapshotAt, actorIds} envelope for a document so operators auditing concurrent-edit incidents can inspect the document's revision timeline without reading raw Linear UI history
+# input: positional <id-or-slug>
+# input: env LINEAR_API_KEY
+# output: stdout JSON array [{id, snapshotAt, actorIds}]
+# output: exit-codes 0 ok, 2 missing-api-key-or-missing-positional, 3 graphql-or-http-error
+# depends-on: jq
+# depends-on: _require_api_key
+# depends-on: _post_graphql
+# depends-on: _die
+# side-effect: reads-env-LINEAR_API_KEY
+# side-effect: makes-graphql-http-call
+# failure-mode: missing-api-key | exit=2 | visible=stderr-LINEAR_API_KEY-not-set | mitigation=set-LINEAR_API_KEY
+# failure-mode: missing-positional | exit=2 | visible=stderr-document-history-requires-an-id | mitigation=supply-id-or-slug
+# failure-mode: graphql-or-http-error | exit=3 | visible=stderr-linear-query-GraphQL-error | mitigation=verify-id-and-key
+# contract: read-only-no-mutations
+# anchor: BTS-245 (manifest seed)
 cmd_document_history() {
+  # @failure-mode: missing-api-key
+  # @side-effect: reads-env-LINEAR_API_KEY
   _require_api_key
   if [[ $# -lt 1 ]]; then
+    # @failure-mode: missing-positional
     _die 2 "document-history requires an id or slug"
   fi
   local id="$1"
@@ -1368,6 +1451,8 @@ cmd_document_history() {
     }
   }'
 
+  # @failure-mode: graphql-or-http-error
+  # @side-effect: makes-graphql-http-call
   _post_graphql "$query" "$variables" | jq '[.documentContentHistory.history[] | {
     id: .id,
     snapshotAt: .contentDataSnapshotAt,

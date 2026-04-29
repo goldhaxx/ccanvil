@@ -1,3 +1,29 @@
+---
+manifest:
+  id: ccanvil-push
+  purpose: Push project customizations back to the hub for review — script handles deterministic copy/hash/lockfile/git mechanics; Claude's role is limited to classifying each candidate as generalizable (hub-worthy) or project-specific (skip). Spawns the ccanvil-differ sub-agent for the classification step.
+  routes-by: /ccanvil-push
+  input:
+    - "no positional args (synthesizes from local diffs vs lockfile)"
+    - "optional: <file-path> (push only that file)"
+  output:
+    - "side-effect: hub branch updated, hub PR opened, lockfile bumped on the project side"
+  depends-on:
+    - ccanvil-sync.sh
+  side-effect:
+    - copies-files-to-hub
+    - opens-hub-pr
+    - mutates-lockfile
+  failure-mode:
+    - "no-candidates | exit=0 | visible=stdout-message | mitigation=no-action-needed"
+    - "all-project-specific | exit=0 | visible=skip-list-without-hub-pr | mitigation=use-/ccanvil-promote-on-individual-files"
+  contract:
+    - judgment-only-on-classification
+    - never-pushes-without-confirmation
+  anchor:
+    - BTS-256 (manifest seed)
+---
+
 Push project customizations to the hub for review.
 
 All deterministic operations (copy, hash, lockfile, git commit, logging) are handled by the script. Claude's role is LIMITED to: classifying changes as generalizable vs project-specific.

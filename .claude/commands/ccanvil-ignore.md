@@ -1,3 +1,26 @@
+---
+manifest:
+  id: ccanvil-ignore
+  purpose: Mark a hub-tracked file as node-only — permanently excluding it from /ccanvil-pull and /ccanvil-push. Use when the file is intentionally project-specific. Reversible via `ccanvil-sync.sh track <file>`.
+  routes-by: /ccanvil-ignore
+  input:
+    - "positional: <file-path>"
+  output:
+    - "side-effect: lockfile entry flipped to node-only; future /ccanvil-pull and /ccanvil-push skip this file entirely"
+  depends-on:
+    - ccanvil-sync.sh
+  side-effect:
+    - mutates-lockfile
+  failure-mode:
+    - "file-not-tracked | exit=non-zero | visible=stderr-error | mitigation=verify-file-is-in-lockfile"
+  contract:
+    - deterministic-no-claude-judgment
+    - confirmation-prompted-before-mutation
+    - reversible-via-track-subcommand
+  anchor:
+    - BTS-256 (manifest seed)
+---
+
 Mark a hub-tracked file as node-only, permanently excluding it from sync.
 
 Use when a file is intentionally project-specific and should never be pulled, pushed, or shown as a conflict again.

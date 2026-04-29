@@ -1,3 +1,26 @@
+---
+manifest:
+  id: commit
+  purpose: Create a well-structured git commit from the current uncommitted changes — runs the full test suite first (skippable with --no-test), stages relevant files (never .env or credentials), composes a conventional-commit message (type/scope/subject), and commits. Halts on test failure.
+  routes-by: /commit
+  input:
+    - "no positional args"
+    - "optional: --no-test (skip test suite gate before commit)"
+  output:
+    - "side-effect: one git commit on the current branch"
+  side-effect:
+    - stages-files
+    - creates-commit
+  failure-mode:
+    - "tests-failed | exit=non-zero | visible=test-output | mitigation=fix-then-retry-or-pass---no-test"
+  contract:
+    - never-stages-secrets
+    - conventional-commit-format
+    - one-logical-change-per-commit
+  anchor:
+    - BTS-256 (manifest seed)
+---
+
 Create a well-structured git commit from the current changes.
 
 ## Steps

@@ -6,6 +6,24 @@ tools:
   - Grep
   - Glob
 model: sonnet
+manifest:
+  id: spec-writer
+  purpose: Translate a feature request into a precise, testable specification with binary acceptance criteria. Used as a sub-agent for deep codebase analysis during /spec authoring — explores existing patterns + tests before producing the AC list.
+  input:
+    - "context: feature request from operator"
+    - "context: project codebase + tests + CLAUDE.md conventions"
+  output:
+    - "structured-spec: docs/specs/<feature-id>.md draft with Summary / Job To Be Done / Acceptance Criteria / Affected Files / Dependencies / Out of Scope / Implementation Notes"
+  side-effect:
+    - reads-only-no-mutations
+  failure-mode:
+    - "ambiguous-request | exit=n/a | visible=clarification-questions-instead-of-spec | mitigation=operator-clarifies-then-retry"
+  contract:
+    - binary-acceptance-criteria
+    - spec-only-no-implementation
+    - references-existing-patterns
+  anchor:
+    - BTS-256 (manifest seed)
 ---
 
 # Specification Writer

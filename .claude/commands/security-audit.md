@@ -1,3 +1,25 @@
+---
+manifest:
+  id: security-audit
+  purpose: Scan the repository for PII, secrets, and sensitive information that should not be in a public repo. Wraps the deterministic security-audit.sh substrate (full mode — files + history). Reports findings as CRITICAL / WARN / INFO; recommends remediation or allowlist entry.
+  routes-by: /security-audit
+  input:
+    - "no positional args"
+  output:
+    - "stdout: findings table with severity / category / location / detail"
+  depends-on:
+    - security-audit.sh
+  side-effect:
+    - reads-only-no-mutations
+  failure-mode:
+    - "findings-detected | exit=1 | visible=stdout-findings-table | mitigation=remediate-or-allowlist-with-rationale"
+  contract:
+    - read-only
+    - deterministic-no-claude-judgment
+  anchor:
+    - BTS-256 (manifest seed)
+---
+
 Scan this repository for PII, secrets, and sensitive information that should not be in a public repo.
 
 This is a fully deterministic operation. No Claude judgment needed for the scan itself.

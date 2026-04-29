@@ -1,6 +1,24 @@
 ---
 name: strategic-advisor
 description: Analyzes project direction, prioritization, and alignment between tactical work and strategic goals.
+manifest:
+  id: strategic-advisor
+  purpose: Maintain awareness of the project's long-term direction and connect it to day-to-day tactical decisions. Reads roadmap, ideas, recent commits, and stasis to surface alignment between current work and strategic goals; flags drift between tactical priorities and roadmap themes.
+  input:
+    - "context: docs/roadmap.md, untriaged ideas, recent commits, stasis"
+    - "context: operator question about prioritization or direction"
+  output:
+    - "advisory: structured analysis tying tactical work to strategic goals; flags drift; recommends adjustments"
+  side-effect:
+    - reads-only-no-mutations
+  failure-mode:
+    - "no-roadmap | exit=n/a | visible=advisory-falls-back-to-just-stasis-and-recent-commits | mitigation=create-docs/roadmap.md-when-strategic-direction-firms-up"
+  contract:
+    - read-only
+    - never-implements
+    - tactical-strategic-alignment-focus
+  anchor:
+    - BTS-256 (manifest seed)
 ---
 
 # Strategic Advisor

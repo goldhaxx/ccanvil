@@ -223,3 +223,26 @@
 .claude/rules/provider-integration.md
 .claude/rules/self-review.md
 .claude/rules/workflow.md
+
+# BTS-256 — Session 10: markdown agents + commands.
+# Batch 1 — agents (4).
+.claude/agents/ccanvil-differ.md
+.claude/agents/drift-analyst.md
+.claude/agents/spec-writer.md
+.claude/agents/strategic-advisor.md
+# Batch 2 — commands (15).
+.claude/commands/activate.md
+.claude/commands/ccanvil-audit.md
+.claude/commands/ccanvil-demote.md
+.claude/commands/ccanvil-ignore.md
+.claude/commands/ccanvil-promote.md
+.claude/commands/ccanvil-pull.md
+.claude/commands/ccanvil-push.md
+.claude/commands/ccanvil-status.md
+.claude/commands/commit.md
+.claude/commands/fix-certs.md
+.claude/commands/land.md
+.claude/commands/permissions-review.md
+.claude/commands/plan.md
+.claude/commands/review.md
+.claude/commands/security-audit.md

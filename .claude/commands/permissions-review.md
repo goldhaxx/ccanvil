@@ -1,3 +1,30 @@
+---
+manifest:
+  id: permissions-review
+  purpose: Walk the operator through pending permissions-review candidates interactively (BTS-149) — surfaces the BTS-144 promote-review classifier output + BTS-143 accept_danger DANGER list, collects per-row decisions, and dispatches them via `permissions-audit.sh apply --decisions`. No silent mutations; no manual JSON editing.
+  routes-by: /permissions-review
+  input:
+    - "no positional args"
+    - "interactive: per-candidate operator decision"
+  output:
+    - "side-effect: .claude/settings.local.json updated per the decisions; promote-review log appended"
+  depends-on:
+    - permissions-audit.sh
+  side-effect:
+    - mutates-settings.local.json
+    - appends-promote-review-log
+  failure-mode:
+    - "no-candidates | exit=0 | visible=stdout-clean-message | mitigation=no-action-needed"
+  contract:
+    - explicit-confirmation-per-decision
+    - never-silent-mutation
+  anchor:
+    - BTS-143 (accept_danger override)
+    - BTS-144 (promote-review classifier)
+    - BTS-149 (apply --decisions substrate)
+    - BTS-256 (manifest seed)
+---
+
 Walk the user through pending permissions-review candidates interactively, collect per-row decisions, and dispatch them via `permissions-audit.sh apply --decisions`.
 
 `/permissions-review` is the agentic glue between BTS-143 (`accept_danger` override), BTS-144 (`promote-review` classifier), and BTS-149 (`apply --decisions` substrate). It surfaces the silent classifier output, gates every mutation behind explicit user confirmation, then dispatches the decision JSONL deterministically. No silent mutations; no Linear-UI bypasses; no manual JSON editing.

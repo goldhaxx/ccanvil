@@ -10,6 +10,26 @@ tools:
   - Bash(git log:*)
   - Bash(git -C:*)
 model: sonnet
+manifest:
+  id: ccanvil-differ
+  purpose: Compare a downstream project's preset files against the hub using `.ccanvil/ccanvil.lock` for structured analysis. Used by /ccanvil-push to classify each modified file as generalizable (hub-worthy) vs project-specific (node-only override).
+  input:
+    - "context: project tree + lockfile + hub clone"
+    - "no positional args (sub-agent invocation only)"
+  output:
+    - "structured-classification: per-file generalizable / project-specific verdict + rationale"
+  depends-on:
+    - ccanvil-sync.sh
+  side-effect:
+    - reads-only-no-mutations
+  failure-mode:
+    - "lockfile-missing | exit=n/a | visible=halt-with-error | mitigation=run-/init-or-/ccanvil-pull-first"
+    - "hub-clone-not-found | exit=n/a | visible=halt-with-error | mitigation=verify-hub-path"
+  contract:
+    - read-only
+    - per-file-classification
+  anchor:
+    - BTS-256 (manifest seed)
 ---
 
 # ccanvil Differ

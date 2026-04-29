@@ -1,3 +1,23 @@
+---
+manifest:
+  id: ccanvil-audit
+  purpose: Audit the preset for stochastic surface area — flag operations Claude is currently doing that could be replaced with scripts, hooks, or improved output formats. Reads recent stasis + git activity + the deterministic-first rule, then proposes new substrate primitives or hook gates.
+  routes-by: /ccanvil-audit
+  input:
+    - "no positional args (synthesizes from gathered state)"
+  output:
+    - "stdout: structured audit report with operation / current-mechanism / proposed-deterministic-replacement / impact"
+  side-effect:
+    - reads-only-no-mutations
+  failure-mode:
+    - "no-recent-activity | exit=n/a | visible=audit-falls-back-to-cataloged-anti-patterns | mitigation=run-/audit-after-substantive-session-work"
+  contract:
+    - read-only
+    - never-mutates-substrate
+  anchor:
+    - BTS-256 (manifest seed)
+---
+
 Analyze the preset for opportunities to reduce stochastic surface area and increase deterministic automation.
 
 This is a self-review process. Run it on demand (`/ccanvil-audit`) or as part of `/stasis` runs and reviews.

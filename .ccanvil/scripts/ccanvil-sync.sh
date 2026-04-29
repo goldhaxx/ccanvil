@@ -1306,14 +1306,46 @@ cmd_hash() {
   echo "$(file_hash "$file")  $file"
 }
 
+# @manifest
+# purpose: Read a single lockfile entry by file-path key and emit its full descriptor (origin, hub_hash, local_hash, status, sync) or the literal "not found" so substrate consumers can probe per-file state without parsing the lockfile themselves
+# input: positional <file>
+# output: stdout JSON object (entry descriptor) or "not found" string
+# output: exit-codes 0 ok, 1 missing-lockfile-or-missing-positional
+# depends-on: jq
+# depends-on: require_lockfile
+# side-effect: reads-lockfile
+# failure-mode: missing-lockfile | exit=1 | visible=stderr-die-from-require_lockfile | mitigation=run-init-first
+# failure-mode: missing-positional | exit=1 | visible=stderr-Usage | mitigation=supply-file-arg
+# contract: never-mutates-state
+# anchor: BTS-244 (manifest seed)
 cmd_lock_get() {
+  # @failure-mode: missing-lockfile
+  # @side-effect: reads-lockfile
   require_lockfile
+  # @failure-mode: missing-positional
   local file="${1:?Usage: ccanvil-sync.sh lock-get <file>}"
   jq --arg f "$file" '.files[$f] // "not found"' "$LOCKFILE"
 }
 
+# @manifest
+# purpose: Set a single field on a single lockfile entry to either null (when value is the literal "null") or a string value, then write atomically via safe_lock_mv so partial-write torn-state never reaches consumers
+# input: positional <file> <field> <value>
+# output: writes lockfile entry field
+# output: exit-codes 0 ok, 1 missing-lockfile-or-missing-positional
+# depends-on: jq
+# depends-on: require_lockfile
+# depends-on: safe_lock_mv
+# depends-on: mktemp
+# side-effect: writes-lockfile-field
+# failure-mode: missing-lockfile | exit=1 | visible=stderr-die-from-require_lockfile | mitigation=run-init-first
+# failure-mode: missing-positional | exit=1 | visible=stderr-Usage | mitigation=supply-file-field-value
+# contract: atomic-write-via-safe_lock_mv
+# contract: null-literal-stores-json-null-not-string-null
+# anchor: BTS-244 (manifest seed)
 cmd_lock_update() {
+  # @failure-mode: missing-lockfile
   require_lockfile
+  # @failure-mode: missing-positional
   local file="${1:?Usage: ccanvil-sync.sh lock-update <file> <field> <value>}"
   local field="${2:?}"
   local value="${3:?}"
@@ -1325,11 +1357,30 @@ cmd_lock_update() {
   else
     jq --arg f "$file" --arg k "$field" --arg v "$value" '.files[$f][$k] = $v' "$LOCKFILE" > "$tmp" || true
   fi
+  # @side-effect: writes-lockfile-field
   safe_lock_mv "$tmp" "$LOCKFILE" "lock-update $file $field"
 }
 
+# @manifest
+# purpose: Insert or replace a lockfile entry with a fully-formed descriptor (origin + hub_hash + local_hash + status); branches on null hub_hash vs null local_hash so callers can express hub-only or local-only entries explicitly
+# input: positional <file> <origin> <hub_hash> <local_hash> <status>
+# output: writes lockfile entry
+# output: exit-codes 0 ok, 1 missing-lockfile-or-missing-positional
+# caller: cmd_pull_apply
+# depends-on: jq
+# depends-on: require_lockfile
+# depends-on: safe_lock_mv
+# depends-on: mktemp
+# side-effect: writes-lockfile-entry
+# failure-mode: missing-lockfile | exit=1 | visible=stderr-die-from-require_lockfile | mitigation=run-init-first
+# failure-mode: missing-positional | exit=1 | visible=stderr-Usage | mitigation=supply-all-positional-args
+# contract: replaces-existing-entry-on-collision
+# contract: atomic-write-via-safe_lock_mv
+# anchor: BTS-244 (manifest seed)
 cmd_lock_add() {
+  # @failure-mode: missing-lockfile
   require_lockfile
+  # @failure-mode: missing-positional
   local file="${1:?Usage: ccanvil-sync.sh lock-add <file> <origin> <hub_hash> <local_hash> <status>}"
   local origin="${2:?}"
   local hub_hash="${3}"
@@ -1348,26 +1399,67 @@ cmd_lock_add() {
     jq --arg f "$file" --arg o "$origin" --arg sh "$hub_hash" --arg lh "$local_hash" --arg st "$status" \
       '.files[$f] = {"origin": $o, "hub_hash": $sh, "local_hash": $lh, "status": $st}' "$LOCKFILE" > "$tmp" || true
   fi
+  # @side-effect: writes-lockfile-entry
   safe_lock_mv "$tmp" "$LOCKFILE" "lock-add $file"
 }
 
+# @manifest
+# purpose: Delete a lockfile entry by file-path key so cmd_pull_apply's delete action can remove tracked entries that have been removed from the hub
+# input: positional <file>
+# output: writes lockfile (entry removed)
+# output: exit-codes 0 ok, 1 missing-lockfile-or-missing-positional
+# caller: cmd_pull_apply
+# depends-on: jq
+# depends-on: require_lockfile
+# depends-on: safe_lock_mv
+# depends-on: mktemp
+# side-effect: removes-lockfile-entry
+# failure-mode: missing-lockfile | exit=1 | visible=stderr-die-from-require_lockfile | mitigation=run-init-first
+# failure-mode: missing-positional | exit=1 | visible=stderr-Usage | mitigation=supply-file-arg
+# contract: idempotent-on-already-missing
+# contract: atomic-write-via-safe_lock_mv
+# anchor: BTS-244 (manifest seed)
 cmd_lock_remove() {
+  # @failure-mode: missing-lockfile
   require_lockfile
+  # @failure-mode: missing-positional
   local file="${1:?Usage: ccanvil-sync.sh lock-remove <file>}"
 
   local tmp
   tmp=$(mktemp)
   jq --arg f "$file" 'del(.files[$f])' "$LOCKFILE" > "$tmp" || true
+  # @side-effect: removes-lockfile-entry
   safe_lock_mv "$tmp" "$LOCKFILE" "lock-remove $file"
 }
 
+# @manifest
+# purpose: Stamp the lockfile's hub_version + synced_at with the supplied version + current timestamp so cmd_pull_finalize and cmd_push_finalize can record a coherent post-sync version pin
+# input: positional <version>
+# output: writes lockfile hub_version + synced_at
+# output: exit-codes 0 ok, 1 missing-lockfile-or-missing-positional
+# caller: cmd_pull_finalize
+# caller: cmd_push_finalize
+# caller: cmd_promote
+# depends-on: jq
+# depends-on: require_lockfile
+# depends-on: safe_lock_mv
+# depends-on: timestamp
+# depends-on: mktemp
+# side-effect: writes-lockfile-version
+# failure-mode: missing-lockfile | exit=1 | visible=stderr-die-from-require_lockfile | mitigation=run-init-first
+# failure-mode: missing-positional | exit=1 | visible=stderr-Usage | mitigation=supply-version-arg
+# contract: atomic-write-via-safe_lock_mv
+# anchor: BTS-244 (manifest seed)
 cmd_lock_set_version() {
+  # @failure-mode: missing-lockfile
   require_lockfile
+  # @failure-mode: missing-positional
   local version="${1:?Usage: ccanvil-sync.sh lock-set-version <version>}"
 
   local tmp
   tmp=$(mktemp)
   jq --arg v "$version" --arg ts "$(timestamp)" '.hub_version = $v | .synced_at = $ts' "$LOCKFILE" > "$tmp" || true
+  # @side-effect: writes-lockfile-version
   safe_lock_mv "$tmp" "$LOCKFILE" "lock-set-version"
 }
 

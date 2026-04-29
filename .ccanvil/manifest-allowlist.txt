@@ -112,3 +112,11 @@
 .ccanvil/scripts/ccanvil-sync.sh:cmd_push_finalize
 .ccanvil/scripts/ccanvil-sync.sh:cmd_promote
 .ccanvil/scripts/ccanvil-sync.sh:cmd_demote
+
+# BTS-244 — Session 5: ccanvil-sync.sh stack + registry cluster.
+# Batch 1 — lockfile primitives.
+.ccanvil/scripts/ccanvil-sync.sh:cmd_lock_get
+.ccanvil/scripts/ccanvil-sync.sh:cmd_lock_update
+.ccanvil/scripts/ccanvil-sync.sh:cmd_lock_add
+.ccanvil/scripts/ccanvil-sync.sh:cmd_lock_remove
+.ccanvil/scripts/ccanvil-sync.sh:cmd_lock_set_version

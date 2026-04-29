@@ -1,3 +1,26 @@
+---
+manifest:
+  id: fix-certs
+  purpose: Diagnose and fix TLS certificate issues caused by Cloudflare WARP VPN — runs the substrate's `--check` mode for diagnosis, builds the combined CA bundle if missing, and emits the env-var exports the operator can `eval` or append to their shell profile.
+  routes-by: /fix-certs
+  input:
+    - "no positional args"
+  output:
+    - "stdout: shell-ready export lines (eval-able)"
+    - "side-effect: ~/.cloudflare-certs/combined-ca-bundle.pem and standalone cert created when missing"
+  depends-on:
+    - fix-cloudflare-certs.sh
+  side-effect:
+    - writes-cert-bundle
+  failure-mode:
+    - "cf-cert-not-in-keychain | exit=1 | visible=stderr-FAIL-with-IT-admin-hint | mitigation=ask-IT-to-install-WARP-root-CA"
+  contract:
+    - idempotent-on-rerun
+    - --check-is-side-effect-free
+  anchor:
+    - BTS-256 (manifest seed)
+---
+
 Diagnose and fix TLS certificate issues caused by Cloudflare WARP VPN.
 
 1. Read `.claude/rules/tls-troubleshooting.md` for full context on the problem and remediation steps.

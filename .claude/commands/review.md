@@ -1,3 +1,26 @@
+---
+manifest:
+  id: review
+  purpose: Three-layer review of uncommitted changes — (1) spawns the code-reviewer sub-agent for INFO/WARN/CRITICAL findings, (2) runs the deterministic security-audit substrate (--files-only), (3) lightweight self-review per `.claude/rules/self-review.md` for stochastic-op candidates. Recommends commit-or-fix-first.
+  routes-by: /review
+  input:
+    - "no positional args (synthesizes from current uncommitted diff)"
+  output:
+    - "stdout: combined review + security audit + self-review summary with recommendation"
+  depends-on:
+    - security-audit.sh
+  side-effect:
+    - reads-only-no-mutations
+  failure-mode:
+    - "no-uncommitted-changes | exit=0 | visible=stdout-clean-message | mitigation=run-after-edits"
+    - "critical-finding | exit=non-zero | visible=critical-list-with-rationale | mitigation=fix-before-commit"
+  contract:
+    - read-only
+    - three-layer-coverage
+  anchor:
+    - BTS-256 (manifest seed)
+---
+
 Review the current uncommitted changes using the code-reviewer sub-agent.
 
 Delegate to the `code-reviewer` agent with this task:

@@ -1,3 +1,25 @@
+---
+manifest:
+  id: ccanvil-demote
+  purpose: Demote a hub-tracked file to local-only override — the file stays in place but future hub pulls show diffs instead of auto-updating, and pushes are gated behind explicit promotion. Fully deterministic; the entire mechanism rides ccanvil-sync.sh.
+  routes-by: /ccanvil-demote
+  input:
+    - "positional: <file-path>"
+  output:
+    - "side-effect: lockfile entry flipped to local-override; future /ccanvil-pull skips this file"
+  depends-on:
+    - ccanvil-sync.sh
+  side-effect:
+    - mutates-lockfile
+  failure-mode:
+    - "file-not-tracked | exit=non-zero | visible=stderr-error | mitigation=verify-file-is-in-lockfile"
+  contract:
+    - deterministic-no-claude-judgment
+    - confirmation-prompted-before-mutation
+  anchor:
+    - BTS-256 (manifest seed)
+---
+
 Demote a hub-managed file to local-only override.
 
 This is a fully deterministic operation. No Claude judgment needed.

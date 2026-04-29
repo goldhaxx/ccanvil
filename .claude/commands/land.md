@@ -1,3 +1,32 @@
+---
+manifest:
+  id: land
+  purpose: Post-merge step that wraps `docs-check.sh land` (git mechanics — fast-forward main, delete branch, recover landed branch via squash-subject parse) and follows up by parsing the AUTO-CLOSE marker and dispatching the linked Linear ticket to Done via the BTS-128 ticket.transition primitive. Auto-close failure NEVER blocks the merge cleanup.
+  routes-by: /land
+  input:
+    - "no positional args (synthesizes from git state)"
+  output:
+    - "side-effect: main fast-forwarded; feature branch deleted; Linear ticket transitioned to Done"
+  depends-on:
+    - docs-check.sh
+    - operations.sh
+  side-effect:
+    - fast-forwards-main
+    - deletes-feature-branch
+    - transitions-linear-ticket
+    - queues-pending-on-failure
+  failure-mode:
+    - "ticket-close-failure | exit=0 | visible=PENDING-line | mitigation=run-/idea-sync-after-MCP-recovers"
+  contract:
+    - never-fails-merge-cleanup-on-linear-error
+    - parses-AUTO-CLOSE-marker-from-script-stdout
+  anchor:
+    - BTS-119 (auto-close fallback)
+    - BTS-128 (ticket.transition)
+    - BTS-138 (squash-subject branch recovery)
+    - BTS-256 (manifest seed)
+---
+
 Return the working tree to main after a PR merge, then auto-close the linked Linear issue.
 
 `/land` is the canonical post-merge step. It wraps `docs-check.sh land` (git mechanics) and follows up by dispatching the AUTO-CLOSE intent the script emits for the just-landed spec — transitioning the linked Linear issue to `Done` via the BTS-128 `ticket.transition` primitive. On MCP failure, the transition is queued to `.ccanvil/ideas-pending.log` for `/idea sync` to replay — auto-close NEVER blocks the merge cleanup.

@@ -7,6 +7,28 @@ tools:
   - Glob
   - Bash(git log:*)
 model: haiku
+manifest:
+  id: drift-analyst
+  purpose: Synthesize a thoughtful Linear issue body for a single drifted ccanvil downstream node. Reads drift JSON + recent git context + roadmap snippet; emits a Markdown issue body the /drift-watchdog skill dispatches via http.
+  input:
+    - "context: drift JSON for one node (pre-fetched by /drift-watchdog)"
+    - "context: recent git log of the drifted files"
+    - "context: docs/roadmap.md snippet (when present)"
+  output:
+    - "markdown-issue-body: structured Linear issue body with What changed / Why it matters / Recommended action"
+  caller:
+    - skill:/drift-watchdog
+  depends-on:
+    - git
+  side-effect:
+    - reads-only-no-mutations
+  failure-mode:
+    - "empty-drift-json | exit=n/a | visible=empty-output | mitigation=skill-skips-this-node"
+  contract:
+    - read-only
+    - one-node-per-invocation
+  anchor:
+    - BTS-256 (manifest seed)
 ---
 
 # Drift Analyst

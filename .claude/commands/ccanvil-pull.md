@@ -1,3 +1,28 @@
+---
+manifest:
+  id: ccanvil-pull
+  purpose: Pull hub updates into the project — script handles the deterministic mechanics (copy, hash, lockfile, logging) and Claude's role is limited to two judgment calls — conflict resolution and merge proposal authoring. Skips local-override and node-only files per the lockfile.
+  routes-by: /ccanvil-pull
+  input:
+    - "no positional args (synthesizes from hub state vs lockfile)"
+    - "optional: per-conflict resolution decisions"
+  output:
+    - "side-effect: hub-tracked files updated in project; lockfile bumped; commit on feature branch (or main if pre-spec)"
+  depends-on:
+    - ccanvil-sync.sh
+  side-effect:
+    - copies-files-from-hub
+    - mutates-lockfile
+    - commits-on-active-branch
+  failure-mode:
+    - "merge-conflict | exit=non-zero | visible=conflict-list-with-diff | mitigation=operator-resolves-each-conflict"
+  contract:
+    - judgment-only-on-conflicts
+    - skips-local-override-and-node-only-files
+  anchor:
+    - BTS-256 (manifest seed)
+---
+
 Pull updates from the hub into this project.
 
 All deterministic operations (copy, hash, lockfile, logging) are handled by the script. Claude's role is LIMITED to judgment calls: conflict resolution and merge proposals.

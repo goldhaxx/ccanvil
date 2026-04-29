@@ -1,3 +1,30 @@
+---
+manifest:
+  id: plan
+  purpose: Create an implementation plan for the active feature — reads the spec via the BTS-204 provider-aware artifact-read primitive, analyzes affected files for existing patterns, and writes a step-by-step plan to docs/plan.md sized for ~5–15min TDD cycles per step. BTS-20 lifecycle pre-flight gates entry to spec-activated / plan-written states only.
+  routes-by: /plan
+  input:
+    - "no positional args (synthesizes from active spec)"
+  output:
+    - "file: docs/plan.md (or Linear plan Document on routed nodes)"
+  depends-on:
+    - docs-check.sh
+  side-effect:
+    - writes-plan-artifact
+  failure-mode:
+    - "no-active-spec | exit=non-zero | visible=stderr-error | mitigation=run-/spec-and-/activate-first"
+    - "lifecycle-blocked | exit=non-zero | visible=blockers-list | mitigation=fix-blockers-then-retry"
+  contract:
+    - tdd-sized-steps
+    - never-implements
+    - live-api-validation-gate-flagged-for-risky-contracts
+  anchor:
+    - BTS-20 (lifecycle pre-flight)
+    - BTS-171 (live-API validation gate)
+    - BTS-204 (provider-aware artifact-read)
+    - BTS-256 (manifest seed)
+---
+
 Create an implementation plan for the feature described in the user's message (or in `docs/spec.md` if no message provided).
 
 ## Steps

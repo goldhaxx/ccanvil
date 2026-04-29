@@ -1,3 +1,33 @@
+---
+manifest:
+  id: activate
+  purpose: Activate a Draft spec — wraps `docs-check.sh activate` (git mechanics + branch + draft PR + spec copy) and follows up by parsing the AUTO-TRANSITION marker and dispatching the linked Linear ticket to In Progress via the BTS-128 ticket.transition primitive. On MCP failure, queues to ideas-pending.log for /idea sync replay.
+  routes-by: /activate
+  input:
+    - "positional: <feature-id>"
+    - "optional: --no-auto-push (passthrough to script)"
+  output:
+    - "side-effect: feature branch created, spec copied to docs/spec.md, draft PR opened, Linear ticket transitioned to In Progress"
+  depends-on:
+    - docs-check.sh
+    - operations.sh
+  side-effect:
+    - creates-feature-branch
+    - opens-draft-pr
+    - transitions-linear-ticket
+    - queues-pending-on-failure
+  failure-mode:
+    - "spec-not-found | exit=non-zero | visible=stderr-error-from-docs-check.sh | mitigation=run-/spec-first"
+    - "ticket-transition-failure | exit=0 | visible=PENDING-line-and-pending-log-grows | mitigation=run-/idea-sync"
+  contract:
+    - never-fails-activation-on-linear-error
+    - mirrors-/land-AUTO-CLOSE-precedent
+  anchor:
+    - BTS-128 (ticket.transition primitive)
+    - BTS-145 (--no-auto-push)
+    - BTS-256 (manifest seed)
+---
+
 Activate a Draft spec — create the feature branch, copy the spec to active, push origin, open a draft PR, and transition the linked Linear issue to In Progress.
 
 `/activate` is the canonical pre-implementation step. It wraps `docs-check.sh activate` (git mechanics + branch + draft PR) and follows up by dispatching the `AUTO-TRANSITION` intent the script emits — flipping the linked Linear issue to `In Progress` via the BTS-128 `ticket.transition` primitive. On MCP failure, the skill enqueues the transition to `.ccanvil/ideas-pending.log` for `/idea sync` to replay later. Mirrors `/land`'s AUTO-CLOSE precedent.

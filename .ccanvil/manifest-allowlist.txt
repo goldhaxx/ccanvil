@@ -180,3 +180,7 @@
 .ccanvil/scripts/manifest-check.sh:cmd_extract_identity
 .ccanvil/scripts/manifest-check.sh:cmd_check
 .ccanvil/scripts/manifest-check.sh:cmd_verify
+# Batch 3 — operations.sh + context-budget.sh.
+.ccanvil/scripts/operations.sh:cmd_resolve
+.ccanvil/scripts/operations.sh:cmd_exec
+.ccanvil/scripts/context-budget.sh:cmd_check

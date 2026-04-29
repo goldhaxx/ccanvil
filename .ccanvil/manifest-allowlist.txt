@@ -125,3 +125,7 @@
 .ccanvil/scripts/ccanvil-sync.sh:cmd_migrate
 .ccanvil/scripts/ccanvil-sync.sh:cmd_register
 .ccanvil/scripts/ccanvil-sync.sh:cmd_relocate
+# Batch 3 — stasis-migration + registry/events.
+.ccanvil/scripts/ccanvil-sync.sh:cmd_migrate_stasis_artifact
+.ccanvil/scripts/ccanvil-sync.sh:cmd_registry
+.ccanvil/scripts/ccanvil-sync.sh:cmd_events

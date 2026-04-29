@@ -3033,6 +3033,23 @@ cmd_relocate() {
 #      file, now removed).
 #
 # Exit: 0 on success or no-op; 1 on ambiguous both-exist state.
+# @manifest
+# purpose: One-time idempotent migration that renames the prior-vocabulary stasis artifact to the current name and removes the prior-vocabulary recall command file (using git mv when paths are tracked so history follows); intended for downstream nodes upgrading past the BTS-22 vocabulary rollover
+# input: (none)
+# output: stdout MIGRATED + REMOVED log lines per applied action
+# output: writes file rename + file removal + single commit when either action fires
+# output: exit-codes 0 ok-or-no-op, 1 ambiguous-both-old-and-new-exist
+# depends-on: git
+# depends-on: mv
+# depends-on: rm
+# depends-on: pwd
+# side-effect: renames-stasis-artifact
+# side-effect: removes-retired-command-file
+# side-effect: writes-migration-commit
+# failure-mode: ambiguous-both-exist | exit=1 | visible=stderr-ERROR-both-files-exist | mitigation=remove-one-manually-then-rerun
+# contract: idempotent-on-already-migrated
+# contract: single-commit-captures-both-actions
+# anchor: BTS-244 (manifest seed)
 cmd_migrate_stasis_artifact() {
   local project_dir
   project_dir=$(pwd)
@@ -3045,6 +3062,7 @@ cmd_migrate_stasis_artifact() {
 
   # Step 1/2: artifact rename (or conflict detection)
   if [[ -f "$old_artifact" && -f "$new_artifact" ]]; then
+    # @failure-mode: ambiguous-both-exist
     echo "ERROR: both docs/checkpoint.md and docs/stasis.md exist." >&2
     echo "       Migration can't choose between them. Resolve manually:" >&2
     echo "       1. Decide which content to keep." >&2
@@ -3056,6 +3074,7 @@ cmd_migrate_stasis_artifact() {
   if [[ -f "$old_artifact" && ! -f "$new_artifact" ]]; then
     # Prefer git mv for history preservation; fall back to plain mv if git fails
     # (e.g., file not tracked).
+    # @side-effect: renames-stasis-artifact
     if git -C "$project_dir" ls-files --error-unmatch "docs/checkpoint.md" >/dev/null 2>&1; then
       (cd "$project_dir" && git mv "docs/checkpoint.md" "docs/stasis.md") || {
         mv "$old_artifact" "$new_artifact"
@@ -3070,6 +3089,7 @@ cmd_migrate_stasis_artifact() {
 
   # Step 3: remove legacy catchup command
   if [[ -f "$old_catchup" ]]; then
+    # @side-effect: removes-retired-command-file
     if git -C "$project_dir" ls-files --error-unmatch ".claude/commands/catchup.md" >/dev/null 2>&1; then
       (cd "$project_dir" && git rm -q ".claude/commands/catchup.md") || {
         rm -f "$old_catchup"
@@ -3083,6 +3103,7 @@ cmd_migrate_stasis_artifact() {
 
   # Single commit captures both actions if either occurred.
   if $did_work; then
+    # @side-effect: writes-migration-commit
     (cd "$project_dir" && \
       ALLOW_MAIN=1 git -c commit.gpgsign=false commit -q \
         -m "chore(stasis-migration): rename checkpoint/catchup artifacts" \
@@ -3094,13 +3115,29 @@ cmd_migrate_stasis_artifact() {
 
 # registry: List all registered downstream projects.
 # Can be run from anywhere with a lockfile.
+# @manifest
+# purpose: Read the hub-side .ccanvil/registry.json and render every registered downstream node (name, UUID, portable path, registered_at, last_synced, version) so operators can audit the live downstream-node fleet
+# input: (none)
+# output: stdout formatted human-readable listing
+# output: exit-codes 0 ok-or-no-registry, 1 missing-lockfile
+# depends-on: jq
+# depends-on: require_lockfile
+# depends-on: get_hub_source_raw
+# side-effect: reads-hub-registry
+# failure-mode: missing-lockfile | exit=1 | visible=stderr-die-from-require_lockfile | mitigation=run-init-first
+# failure-mode: no-registry-yet | exit=0 | visible=stdout-No-registry-found | mitigation=register-first-downstream-node
+# contract: read-only
+# anchor: BTS-244 (manifest seed)
 cmd_registry() {
+  # @failure-mode: missing-lockfile
+  # @side-effect: reads-hub-registry
   require_lockfile
   local hub_root
   hub_root=$(get_hub_source_raw)
   local registry="$hub_root/.ccanvil/registry.json"
 
   if [[ ! -f "$registry" ]]; then
+    # @failure-mode: no-registry-yet
     echo "No registry found. Run 'ccanvil-sync.sh register' from a downstream project."
     return 0
   fi
@@ -3115,6 +3152,22 @@ cmd_registry() {
 # The events log is machine-local audit state (gitignored) — previously,
 # these events were git commits on main; now they live in .ccanvil/events.log.
 # Usage: ccanvil-sync.sh events [--event TYPE] [--node UUID|NAME] [--since EPOCH]
+# @manifest
+# purpose: Read the hub's machine-local events log (gitignored audit trail of register/broadcast/etc. operations) and emit filtered JSONL — supports filtering by event type, node UUID/name, and minimum timestamp so operators can audit hub history without parsing the file directly
+# input: --event <type>
+# input: --node <uuid-or-name>
+# input: --since <epoch>
+# output: stdout newline-delimited JSON (one object per matching event)
+# output: exit-codes 0 ok-or-no-events-log, 2 unknown-flag
+# depends-on: jq
+# depends-on: get_hub_source_raw
+# depends-on: pwd
+# side-effect: reads-hub-events-log
+# failure-mode: unknown-flag | exit=2 | visible=stderr-Unknown-events-flag | mitigation=use-documented-flag-name
+# failure-mode: no-events-log | exit=0 | visible=empty-stdout | mitigation=register-or-broadcast-first
+# contract: read-only
+# contract: emits-empty-when-log-missing
+# anchor: BTS-244 (manifest seed)
 cmd_events() {
   local filter_event="" filter_node="" filter_since=""
   while [[ $# -gt 0 ]]; do
@@ -3122,6 +3175,7 @@ cmd_events() {
       --event) filter_event="$2"; shift 2 ;;
       --node)  filter_node="$2";  shift 2 ;;
       --since) filter_since="$2"; shift 2 ;;
+      # @failure-mode: unknown-flag
       *) echo "Unknown events flag: $1" >&2; return 2 ;;
     esac
   done
@@ -3133,6 +3187,8 @@ cmd_events() {
     hub_root=$(pwd)
   fi
   local log_file="$hub_root/.ccanvil/events.log"
+  # @failure-mode: no-events-log
+  # @side-effect: reads-hub-events-log
   [[ -f "$log_file" ]] || return 0
 
   local jq_filter='.'

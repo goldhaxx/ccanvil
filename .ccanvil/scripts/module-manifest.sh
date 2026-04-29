@@ -303,12 +303,13 @@ _extract_markdown() {
 # Returns 0 on match, 1 otherwise. Brace-counted; assumes well-formed bash.
 _function_body_grep() {
   local path="$1" fn_id="$2" pattern="$3"
-  local in_fn=0 depth=0 line opens closes
+  local in_fn=0 depth=0 line opens closes fn_decl_seen=0
   while IFS= read -r line || [[ -n "$line" ]]; do
     if [[ "$in_fn" -eq 0 ]]; then
       if [[ "$line" =~ ^${fn_id}\(\)[[:space:]]*\{ ]]; then
         in_fn=1
         depth=1
+        fn_decl_seen=1
         continue
       fi
     else
@@ -324,6 +325,13 @@ _function_body_grep() {
       fi
     fi
   done < "$path"
+  # BTS-251: file-level shell fallback — when no fn() decl was found, the
+  # manifest's scope is the whole file. Mirrors the markdown-body branch in
+  # _target_body_grep but applies to .sh files where id == basename.
+  if [[ "$fn_decl_seen" -eq 0 ]]; then
+    grep -qE -- "$pattern" "$path"
+    return $?
+  fi
   return 1
 }
 

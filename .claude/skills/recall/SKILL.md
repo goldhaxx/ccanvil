@@ -1,6 +1,42 @@
 ---
 name: recall
 description: Re-hydrate context after a reset — read the last /stasis snapshot and report current project state.
+manifest:
+  id: recall
+  purpose: Re-hydrate context after a reset by reading the last /stasis snapshot, re-running deterministic state queries (lifecycle-state, session-info, backlog.list, idea-count, permissions audit, manifest validate, sessions-list, stasis-carry-forward, evidence-scan), and emitting a cold-start briefing
+  routes-by: /recall
+  input:
+    - "no positional args"
+    - "reads: docs/stasis.md (or Linear stasis Document on routed nodes), docs/sessions/<recent>, lifecycle-state JSON envelope"
+  output:
+    - "stdout: cold-start briefing (lifecycle state + legal next actions + spec backlog + ideas + permissions + manifest coverage + branch + outstanding determinism + evidence gaps from prior session + carry-forward + post-stasis audit + next step)"
+  caller:
+    - .claude/rules/workflow.md
+    - skill:/stasis
+  depends-on:
+    - docs-check.sh
+    - operations.sh
+    - module-manifest.sh
+    - permissions-audit.sh
+  side-effect:
+    - reads-only-no-mutations
+  failure-mode:
+    - "stasis-not-found | exit=n/a | visible=briefing-falls-back-to-first-stasis-message | mitigation=run-/stasis-first"
+    - "lifecycle-blocked | exit=n/a | visible=briefing-surfaces-blockers-list | mitigation=fix-blockers-then-retry"
+  contract:
+    - read-only
+    - never-implements
+    - silent-on-empty-evidence-gaps
+    - silent-on-zero-carry-forward
+  anchor:
+    - BTS-20 (lifecycle-state envelope)
+    - BTS-22 (sessions-list cross-session history)
+    - BTS-201 (evidence gaps surfacing)
+    - BTS-204 (provider-aware artifact-read)
+    - BTS-206 (session counter + boundary)
+    - BTS-232 (carry-forward determinism candidates)
+    - BTS-239 (manifest coverage probe)
+    - BTS-252 (manifest seed)
 ---
 
 Read the current state of the project to resume work after a context reset. `/recall` is the inverse of `/stasis`: it reads the snapshot that `/stasis` wrote, re-runs the deterministic state queries, and produces a cold-start briefing.

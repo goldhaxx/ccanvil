@@ -4,7 +4,7 @@
 > Work: linear:BTS-252
 > Created: 1777482665
 > Subject: Markdown skills + rules manifests
-> Status: Complete
+> Status: In Progress
 
 ## Summary
 
@@ -13,7 +13,7 @@ Per `docs/manifest-rollout.md` Session 9 — extend Layer 2 (Self-Describing Sys
 ## Job To Be Done
 
 **When** I'm cold-reading a skill or rule and need to know its purpose, callers, dependencies, side-effects, and failure modes,
-**I want to** read the YAML frontmatter `manifest:` block at the top of the file using the same field set as cmd_* primitives,
+**I want to** read the YAML frontmatter `manifest:` block at the top of the file using the same field set as cmd\_\* primitives,
 **So that** every documentation surface in `.claude/skills/` and `.claude/rules/` is self-describing and drift-guard catches regressions when the body's claims drift from the manifest's claims.
 
 ## Acceptance Criteria
@@ -32,7 +32,7 @@ Each criterion is independently testable. Binary pass/fail.
 ## Affected Files
 
 | File | Change |
-|------|--------|
+| -- | -- |
 | `.claude/skills/ccanvil-pull-globals/SKILL.md` | Modified — frontmatter manifest block added |
 | `.claude/skills/drift-watchdog/SKILL.md` | Modified — frontmatter manifest block added |
 | `.claude/skills/idea/SKILL.md` | Modified — frontmatter manifest block added |
@@ -52,25 +52,25 @@ Each criterion is independently testable. Binary pass/fail.
 
 ## Dependencies
 
-- **Requires:** BTS-239 (manifest substrate), BTS-240 (markdown frontmatter parser + `_target_body_grep` markdown branch)
-- **Blocked by:** none
+* **Requires:** BTS-239 (manifest substrate), BTS-240 (markdown frontmatter parser + `_target_body_grep` markdown branch)
+* **Blocked by:** none
 
 ## Out of Scope
 
-- Markdown agents (5) and commands (16) — Session 10
-- Layer 3 / `code-reviewer` integration — Session 11
-- Modifying skill/rule bodies — frontmatter-only ship
-- Adding new markers to skills/rules — markers are not enforced for `.md` paths (BTS-240 design)
+* Markdown agents (5) and commands (16) — Session 10
+* Layer 3 / `code-reviewer` integration — Session 11
+* Modifying skill/rule bodies — frontmatter-only ship
+* Adding new markers to skills/rules — markers are not enforced for `.md` paths (BTS-240 design)
 
 ## Implementation Notes
 
-- **Frontmatter shape:** existing seeded skill (`spec`) and rule (`tdd`) carry the canonical shape. Read `.claude/skills/spec/SKILL.md` and `.claude/rules/tdd.md` for the field structure. The `name:` and `description:` keys at the top of skills' frontmatter must be preserved; the `manifest:` key is added as a sibling.
-- **id field:** for skills, use the skill's directory name (e.g., `recall`, `idea`). For rules, use the file's basename without `.md` (e.g., `code-quality`, `tdd`). The `id` MUST match what the validator's basename fallback would compute.
-- **Caller resolution:** declared callers can be path form (e.g., `.claude/commands/foo.md`, `.ccanvil/scripts/docs-check.sh`) or skill form (`skill:/recall`). Path form is preferred for non-skill `.claude/` files (rules, agents). Skill form for skills/commands.
-- **Depends-on:** body-scoped grep via `_target_body_grep`'s markdown branch (frontmatter is stripped before grep). Declare deps that the rule/skill body actually mentions by name (script names, helper functions referenced in command examples).
-- **Allowlist shape:** path-only entries (no `:fn` suffix). Like Session 8 file-level shell — `id` is derived from basename minus extension.
-- **Anchor:** at least one BTS for origin; BTS-252 (manifest seed) as the second anchor for traceability of when the manifest landed.
-- **No body changes:** every rule and skill body is unchanged. Only the frontmatter is touched.
+* **Frontmatter shape:** existing seeded skill (`spec`) and rule (`tdd`) carry the canonical shape. Read `.claude/skills/spec/SKILL.md` and `.claude/rules/tdd.md` for the field structure. The `name:` and `description:` keys at the top of skills' frontmatter must be preserved; the `manifest:` key is added as a sibling.
+* **id field:** for skills, use the skill's directory name (e.g., `recall`, `idea`). For rules, use the file's basename without `.md` (e.g., `code-quality`, `tdd`). The `id` MUST match what the validator's basename fallback would compute.
+* **Caller resolution:** declared callers can be path form (e.g., `.claude/commands/foo.md`, `.ccanvil/scripts/docs-check.sh`) or skill form (`skill:/recall`). Path form is preferred for non-skill `.claude/` files (rules, agents). Skill form for skills/commands.
+* **Depends-on:** body-scoped grep via `_target_body_grep`'s markdown branch (frontmatter is stripped before grep). Declare deps that the rule/skill body actually mentions by name (script names, helper functions referenced in command examples).
+* **Allowlist shape:** path-only entries (no `:fn` suffix). Like Session 8 file-level shell — `id` is derived from basename minus extension.
+* **Anchor:** at least one BTS for origin; BTS-252 (manifest seed) as the second anchor for traceability of when the manifest landed.
+* **No body changes:** every rule and skill body is unchanged. Only the frontmatter is touched.
 
 <!-- NODE-SPECIFIC-START -->
 <!-- Add project-specific content below this line. -->

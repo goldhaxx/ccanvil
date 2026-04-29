@@ -343,7 +343,16 @@ _function_body_grep() {
 _target_body_grep() {
   local path="$1" id="$2" pattern="$3"
   if [[ "$path" == *.md ]]; then
-    awk '
+    # BTS-252: capture awk output into a var before grep, instead of piping
+    # `awk | grep -qE`. Under `set -o pipefail`, the awk-grep pipe trips on
+    # SIGPIPE: grep -q exits on first match, awk gets killed mid-output,
+    # the pipeline returns awk's signal-exit code, and the function reports
+    # no-match even though grep DID match. Manifests with bodies large
+    # enough for grep to short-circuit early failed depends-on resolution
+    # (regression observed on the idea skill — 305-line body). Two-step
+    # capture serializes the work and isolates each step's exit code.
+    local _body
+    _body=$(awk '
       BEGIN { fm=0; body=0 }
       /^---$/ {
         if (fm == 0) { fm=1; next }
@@ -351,7 +360,8 @@ _target_body_grep() {
       }
       body == 1 { print }
       fm == 0 { print }   # no frontmatter at all → entire file is body
-    ' "$path" | grep -qE -- "$pattern"
+    ' "$path")
+    echo "$_body" | grep -qE -- "$pattern"
     return $?
   fi
   _function_body_grep "$path" "$id" "$pattern"

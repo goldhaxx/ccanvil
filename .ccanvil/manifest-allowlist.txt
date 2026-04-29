@@ -163,3 +163,12 @@
 .ccanvil/scripts/linear-query.sh:cmd_save_document
 .ccanvil/scripts/linear-query.sh:cmd_trash_document
 .ccanvil/scripts/linear-query.sh:cmd_document_history
+
+# BTS-246 — Session 7: small mega-scripts batch.
+# Batch 1 — permissions-audit.sh.
+.ccanvil/scripts/permissions-audit.sh:cmd_check
+.ccanvil/scripts/permissions-audit.sh:cmd_init
+.ccanvil/scripts/permissions-audit.sh:cmd_promote_review
+.ccanvil/scripts/permissions-audit.sh:cmd_apply
+.ccanvil/scripts/permissions-audit.sh:cmd_decision_append
+.ccanvil/scripts/permissions-audit.sh:cmd_entry_context

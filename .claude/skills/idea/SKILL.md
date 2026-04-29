@@ -1,6 +1,47 @@
 ---
 name: idea
 description: Capture, list, triage, review-icebox, or sync project ideas via the configured provider (Linear MCP native-Triage or gitignored local JSONL). Fully agentic — no Linear UI required.
+manifest:
+  id: idea
+  purpose: Capture / list / triage / review-icebox / sync project ideas via the resolved provider (Linear-routed state-ID dispatch or local JSONL); evidence-gate bug-shape captures (BTS-201) and route everything through operations.sh — fully agentic, no Linear UI ever required
+  routes-by: /idea
+  input:
+    - "positional: <text> (capture mode — default if first arg is not a sub-verb)"
+    - "sub-verb: list / triage / review-icebox / sync"
+    - "capture flags: --parent <ref>, --source-skill <name>, --context <text>, --family <BTS-A,BTS-B>"
+    - "triage outcome: promote / defer / dismiss / merge"
+  output:
+    - "Linear-routed: GraphQL issueCreate or issueUpdate via linear-query.sh save-issue"
+    - "local-routed: JSONL append to .ccanvil/ideas.log"
+    - "fallback: .ccanvil/ideas-pending.log on dispatch failure (replayed by /idea sync)"
+  caller:
+    - skill:/stasis
+    - skill:/radar
+    - skill:/spec
+  depends-on:
+    - operations.sh
+    - docs-check.sh
+    - linear-query.sh
+  side-effect:
+    - dispatches-graphql-mutation
+    - writes-pending-log-on-failure
+    - writes-jsonl-on-local-route
+  failure-mode:
+    - "bug-shape-without-evidence | exit=1 | visible=stderr-REFUSED-with-anchor-list | mitigation=add-Command-Output-Exit-Reproduce-anchors-or-retitle-DIAGNOSE"
+    - "graphql-or-network-error | exit=0 | visible=PENDING-line-and-pending-log-grows | mitigation=run-/idea-sync-after-MCP-recovers"
+  contract:
+    - never-touches-git
+    - state-id-dispatch-never-by-name
+    - capture-must-succeed-from-operator-pov
+    - dedupe-by-exact-title-match-on-dual-capture
+  anchor:
+    - BTS-115 (dual-capture pattern)
+    - BTS-152 (state-id dispatch)
+    - BTS-162 (--parent capture-time link)
+    - BTS-172 (templated capture flags)
+    - BTS-201 (evidence gate)
+    - BTS-205 (idea-pending dead-letter)
+    - BTS-252 (manifest seed)
 ---
 
 Capture, list, triage, review-icebox, or sync project ideas. The skill resolves each operation through `.ccanvil/scripts/operations.sh`, which picks a provider based on `.claude/ccanvil.json` + `.claude/ccanvil.local.json`:

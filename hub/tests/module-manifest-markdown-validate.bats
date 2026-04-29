@@ -222,3 +222,50 @@ EOF
   echo "$output$stderr" | grep -q "missing-required-key"
   echo "$output$stderr" | grep -q "value=purpose"
 }
+
+@test "validate markdown BTS-252: large body with early-match depends-on does not SIGPIPE" {
+  # Regression: under set -o pipefail, `awk | grep -qE` returns non-zero
+  # when grep -q matches early and SIGPIPEs awk. Manifests on large bodies
+  # falsely reported depends-on-not-found despite real matches in the body.
+  # Fix: capture awk output into a var first, then grep — serializes the
+  # work and isolates each step's exit code.
+  set -e
+  big="$proj/hub/tests/fixtures/manifest/big-body-deps.md"
+  {
+    cat <<'HEAD'
+---
+manifest:
+  purpose: Test SIGPIPE-resistance with a large body and early-match depends-on
+  input:
+    - x
+  output:
+    - y
+  depends-on:
+    - operations.sh
+  side-effect:
+    - z
+  failure-mode:
+    - "f | exit=1 | visible=none"
+  contract:
+    - c
+  anchor:
+    - BTS-252
+---
+
+# Body
+
+operations.sh appears here in the second line so grep -q matches early.
+HEAD
+    # Pad with ~300 more lines so awk has plenty of work after grep -q
+    # short-circuits — replicates the idea SKILL.md repro shape.
+    for i in $(seq 1 320); do
+      printf "padding line %d — lorem ipsum filler that does not affect the test\n" "$i"
+    done
+  } > "$big"
+  echo "hub/tests/fixtures/manifest/big-body-deps.md" > "$proj/.ccanvil/manifest-allowlist.txt"
+  cd "$proj"
+  run bash "$SCRIPT" validate --json
+  [ "$status" -eq 0 ]
+  echo "$output" | jq -e '.coverage.covered == 1'
+  echo "$output" | jq -e '.drift == []'
+}

@@ -172,13 +172,56 @@ _post_graphql() {
 # Subcommand stubs (filled in by later steps in the BTS-164 plan)
 # -----------------------------------------------------------------------------
 
+# @manifest
+# purpose: Wrap the Linear GraphQL `viewer` query — used by /drift-watchdog preflight and operator smoke tests to verify LINEAR_API_KEY auth without side effects
+# input: env LINEAR_API_KEY
+# output: stdout JSON {id, name}
+# output: exit-codes 0 ok, 2 missing-api-key, 3 graphql-or-http-error
+# caller: cmd_drift_watchdog_preflight
+# depends-on: jq
+# depends-on: _require_api_key
+# depends-on: _post_graphql
+# side-effect: reads-env-LINEAR_API_KEY
+# side-effect: makes-graphql-http-call
+# failure-mode: missing-api-key | exit=2 | visible=stderr-LINEAR_API_KEY-not-set | mitigation=set-LINEAR_API_KEY-or-add-to-env
+# failure-mode: graphql-or-http-error | exit=3 | visible=stderr-linear-query-GraphQL-error-or-HTTP-request-failed | mitigation=verify-network-and-key-validity
+# contract: read-only-no-mutations
+# anchor: BTS-245 (manifest seed)
 cmd_viewer() {
+  # @failure-mode: missing-api-key
+  # @side-effect: reads-env-LINEAR_API_KEY
   _require_api_key
   local query='query { viewer { id name } }'
+  # @failure-mode: graphql-or-http-error
+  # @side-effect: makes-graphql-http-call
   _post_graphql "$query" | jq '.viewer'
 }
 
+# @manifest
+# purpose: Wrap the Linear GraphQL `issues` query with a composable IssueFilter (project/team/state/label/limit) — auto-detects UUID-shaped --state values and filters by state.id.eq vs state.type.eq so callers can use either form symmetrically
+# input: --project <name>
+# input: --team <name>
+# input: --state <type-or-uuid>
+# input: --label <name>
+# input: --limit <int>
+# input: env LINEAR_API_KEY
+# output: stdout JSON array [{id, title, status, statusType, priority, createdAt, updatedAt, labels[]}]
+# output: exit-codes 0 ok, 2 missing-api-key-or-unknown-flag, 3 graphql-or-http-error
+# depends-on: jq
+# depends-on: _require_api_key
+# depends-on: _post_graphql
+# depends-on: _die
+# side-effect: reads-env-LINEAR_API_KEY
+# side-effect: makes-graphql-http-call
+# failure-mode: missing-api-key | exit=2 | visible=stderr-LINEAR_API_KEY-not-set | mitigation=set-LINEAR_API_KEY
+# failure-mode: unknown-flag | exit=2 | visible=stderr-list-issues-unknown-flag | mitigation=use-documented-flag-name
+# failure-mode: graphql-or-http-error | exit=3 | visible=stderr-linear-query-GraphQL-error-or-HTTP-request-failed | mitigation=verify-filter-shape-and-key
+# contract: emits-empty-array-when-no-matches
+# contract: filter-uuid-state-by-id-eq-non-uuid-by-type-eq
+# anchor: BTS-245 (manifest seed)
 cmd_list_issues() {
+  # @failure-mode: missing-api-key
+  # @side-effect: reads-env-LINEAR_API_KEY
   _require_api_key
 
   local project="" team="" state="" label="" limit="50"
@@ -189,6 +232,7 @@ cmd_list_issues() {
       --state)   state="$2";   shift 2 ;;
       --label)   label="$2";   shift 2 ;;
       --limit)   limit="$2";   shift 2 ;;
+      # @failure-mode: unknown-flag
       *) _die 2 "list-issues: unknown flag: $1" ;;
     esac
   done
@@ -231,6 +275,8 @@ cmd_list_issues() {
     }
   }'
 
+  # @failure-mode: graphql-or-http-error
+  # @side-effect: makes-graphql-http-call
   _post_graphql "$query" "$variables" | jq '[.issues.nodes[] | {
     id: .identifier,
     title: .title,
@@ -243,9 +289,29 @@ cmd_list_issues() {
   }]'
 }
 
+# @manifest
+# purpose: Wrap the Linear GraphQL `issue` query — fetches a single issue by identifier (e.g. BTS-164) including the full description, status, labels, and timestamps so /spec, /idea triage, and operator queries get full context in one call
+# input: positional <issue-identifier>
+# input: env LINEAR_API_KEY
+# output: stdout JSON {id, uuid, title, status, statusType, priority, createdAt, updatedAt, description, labels[]}
+# output: exit-codes 0 ok, 2 missing-api-key-or-missing-positional, 3 graphql-or-http-error
+# depends-on: jq
+# depends-on: _require_api_key
+# depends-on: _post_graphql
+# depends-on: _die
+# side-effect: reads-env-LINEAR_API_KEY
+# side-effect: makes-graphql-http-call
+# failure-mode: missing-api-key | exit=2 | visible=stderr-LINEAR_API_KEY-not-set | mitigation=set-LINEAR_API_KEY
+# failure-mode: missing-positional | exit=2 | visible=stderr-get-issue-requires-an-issue-identifier | mitigation=supply-issue-id
+# failure-mode: graphql-or-http-error | exit=3 | visible=stderr-linear-query-GraphQL-error | mitigation=verify-issue-exists-and-key
+# contract: read-only-no-mutations
+# anchor: BTS-245 (manifest seed)
 cmd_get_issue() {
+  # @failure-mode: missing-api-key
+  # @side-effect: reads-env-LINEAR_API_KEY
   _require_api_key
   if [[ $# -lt 1 ]]; then
+    # @failure-mode: missing-positional
     _die 2 "get-issue requires an issue identifier (e.g., BTS-164)"
   fi
   local id="$1"
@@ -261,6 +327,8 @@ cmd_get_issue() {
     }
   }'
 
+  # @failure-mode: graphql-or-http-error
+  # @side-effect: makes-graphql-http-call
   _post_graphql "$query" "$variables" | jq '.issue | {
     id: .identifier,
     uuid: .id,
@@ -275,12 +343,32 @@ cmd_get_issue() {
   }'
 }
 
+# @manifest
+# purpose: Wrap the Linear GraphQL `workflowStates` query — emits {id, name, type} per state for a given team so operations.sh ticket.transition resolvers can map role names to state UUIDs at config time
+# input: --team <name>
+# input: env LINEAR_API_KEY
+# output: stdout JSON array [{id, name, type}]
+# output: exit-codes 0 ok, 2 missing-api-key-or-unknown-flag, 3 graphql-or-http-error
+# depends-on: jq
+# depends-on: _require_api_key
+# depends-on: _post_graphql
+# depends-on: _die
+# side-effect: reads-env-LINEAR_API_KEY
+# side-effect: makes-graphql-http-call
+# failure-mode: missing-api-key | exit=2 | visible=stderr-LINEAR_API_KEY-not-set | mitigation=set-LINEAR_API_KEY
+# failure-mode: unknown-flag | exit=2 | visible=stderr-list-states-unknown-flag | mitigation=use-documented-flag-name
+# failure-mode: graphql-or-http-error | exit=3 | visible=stderr-linear-query-GraphQL-error | mitigation=verify-team-name-and-key
+# contract: emits-empty-array-when-no-matches
+# anchor: BTS-245 (manifest seed)
 cmd_list_states() {
+  # @failure-mode: missing-api-key
+  # @side-effect: reads-env-LINEAR_API_KEY
   _require_api_key
   local team=""
   while [[ $# -gt 0 ]]; do
     case "$1" in
       --team) team="$2"; shift 2 ;;
+      # @failure-mode: unknown-flag
       *) _die 2 "list-states: unknown flag: $1" ;;
     esac
   done
@@ -299,10 +387,35 @@ cmd_list_states() {
     }
   }'
 
+  # @failure-mode: graphql-or-http-error
+  # @side-effect: makes-graphql-http-call
   _post_graphql "$query" "$variables" | jq '[.workflowStates.nodes[] | {id, name, type}]'
 }
 
+# @manifest
+# purpose: Wrap the Linear GraphQL `issueLabels` query with optional team scoping (--team name, --team-id UUID, or --workspace-scoped for null-team labels) — used by save-issue label-resolution and BTS-170's workspace-vs-team label disambiguation
+# input: --team <name>
+# input: --team-id <uuid>
+# input: --workspace-scoped (mutually exclusive with --team / --team-id)
+# input: env LINEAR_API_KEY
+# output: stdout JSON array [{id, name}]
+# output: exit-codes 0 ok, 2 missing-api-key-or-unknown-flag-or-mutex-violation, 3 graphql-or-http-error
+# depends-on: jq
+# depends-on: _require_api_key
+# depends-on: _post_graphql
+# depends-on: _die
+# side-effect: reads-env-LINEAR_API_KEY
+# side-effect: makes-graphql-http-call
+# failure-mode: missing-api-key | exit=2 | visible=stderr-LINEAR_API_KEY-not-set | mitigation=set-LINEAR_API_KEY
+# failure-mode: unknown-flag | exit=2 | visible=stderr-list-labels-unknown-flag | mitigation=use-documented-flag-name
+# failure-mode: workspace-team-mutex | exit=2 | visible=stderr-workspace-scoped-is-mutually-exclusive | mitigation=pick-one-scoping-mode
+# failure-mode: graphql-or-http-error | exit=3 | visible=stderr-linear-query-GraphQL-error | mitigation=verify-filter-shape-and-key
+# contract: --team-id-wins-over-team-when-both-present
+# contract: workspace-scoped-uses-null-team-direct-boolean
+# anchor: BTS-245 (manifest seed)
 cmd_list_labels() {
+  # @failure-mode: missing-api-key
+  # @side-effect: reads-env-LINEAR_API_KEY
   _require_api_key
   local team="" team_id="" workspace_scoped=false
   while [[ $# -gt 0 ]]; do
@@ -310,6 +423,7 @@ cmd_list_labels() {
       --team)             team="$2";    shift 2 ;;
       --team-id)          team_id="$2"; shift 2 ;;
       --workspace-scoped) workspace_scoped=true; shift ;;
+      # @failure-mode: unknown-flag
       *) _die 2 "list-labels: unknown flag: $1" ;;
     esac
   done
@@ -317,6 +431,7 @@ cmd_list_labels() {
   # BTS-170: --workspace-scoped is mutually exclusive with team scoping —
   # workspace-scoped means "no team filter," not "team filter AND null."
   if $workspace_scoped && [[ -n "$team_id" || -n "$team" ]]; then
+    # @failure-mode: workspace-team-mutex
     _die 2 "list-labels: --workspace-scoped is mutually exclusive with --team / --team-id"
   fi
 
@@ -346,6 +461,8 @@ cmd_list_labels() {
     }
   }'
 
+  # @failure-mode: graphql-or-http-error
+  # @side-effect: makes-graphql-http-call
   _post_graphql "$query" "$variables" | jq '[.issueLabels.nodes[] | {id, name}]'
 }
 
@@ -353,12 +470,32 @@ cmd_list_labels() {
 # team and project. Both follow the same shape as list-labels: optional
 # --name filter, returns [{id, name}].
 
+# @manifest
+# purpose: Wrap the Linear GraphQL `teams` query with optional --name filter — emits {id, name, key} per team so save-issue can resolve team names to UUIDs without a name-lookup roundtrip per call
+# input: --name <name>
+# input: env LINEAR_API_KEY
+# output: stdout JSON array [{id, name, key}]
+# output: exit-codes 0 ok, 2 missing-api-key-or-unknown-flag, 3 graphql-or-http-error
+# depends-on: jq
+# depends-on: _require_api_key
+# depends-on: _post_graphql
+# depends-on: _die
+# side-effect: reads-env-LINEAR_API_KEY
+# side-effect: makes-graphql-http-call
+# failure-mode: missing-api-key | exit=2 | visible=stderr-LINEAR_API_KEY-not-set | mitigation=set-LINEAR_API_KEY
+# failure-mode: unknown-flag | exit=2 | visible=stderr-list-teams-unknown-flag | mitigation=use-documented-flag-name
+# failure-mode: graphql-or-http-error | exit=3 | visible=stderr-linear-query-GraphQL-error | mitigation=verify-team-name-and-key
+# contract: emits-empty-array-when-no-matches
+# anchor: BTS-245 (manifest seed)
 cmd_list_teams() {
+  # @failure-mode: missing-api-key
+  # @side-effect: reads-env-LINEAR_API_KEY
   _require_api_key
   local name=""
   while [[ $# -gt 0 ]]; do
     case "$1" in
       --name) name="$2"; shift 2 ;;
+      # @failure-mode: unknown-flag
       *) _die 2 "list-teams: unknown flag: $1" ;;
     esac
   done
@@ -377,15 +514,37 @@ cmd_list_teams() {
     }
   }'
 
+  # @failure-mode: graphql-or-http-error
+  # @side-effect: makes-graphql-http-call
   _post_graphql "$query" "$variables" | jq '[.teams.nodes[] | {id, name, key}]'
 }
 
+# @manifest
+# purpose: Wrap the Linear GraphQL `projects` query with optional --name filter — emits {id, name, slugId} per project so save-issue can resolve project names to UUIDs at create time
+# input: --name <name>
+# input: env LINEAR_API_KEY
+# output: stdout JSON array [{id, name, slugId}]
+# output: exit-codes 0 ok, 2 missing-api-key-or-unknown-flag, 3 graphql-or-http-error
+# depends-on: jq
+# depends-on: _require_api_key
+# depends-on: _post_graphql
+# depends-on: _die
+# side-effect: reads-env-LINEAR_API_KEY
+# side-effect: makes-graphql-http-call
+# failure-mode: missing-api-key | exit=2 | visible=stderr-LINEAR_API_KEY-not-set | mitigation=set-LINEAR_API_KEY
+# failure-mode: unknown-flag | exit=2 | visible=stderr-list-projects-unknown-flag | mitigation=use-documented-flag-name
+# failure-mode: graphql-or-http-error | exit=3 | visible=stderr-linear-query-GraphQL-error | mitigation=verify-project-name-and-key
+# contract: emits-empty-array-when-no-matches
+# anchor: BTS-245 (manifest seed)
 cmd_list_projects() {
+  # @failure-mode: missing-api-key
+  # @side-effect: reads-env-LINEAR_API_KEY
   _require_api_key
   local name=""
   while [[ $# -gt 0 ]]; do
     case "$1" in
       --name) name="$2"; shift 2 ;;
+      # @failure-mode: unknown-flag
       *) _die 2 "list-projects: unknown flag: $1" ;;
     esac
   done
@@ -404,6 +563,8 @@ cmd_list_projects() {
     }
   }'
 
+  # @failure-mode: graphql-or-http-error
+  # @side-effect: makes-graphql-http-call
   _post_graphql "$query" "$variables" | jq '[.projects.nodes[] | {id, name, slugId}]'
 }
 
@@ -412,7 +573,33 @@ cmd_list_projects() {
 # IssueRelation entities created via issueRelationCreate. This subcommand
 # wraps that mutation as a clean primitive; cmd_save_issue's --duplicate-of
 # convenience flag dispatches through this path internally.
+# @manifest
+# purpose: Wrap the Linear GraphQL `issueRelationCreate` mutation — creates one of three relation types (duplicate, blocks, related) between two issues so the duplicate-of dispatch path in /idea triage and cmd_save_issue's BTS-228 follow-up can record the link as a proper IssueRelation entity (not as an IssueUpdateInput field, which Linear rejects)
+# input: --type <duplicate|blocks|related>
+# input: --issue <uuid>
+# input: --related <uuid>
+# input: env LINEAR_API_KEY
+# output: stdout JSON {id, type}
+# output: exit-codes 0 ok, 2 missing-api-key-or-unknown-flag-or-missing-required-flag-or-bad-type, 3 graphql-or-http-error
+# caller: cmd_save_issue
+# depends-on: jq
+# depends-on: _require_api_key
+# depends-on: _post_graphql
+# depends-on: _die
+# side-effect: reads-env-LINEAR_API_KEY
+# side-effect: creates-issue-relation-on-linear
+# failure-mode: missing-api-key | exit=2 | visible=stderr-LINEAR_API_KEY-not-set | mitigation=set-LINEAR_API_KEY
+# failure-mode: unknown-flag | exit=2 | visible=stderr-create-relation-unknown-flag | mitigation=use-documented-flag-name
+# failure-mode: missing-type | exit=2 | visible=stderr-create-relation-type-required | mitigation=supply-type-flag
+# failure-mode: bad-type | exit=2 | visible=stderr-create-relation-unknown-type | mitigation=use-duplicate-blocks-or-related
+# failure-mode: missing-issue | exit=2 | visible=stderr-create-relation-issue-required | mitigation=supply-issue-uuid
+# failure-mode: missing-related | exit=2 | visible=stderr-create-relation-related-required | mitigation=supply-related-uuid
+# failure-mode: graphql-or-http-error | exit=3 | visible=stderr-linear-query-GraphQL-error | mitigation=verify-uuids-and-key
+# contract: requires-uuid-not-identifier-shaped-args
+# anchor: BTS-245 (manifest seed)
 cmd_create_relation() {
+  # @failure-mode: missing-api-key
+  # @side-effect: reads-env-LINEAR_API_KEY
   _require_api_key
   local rel_type="" issue_id="" related_id=""
   while [[ $# -gt 0 ]]; do
@@ -420,15 +607,20 @@ cmd_create_relation() {
       --type)    rel_type="$2";    shift 2 ;;
       --issue)   issue_id="$2";    shift 2 ;;
       --related) related_id="$2";  shift 2 ;;
+      # @failure-mode: unknown-flag
       *) _die 2 "create-relation: unknown flag: $1" ;;
     esac
   done
   case "$rel_type" in
     duplicate|blocks|related) ;;
+    # @failure-mode: missing-type
     "")  _die 2 "create-relation: --type required (duplicate|blocks|related)" ;;
+    # @failure-mode: bad-type
     *)   _die 2 "create-relation: unknown --type '$rel_type' (valid: duplicate|blocks|related)" ;;
   esac
+  # @failure-mode: missing-issue
   [[ -z "$issue_id" ]]   && _die 2 "create-relation: --issue required (issue UUID)"
+  # @failure-mode: missing-related
   [[ -z "$related_id" ]] && _die 2 "create-relation: --related required (related issue UUID)"
 
   local query='mutation IssueRelationCreate($input: IssueRelationCreateInput!) {
@@ -444,10 +636,56 @@ cmd_create_relation() {
     --arg relatedIssueId "$related_id" \
     '{input:{type:$type, issueId:$issueId, relatedIssueId:$relatedIssueId}}')
 
+  # @failure-mode: graphql-or-http-error
+  # @side-effect: creates-issue-relation-on-linear
   _post_graphql "$query" "$variables" | jq '.issueRelationCreate.issueRelation | {id, type}'
 }
 
+# @manifest
+# purpose: Wrap the Linear GraphQL `issueCreate` and `issueUpdate` mutations under a single command — branches on --id presence (update vs create), supports name-based resolution of team/project/label via list-teams/list-projects/list-labels round-trips, layers stdin-JSON over CLI flags so callers can pre-compose IssueCreateInput shape, and dispatches duplicate-of as a follow-up issueRelationCreate (BTS-228 — Linear rejects duplicate-of inside IssueUpdateInput)
+# input: --id <issue-id-for-update>
+# input: --title / --description / --state / --team-id / --project-id / --parent-id / --duplicate-of / --priority / --label-ids / --team / --project / --labels / --input-json -
+# input: env LINEAR_API_KEY
+# input: stdin JSON object when --input-json - is supplied
+# output: stdout JSON {id, title}
+# output: exit-codes 0 ok, 2 missing-api-key-or-unknown-flag-or-missing-required-on-create-or-unresolved-name-or-bad-stdin-json, 3 graphql-or-http-error
+# caller: skill:/idea
+# caller: skill:/spec
+# caller: skill:/activate
+# caller: skill:/land
+# depends-on: jq
+# depends-on: _require_api_key
+# depends-on: _post_graphql
+# depends-on: _die
+# depends-on: cmd_list_teams
+# depends-on: cmd_list_projects
+# depends-on: cmd_list_labels
+# depends-on: cmd_create_relation
+# depends-on: cat
+# depends-on: head
+# depends-on: printf
+# side-effect: reads-env-LINEAR_API_KEY
+# side-effect: reads-stdin-when-input-json
+# side-effect: creates-or-updates-issue-on-linear
+# side-effect: creates-issue-relation-when-duplicate-of-supplied
+# failure-mode: missing-api-key | exit=2 | visible=stderr-LINEAR_API_KEY-not-set | mitigation=set-LINEAR_API_KEY
+# failure-mode: unknown-flag | exit=2 | visible=stderr-save-issue-unknown-flag | mitigation=use-documented-flag-name
+# failure-mode: unresolved-team-name | exit=2 | visible=stderr-save-issue-team-did-not-resolve | mitigation=verify-team-name-or-use-team-id
+# failure-mode: unresolved-project-name | exit=2 | visible=stderr-save-issue-project-did-not-resolve | mitigation=verify-project-name-or-use-project-id
+# failure-mode: unresolved-label-name | exit=2 | visible=stderr-save-issue-labels-did-not-resolve | mitigation=verify-label-name-and-team-scoping
+# failure-mode: bad-input-json-shape | exit=2 | visible=stderr-save-issue-input-json-not-valid-object | mitigation=supply-valid-json-object-on-stdin
+# failure-mode: input-json-non-stdin | exit=2 | visible=stderr-save-issue-input-json-only-supports-stdin | mitigation=use-input-json-dash
+# failure-mode: missing-create-title | exit=2 | visible=stderr-save-issue-create-requires-title | mitigation=supply-title-or-include-in-stdin-json
+# failure-mode: missing-create-team-id | exit=2 | visible=stderr-save-issue-create-requires-team-id | mitigation=supply-team-id-or-team-name
+# failure-mode: graphql-or-http-error | exit=3 | visible=stderr-linear-query-GraphQL-error | mitigation=verify-input-shape-and-key
+# failure-mode: relation-create-warning | exit=0 | visible=stderr-WARN-save-issue-relation-create-failed | mitigation=run-printed-create-relation-retry-recipe
+# contract: cli-flags-override-stdin-json-on-key-collision
+# contract: id-flags-take-precedence-over-name-resolution-flags
+# contract: duplicate-of-dispatched-as-separate-relation-mutation-after-update
+# anchor: BTS-245 (manifest seed)
 cmd_save_issue() {
+  # @failure-mode: missing-api-key
+  # @side-effect: reads-env-LINEAR_API_KEY
   _require_api_key
 
   # Mode selector: presence of --id triggers update; absence triggers create.
@@ -475,6 +713,7 @@ cmd_save_issue() {
       --team)          team_name="$2";    shift 2 ;;
       --project)       project_name="$2"; shift 2 ;;
       --labels)        labels_csv="$2";   shift 2 ;;
+      # @failure-mode: unknown-flag
       *) _die 2 "save-issue: unknown flag: $1" ;;
     esac
   done
@@ -490,12 +729,14 @@ cmd_save_issue() {
   if [[ -z "$team_id" && -n "$team_name" ]]; then
     team_id=$(cmd_list_teams --name "$team_name" | jq -r '.[0].id // ""')
     if [[ -z "$team_id" ]]; then
+      # @failure-mode: unresolved-team-name
       _die 2 "save-issue: --team '$team_name' did not resolve to a team id"
     fi
   fi
   if [[ -z "$project_id" && -n "$project_name" ]]; then
     project_id=$(cmd_list_projects --name "$project_name" | jq -r '.[0].id // ""')
     if [[ -z "$project_id" ]]; then
+      # @failure-mode: unresolved-project-name
       _die 2 "save-issue: --project '$project_name' did not resolve to a project id"
     fi
   fi
@@ -525,6 +766,7 @@ cmd_save_issue() {
         lid=$(cmd_list_labels --workspace-scoped | jq -r --arg n "$label_name" '.[] | select(.name == $n) | .id' | head -1)
       fi
       if [[ -z "$lid" ]]; then
+        # @failure-mode: unresolved-label-name
         _die 2 "save-issue: --labels '$label_name' did not resolve to a label id"
       fi
       resolved_ids="${resolved_ids:+${resolved_ids},}${lid}"
@@ -539,12 +781,15 @@ cmd_save_issue() {
   local stdin_input='{}'
   if [[ -n "$input_json" ]]; then
     if [[ "$input_json" == "-" ]]; then
+      # @side-effect: reads-stdin-when-input-json
       stdin_input=$(cat)
     else
+      # @failure-mode: input-json-non-stdin
       _die 2 "save-issue: --input-json currently supports only '-' (stdin)"
     fi
     # Validate it's a JSON object before merging.
     if ! printf '%s' "$stdin_input" | jq -e 'type == "object"' >/dev/null 2>&1; then
+      # @failure-mode: bad-input-json-shape
       _die 2 "save-issue: --input-json - did not receive a valid JSON object on stdin"
     fi
   fi
@@ -592,9 +837,11 @@ cmd_save_issue() {
     # gap before the API call. Check the merged input, not just the flag vars,
     # so stdin-JSON-only callers (BTS-166) aren't flagged spuriously.
     if [[ -z "$(echo "$input" | jq -r '.title // ""')" ]]; then
+      # @failure-mode: missing-create-title
       _die 2 "save-issue create requires --title"
     fi
     if [[ -z "$(echo "$input" | jq -r '.teamId // ""')" ]]; then
+      # @failure-mode: missing-create-team-id
       _die 2 "save-issue create requires --team-id (use list-teams to discover)"
     fi
 
@@ -603,6 +850,8 @@ cmd_save_issue() {
     }'
     local variables
     variables=$(jq -n --argjson i "$input" '{input:$i}')
+    # @failure-mode: graphql-or-http-error
+    # @side-effect: creates-or-updates-issue-on-linear
     _post_graphql "$query" "$variables" | jq '.issueCreate.issue | {
       id: .identifier,
       title: .title
@@ -629,7 +878,9 @@ cmd_save_issue() {
       local issue_uuid
       issue_uuid=$(printf '%s' "$update_response" | jq -r '.issueUpdate.issue.id // empty')
       if [[ -n "$issue_uuid" ]]; then
+        # @side-effect: creates-issue-relation-when-duplicate-of-supplied
         if ! cmd_create_relation --type duplicate --issue "$issue_uuid" --related "$duplicate_of" >/dev/null 2>&1; then
+          # @failure-mode: relation-create-warning
           echo "WARN: save-issue: relation-create-failed — type=duplicate from=$id to=$duplicate_of" >&2
           echo "Retry: bash linear-query.sh create-relation --type duplicate --issue $issue_uuid --related $duplicate_of" >&2
         fi
@@ -696,21 +947,47 @@ main() {
 # -----------------------------------------------------------------------------
 BTS_NS="5b8e4a8e-4f3c-4d2a-9c1e-bf204550b91d"
 
+# @manifest
+# purpose: Deterministically derive a Linear-Document UUID from (BTS_NS, kind, ticket) by SHA-256-hashing the composite input and substituting RFC 4122 v4 version + variant nibbles — provides stable, no-network UUIDs for the SSOT-Linear flow's spec/plan/stasis Documents so artifact-write upserts hit the same target across sessions
+# input: --kind <spec|plan|feature-stasis|session-stasis>
+# input: --ticket <ticket-id>
+# input: env BTS_NS (namespace prefix)
+# output: stdout one v4-shaped UUID
+# output: exit-codes 0 ok, 2 missing-or-bad-flag
+# caller: cmd_artifact_read
+# caller: cmd_artifact_write
+# depends-on: shasum
+# depends-on: awk
+# depends-on: printf
+# depends-on: _die
+# side-effect: pure-no-mutations
+# failure-mode: unknown-flag | exit=2 | visible=stderr-resolve-document-id-unknown-flag | mitigation=use-documented-flag-name
+# failure-mode: missing-kind | exit=2 | visible=stderr-resolve-document-id-kind-is-required | mitigation=supply-kind-flag
+# failure-mode: missing-ticket | exit=2 | visible=stderr-resolve-document-id-ticket-is-required | mitigation=supply-ticket-flag
+# failure-mode: bad-kind | exit=2 | visible=stderr-resolve-document-id-unknown-kind | mitigation=use-spec-plan-feature-stasis-or-session-stasis
+# contract: deterministic-no-network
+# contract: emits-rfc-4122-v4-shaped-uuid-not-rng-actual-v4
+# anchor: BTS-245 (manifest seed)
 cmd_resolve_document_id() {
+  # @side-effect: pure-no-mutations
   local kind="" ticket=""
   while [[ $# -gt 0 ]]; do
     case "$1" in
       --kind)   kind="${2:-}";   shift 2 ;;
       --ticket) ticket="${2:-}"; shift 2 ;;
+      # @failure-mode: unknown-flag
       *) _die 2 "resolve-document-id: unknown flag: $1" ;;
     esac
   done
 
+  # @failure-mode: missing-kind
   [[ -z "$kind" ]]   && _die 2 "resolve-document-id: --kind is required"
+  # @failure-mode: missing-ticket
   [[ -z "$ticket" ]] && _die 2 "resolve-document-id: --ticket is required"
 
   case "$kind" in
     spec|plan|feature-stasis|session-stasis) ;;
+    # @failure-mode: bad-kind
     *) _die 2 "resolve-document-id: unknown kind '$kind' (must be one of: spec, plan, feature-stasis, session-stasis)" ;;
   esac
 
@@ -737,9 +1014,30 @@ cmd_resolve_document_id() {
     "${hash:0:8}" "${hash:8:4}" "$time_hi" "$clock_seq_hi" "${hash:20:12}"
 }
 
+# @manifest
+# purpose: Wrap the Linear GraphQL `document` query — fetches a single document by UUID or slug including title, markdown content, parent linkage (project/issue), and authorship metadata so the SSOT-Linear flow's artifact-read primitive can hydrate spec/plan/stasis bodies into local-shape envelopes
+# input: positional <id-or-slug>
+# input: env LINEAR_API_KEY
+# output: stdout JSON {id, title, content, slugId, url, updatedAt, createdAt, updatedBy, creator, project, issue}
+# output: exit-codes 0 ok, 2 missing-api-key-or-missing-positional, 3 graphql-or-http-error
+# caller: cmd_artifact_read
+# depends-on: jq
+# depends-on: _require_api_key
+# depends-on: _post_graphql
+# depends-on: _die
+# side-effect: reads-env-LINEAR_API_KEY
+# side-effect: makes-graphql-http-call
+# failure-mode: missing-api-key | exit=2 | visible=stderr-LINEAR_API_KEY-not-set | mitigation=set-LINEAR_API_KEY
+# failure-mode: missing-positional | exit=2 | visible=stderr-get-document-requires-an-id-or-slug | mitigation=supply-id-or-slug
+# failure-mode: graphql-or-http-error | exit=3 | visible=stderr-linear-query-GraphQL-error | mitigation=verify-id-and-key
+# contract: read-only-no-mutations
+# anchor: BTS-245 (manifest seed)
 cmd_get_document() {
+  # @failure-mode: missing-api-key
+  # @side-effect: reads-env-LINEAR_API_KEY
   _require_api_key
   if [[ $# -lt 1 ]]; then
+    # @failure-mode: missing-positional
     _die 2 "get-document requires an id or slug (e.g., 5b8e4a8e-... or spec-bts-204)"
   fi
   local id="$1"
@@ -757,6 +1055,8 @@ cmd_get_document() {
     }
   }'
 
+  # @failure-mode: graphql-or-http-error
+  # @side-effect: makes-graphql-http-call
   _post_graphql "$query" "$variables" | jq '.document | {
     id: .id,
     title: .title,
@@ -772,7 +1072,39 @@ cmd_get_document() {
   }'
 }
 
+# @manifest
+# purpose: Wrap the Linear GraphQL `documentCreate` and `documentUpdate` mutations under a single command — branches on --id presence (or stdin .id) for create-vs-update, supports --create-with-id for caller-supplied DocumentCreateInput.id (BTS-204 idempotent first-write), and layers stdin-JSON over CLI flags so the SSOT-Linear flow can upsert spec/plan/stasis Documents with deterministic resolved IDs
+# input: --id <doc-uuid-for-update>
+# input: --title / --content / --issue-id / --project-id / --initiative-id / --trashed / --input-json -
+# input: --create-with-id (treat stdin .id as DocumentCreateInput.id)
+# input: env LINEAR_API_KEY
+# input: stdin JSON object when --input-json - is supplied
+# output: stdout JSON {id, title, content, updatedAt}
+# output: exit-codes 0 ok, 2 missing-api-key-or-unknown-flag-or-bad-input-json-or-missing-required-on-create, 3 graphql-or-http-error
+# caller: cmd_artifact_write
+# depends-on: jq
+# depends-on: _require_api_key
+# depends-on: _post_graphql
+# depends-on: _die
+# depends-on: cat
+# depends-on: printf
+# side-effect: reads-env-LINEAR_API_KEY
+# side-effect: reads-stdin-when-input-json
+# side-effect: creates-or-updates-document-on-linear
+# failure-mode: missing-api-key | exit=2 | visible=stderr-LINEAR_API_KEY-not-set | mitigation=set-LINEAR_API_KEY
+# failure-mode: unknown-flag | exit=2 | visible=stderr-save-document-unknown-flag | mitigation=use-documented-flag-name
+# failure-mode: input-json-non-stdin | exit=2 | visible=stderr-save-document-input-json-only-supports-stdin | mitigation=use-input-json-dash
+# failure-mode: bad-input-json-shape | exit=2 | visible=stderr-save-document-input-json-not-valid-object | mitigation=supply-valid-json-object-on-stdin
+# failure-mode: missing-create-title | exit=2 | visible=stderr-save-document-create-requires-title | mitigation=supply-title-or-include-in-stdin-json
+# failure-mode: bad-parent-count | exit=2 | visible=stderr-save-document-create-requires-exactly-one-parent | mitigation=supply-exactly-one-of-issue-id-project-id-initiative-id
+# failure-mode: graphql-or-http-error | exit=3 | visible=stderr-linear-query-GraphQL-error | mitigation=verify-input-shape-and-key
+# contract: cli-flags-override-stdin-json-on-key-collision
+# contract: create-with-id-keeps-id-in-input-payload
+# contract: stdin-id-promotes-to-update-mode-by-default
+# anchor: BTS-245 (manifest seed)
 cmd_save_document() {
+  # @failure-mode: missing-api-key
+  # @side-effect: reads-env-LINEAR_API_KEY
   _require_api_key
 
   local id="" title="" content=""
@@ -795,6 +1127,7 @@ cmd_save_document() {
       --trashed)        trashed="$2";        shift 2 ;;
       --input-json)     input_json="$2";     shift 2 ;;
       --create-with-id) create_with_id=1;    shift   ;;
+      # @failure-mode: unknown-flag
       *) _die 2 "save-document: unknown flag: $1" ;;
     esac
   done
@@ -803,11 +1136,14 @@ cmd_save_document() {
   local stdin_input='{}'
   if [[ -n "$input_json" ]]; then
     if [[ "$input_json" == "-" ]]; then
+      # @side-effect: reads-stdin-when-input-json
       stdin_input=$(cat)
     else
+      # @failure-mode: input-json-non-stdin
       _die 2 "save-document: --input-json currently supports only '-' (stdin)"
     fi
     if ! printf '%s' "$stdin_input" | jq -e 'type == "object"' >/dev/null 2>&1; then
+      # @failure-mode: bad-input-json-shape
       _die 2 "save-document: --input-json - did not receive a valid JSON object on stdin"
     fi
   fi
@@ -848,11 +1184,13 @@ cmd_save_document() {
   if [[ -z "$id" || "$create_with_id" -eq 1 ]]; then
     # Create. Title required; exactly one parent (issueId | projectId | initiativeId).
     if [[ -z "$(echo "$input" | jq -r '.title // ""')" ]]; then
+      # @failure-mode: missing-create-title
       _die 2 "save-document create requires --title"
     fi
     local parents
     parents=$(echo "$input" | jq '[.issueId, .projectId, .initiativeId] | map(select(. != null and . != "")) | length')
     if [[ "$parents" -ne 1 ]]; then
+      # @failure-mode: bad-parent-count
       _die 2 "save-document create requires exactly one parent: --issue-id, --project-id, or --initiative-id"
     fi
 
@@ -864,6 +1202,8 @@ cmd_save_document() {
     }'
     local variables
     variables=$(jq -n --argjson i "$input" '{input:$i}')
+    # @failure-mode: graphql-or-http-error
+    # @side-effect: creates-or-updates-document-on-linear
     _post_graphql "$query" "$variables" | jq '.documentCreate.document | {
       id: .id,
       title: .title,
@@ -889,9 +1229,31 @@ cmd_save_document() {
   fi
 }
 
+# @manifest
+# purpose: Wrap the Linear GraphQL `document` query projecting only id + updatedAt + updatedBy — used by BTS-237's concurrent-edit guard to detect mid-flight document mutation by comparing remote updatedAt against the timestamp captured before the local write composed
+# input: positional <id-or-slug>
+# input: env LINEAR_API_KEY
+# output: stdout JSON {id, updatedAt, updatedBy}
+# output: exit-codes 0 ok, 2 missing-api-key-or-missing-positional, 3 graphql-or-http-error
+# caller: cmd_artifact_write
+# depends-on: jq
+# depends-on: _require_api_key
+# depends-on: _post_graphql
+# depends-on: _die
+# side-effect: reads-env-LINEAR_API_KEY
+# side-effect: makes-graphql-http-call
+# failure-mode: missing-api-key | exit=2 | visible=stderr-LINEAR_API_KEY-not-set | mitigation=set-LINEAR_API_KEY
+# failure-mode: missing-positional | exit=2 | visible=stderr-document-updated-at-requires-an-id | mitigation=supply-id-or-slug
+# failure-mode: graphql-or-http-error | exit=3 | visible=stderr-linear-query-GraphQL-error | mitigation=verify-id-and-key
+# contract: read-only-no-mutations
+# contract: minimal-projection-for-fast-conflict-check
+# anchor: BTS-245 (manifest seed)
 cmd_document_updated_at() {
+  # @failure-mode: missing-api-key
+  # @side-effect: reads-env-LINEAR_API_KEY
   _require_api_key
   if [[ $# -lt 1 ]]; then
+    # @failure-mode: missing-positional
     _die 2 "document-updated-at requires an id or slug"
   fi
   local id="$1"
@@ -906,6 +1268,8 @@ cmd_document_updated_at() {
     }
   }'
 
+  # @failure-mode: graphql-or-http-error
+  # @side-effect: makes-graphql-http-call
   _post_graphql "$query" "$variables" | jq '.document | {
     id: .id,
     updatedAt: .updatedAt,
@@ -913,9 +1277,30 @@ cmd_document_updated_at() {
   }'
 }
 
+# @manifest
+# purpose: Wrap the Linear GraphQL `documentDelete` mutation — soft-deletes a document by UUID or slug, used by `cmd_complete`'s archive flow to retire the spec/plan/feature-stasis triplet at PR-cleanup time so the SSOT-Linear flow leaves no orphaned in-flight Documents
+# input: positional <id-or-slug>
+# input: env LINEAR_API_KEY
+# output: stdout JSON {success}
+# output: exit-codes 0 ok, 2 missing-api-key-or-missing-positional, 3 graphql-or-http-error
+# caller: _complete_archive_linear
+# depends-on: jq
+# depends-on: _require_api_key
+# depends-on: _post_graphql
+# depends-on: _die
+# side-effect: reads-env-LINEAR_API_KEY
+# side-effect: deletes-document-on-linear
+# failure-mode: missing-api-key | exit=2 | visible=stderr-LINEAR_API_KEY-not-set | mitigation=set-LINEAR_API_KEY
+# failure-mode: missing-positional | exit=2 | visible=stderr-trash-document-requires-an-id | mitigation=supply-id-or-slug
+# failure-mode: graphql-or-http-error | exit=3 | visible=stderr-linear-query-GraphQL-error | mitigation=verify-id-and-key
+# contract: soft-delete-via-documentDelete-mutation
+# anchor: BTS-245 (manifest seed)
 cmd_trash_document() {
+  # @failure-mode: missing-api-key
+  # @side-effect: reads-env-LINEAR_API_KEY
   _require_api_key
   if [[ $# -lt 1 ]]; then
+    # @failure-mode: missing-positional
     _die 2 "trash-document requires an id or slug"
   fi
   local id="$1"
@@ -927,10 +1312,36 @@ cmd_trash_document() {
     documentDelete(id: $id) { success }
   }'
 
+  # @failure-mode: graphql-or-http-error
+  # @side-effect: deletes-document-on-linear
   _post_graphql "$query" "$variables" | jq '.documentDelete | {success: .success}'
 }
 
+# @manifest
+# purpose: Wrap the Linear GraphQL `documents` query with optional parent scoping (--project / --issue / --initiative IDs) and an optional --with-content flag — emits {id, title, slugId, updatedAt, createdAt} per document so cmd_resolve_document_id and the SSOT-Linear flow can locate documents without per-call lookups
+# input: --project <uuid>
+# input: --issue <uuid>
+# input: --initiative <uuid>
+# input: --limit <int>
+# input: --with-content (include markdown body in projection)
+# input: env LINEAR_API_KEY
+# output: stdout JSON array [{id, title, slugId, updatedAt, createdAt, +optional content}]
+# output: exit-codes 0 ok, 2 missing-api-key-or-unknown-flag, 3 graphql-or-http-error
+# depends-on: jq
+# depends-on: _require_api_key
+# depends-on: _post_graphql
+# depends-on: _die
+# side-effect: reads-env-LINEAR_API_KEY
+# side-effect: makes-graphql-http-call
+# failure-mode: missing-api-key | exit=2 | visible=stderr-LINEAR_API_KEY-not-set | mitigation=set-LINEAR_API_KEY
+# failure-mode: unknown-flag | exit=2 | visible=stderr-list-documents-unknown-flag | mitigation=use-documented-flag-name
+# failure-mode: graphql-or-http-error | exit=3 | visible=stderr-linear-query-GraphQL-error | mitigation=verify-filter-shape-and-key
+# contract: emits-empty-array-when-no-matches
+# contract: with-content-flag-toggles-projection
+# anchor: BTS-245 (manifest seed)
 cmd_list_documents() {
+  # @failure-mode: missing-api-key
+  # @side-effect: reads-env-LINEAR_API_KEY
   _require_api_key
   local project_id="" issue_id="" initiative_id=""
   local limit="50"
@@ -943,6 +1354,7 @@ cmd_list_documents() {
       --initiative)     initiative_id="$2"; shift 2 ;;
       --limit)          limit="$2";         shift 2 ;;
       --with-content)   with_content=1;     shift ;;
+      # @failure-mode: unknown-flag
       *) _die 2 "list-documents: unknown flag: $1" ;;
     esac
   done
@@ -994,12 +1406,34 @@ cmd_list_documents() {
     }]'
   fi
 
+  # @failure-mode: graphql-or-http-error
+  # @side-effect: makes-graphql-http-call
   _post_graphql "$query" "$variables" | jq "$projection"
 }
 
+# @manifest
+# purpose: Wrap the Linear GraphQL `documentContentHistory` query — emits per-snapshot {id, snapshotAt, actorIds} envelope for a document so operators auditing concurrent-edit incidents can inspect the document's revision timeline without reading raw Linear UI history
+# input: positional <id-or-slug>
+# input: env LINEAR_API_KEY
+# output: stdout JSON array [{id, snapshotAt, actorIds}]
+# output: exit-codes 0 ok, 2 missing-api-key-or-missing-positional, 3 graphql-or-http-error
+# depends-on: jq
+# depends-on: _require_api_key
+# depends-on: _post_graphql
+# depends-on: _die
+# side-effect: reads-env-LINEAR_API_KEY
+# side-effect: makes-graphql-http-call
+# failure-mode: missing-api-key | exit=2 | visible=stderr-LINEAR_API_KEY-not-set | mitigation=set-LINEAR_API_KEY
+# failure-mode: missing-positional | exit=2 | visible=stderr-document-history-requires-an-id | mitigation=supply-id-or-slug
+# failure-mode: graphql-or-http-error | exit=3 | visible=stderr-linear-query-GraphQL-error | mitigation=verify-id-and-key
+# contract: read-only-no-mutations
+# anchor: BTS-245 (manifest seed)
 cmd_document_history() {
+  # @failure-mode: missing-api-key
+  # @side-effect: reads-env-LINEAR_API_KEY
   _require_api_key
   if [[ $# -lt 1 ]]; then
+    # @failure-mode: missing-positional
     _die 2 "document-history requires an id or slug"
   fi
   local id="$1"
@@ -1017,6 +1451,8 @@ cmd_document_history() {
     }
   }'
 
+  # @failure-mode: graphql-or-http-error
+  # @side-effect: makes-graphql-http-call
   _post_graphql "$query" "$variables" | jq '[.documentContentHistory.history[] | {
     id: .id,
     snapshotAt: .contentDataSnapshotAt,

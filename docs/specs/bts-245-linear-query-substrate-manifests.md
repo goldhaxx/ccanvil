@@ -4,7 +4,7 @@
 > Work: linear:BTS-245
 > Created: 1777427549
 > Subject: linear-query.sh provider substrate manifests
-> Status: Draft
+> Status: Complete
 
 ## Summary
 

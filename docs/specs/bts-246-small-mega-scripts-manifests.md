@@ -4,7 +4,7 @@
 > Work: linear:BTS-246
 > Created: 1777431919
 > Subject: Small mega-scripts batch manifests
-> Status: In Progress
+> Status: Complete
 
 ## Summary
 

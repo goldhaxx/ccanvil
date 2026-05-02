@@ -4,7 +4,7 @@
 > Work: linear:BTS-265
 > Created: 1777742428
 > Subject: Layer 1 validate-spec primitive
-> Status: In Progress
+> Status: Complete
 
 ## Summary
 

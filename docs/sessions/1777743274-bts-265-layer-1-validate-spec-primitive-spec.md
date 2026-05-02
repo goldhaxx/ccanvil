@@ -33,7 +33,7 @@ Today the spec template (`.ccanvil/templates/spec.md`) defines structure (Accept
 ## Affected Files
 
 | File | Change |
-|------|--------|
+| -- | -- |
 | `.ccanvil/scripts/docs-check.sh` | Modified — add `cmd_validate_spec` + dispatch entry |
 | `.claude/skills/spec/SKILL.md` | Modified — append AC-9 final-step validation invocation |
 | `hub/tests/docs-check-validate-spec.bats` | New — bats coverage for AC-1..7 |
@@ -42,24 +42,24 @@ Today the spec template (`.ccanvil/templates/spec.md`) defines structure (Accept
 
 ## Dependencies
 
-- **Requires:** existing `docs-check.sh` substrate (`cmd_artifact_read`, route awareness, lifecycle helpers). Spec template at `.ccanvil/templates/spec.md` defines the canonical shape this primitive validates against.
-- **Blocked by:** none.
+* **Requires:** existing `docs-check.sh` substrate (`cmd_artifact_read`, route awareness, lifecycle helpers). Spec template at `.ccanvil/templates/spec.md` defines the canonical shape this primitive validates against.
+* **Blocked by:** none.
 
 ## Out of Scope
 
-- L1-B `/spec --review` critic-mode hand-off (BTS-266) — separate sibling. L1-B will consume the envelope from this primitive as ONE of its inputs; that wiring is L1-B's scope.
-- Validating the spec template itself (`.ccanvil/templates/spec.md`) — this primitive validates instances against the canonical template's shape, not the template definition.
-- Retiring the existing `/spec` skill prose around AC quality — the prose stays as guidance for Claude during draft generation; the primitive is the post-draft gate.
-- Validating plans (`docs/plan.md`) or stasis. Plan / stasis validation is plausible Phase 3 work but not Layer 1 scope.
-- BLOCKING `/spec` flow on validate-spec drift. Warn-but-don't-block is the first ramp; promoting to BLOCKING can come post-soak if false-positive rate is low.
+* L1-B `/spec --review` critic-mode hand-off (BTS-266) — separate sibling. L1-B will consume the envelope from this primitive as ONE of its inputs; that wiring is L1-B's scope.
+* Validating the spec template itself (`.ccanvil/templates/spec.md`) — this primitive validates instances against the canonical template's shape, not the template definition.
+* Retiring the existing `/spec` skill prose around AC quality — the prose stays as guidance for Claude during draft generation; the primitive is the post-draft gate.
+* Validating plans (`docs/plan.md`) or stasis. Plan / stasis validation is plausible Phase 3 work but not Layer 1 scope.
+* BLOCKING `/spec` flow on validate-spec drift. Warn-but-don't-block is the first ramp; promoting to BLOCKING can come post-soak if false-positive rate is low.
 
 ## Implementation Notes
 
-- Pattern: `cmd_validate_spec` follows `cmd_extract` / `cmd_validate` shape — manifest block, dispatch entry, pure bash + awk + grep (no python / yq).
-- AC parsing: walk between `## Acceptance Criteria` and the next `##` heading; count `^\s*- \[ \] \*\*AC-` bullets. For each, extract body (everything between `**AC-N:**` and the next `**AC-` or section end). Apply GWT and error regex against bodies.
-- File-ref parsing: walk `## Affected Files` table rows. Pipe-split on `|`, extract backtick-fenced paths from column 1 and the literal "Change" string from column 2. Resolve via `[[ -f "$path" ]]` unless Change starts with "New".
-- Route-aware: use `cmd_artifact_read` (already exists) — emits the spec content regardless of local-or-Linear routing.
-- JSON envelope mirrors `cmd_validate` and `cmd_diff_vs_manifest` shape so `/spec` and L1-B can read with same jq idioms.
+* Pattern: `cmd_validate_spec` follows `cmd_extract` / `cmd_validate` shape — manifest block, dispatch entry, pure bash + awk + grep (no python / yq).
+* AC parsing: walk between `## Acceptance Criteria` and the next `##` heading; count `^\s*- \[ \] \*\*AC-` bullets. For each, extract body (everything between `**AC-N:**` and the next `**AC-` or section end). Apply GWT and error regex against bodies.
+* File-ref parsing: walk `## Affected Files` table rows. Pipe-split on `|`, extract backtick-fenced paths from column 1 and the literal "Change" string from column 2. Resolve via `[[ -f "$path" ]]` unless Change starts with "New".
+* Route-aware: use `cmd_artifact_read` (already exists) — emits the spec content regardless of local-or-Linear routing.
+* JSON envelope mirrors `cmd_validate` and `cmd_diff_vs_manifest` shape so `/spec` and L1-B can read with same jq idioms.
 
 <!-- NODE-SPECIFIC-START -->
 <!-- Add project-specific content below this line. -->

@@ -12,3 +12,12 @@ setup() {
   [ "$status" -eq 2 ]
   [[ "$output" =~ "diff file not found" ]]
 }
+
+# AC-6: clean diff (touches only docs / non-manifested paths) → empty drift envelope.
+@test "diff-vs-manifest: clean diff emits empty drift envelope (exit 0)" {
+  set -e
+  run bash "$SCRIPT" diff-vs-manifest --diff "$REPO_ROOT/hub/tests/fixtures/manifest/diffs/clean.diff"
+  [ "$status" -eq 0 ]
+  echo "$output" | jq -e '.drift == []'
+  echo "$output" | jq -e '.status == "ok"'
+}

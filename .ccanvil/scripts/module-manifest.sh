@@ -936,6 +936,9 @@ cmd_diff_vs_manifest() {
     echo "ERROR: diff file not found: $diff_path" >&2
     return 2
   fi
+
+  # Stub: emit empty drift envelope. Real drift detection lands in Steps 3-6.
+  printf '{"drift":[],"status":"ok"}\n'
 }
 
 cmd="${1:-}"

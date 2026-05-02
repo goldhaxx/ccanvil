@@ -4,7 +4,7 @@
 > Work: linear:BTS-269
 > Created: 1777744329
 > Subject: Cross-substrate cohesion graph
-> Status: In Progress
+> Status: Complete
 
 ## Summary
 

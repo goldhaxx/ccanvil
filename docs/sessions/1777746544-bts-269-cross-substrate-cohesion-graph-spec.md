@@ -32,7 +32,7 @@ Today the manifest substrate (BTS-239) extracts per-primitive `caller`/`depends-
 ## Affected Files
 
 | File | Change |
-|------|--------|
+| -- | -- |
 | `.ccanvil/scripts/module-manifest.sh` | Modified — add `cmd_graph` + dispatch entry |
 | `hub/tests/module-manifest-graph.bats` | New — bats coverage for AC-1..7 |
 | `hub/tests/fixtures/manifest/graphs/*` | New — synthetic-substrate fixtures |
@@ -40,26 +40,26 @@ Today the manifest substrate (BTS-239) extracts per-primitive `caller`/`depends-
 
 ## Dependencies
 
-- **Requires:** `cmd_extract` (already shipped, BTS-239) for per-entry manifest data; the existing `_diff_normalize_caller_path` helper (BTS-268) for skill: → path mapping.
-- **Blocked by:** none.
+* **Requires:** `cmd_extract` (already shipped, BTS-239) for per-entry manifest data; the existing `_diff_normalize_caller_path` helper (BTS-268) for skill: → path mapping.
+* **Blocked by:** none.
 
 ## Out of Scope
 
-- `/review` integration. Detecting cross-cluster edges in a PR diff is a natural follow-up but ships separately if friction surfaces.
-- Visual rendering UI (HTML/SVG via `dot -Tsvg`). DOT format is the substrate primitive; rendering happens in operator's choice of tooling.
-- Cohesion heuristics beyond cross-cluster-edge detection (e.g., density, centrality, modularity scores). Those compose well with the JSON envelope and can be added as separate primitives.
-- Caller resolution for non-manifested files (e.g., `bin/foo.py` calling `cmd_X`). The graph only includes nodes from the allowlist.
-- Edge weights / call frequency. Edges are unweighted; one declaration = one edge.
-- Auto-detecting cluster boundaries. Path-prefix-based clusters are the v1 definition; richer clustering (e.g., cohesion-derived clusters) is a research follow-up.
+* `/review` integration. Detecting cross-cluster edges in a PR diff is a natural follow-up but ships separately if friction surfaces.
+* Visual rendering UI (HTML/SVG via `dot -Tsvg`). DOT format is the substrate primitive; rendering happens in operator's choice of tooling.
+* Cohesion heuristics beyond cross-cluster-edge detection (e.g., density, centrality, modularity scores). Those compose well with the JSON envelope and can be added as separate primitives.
+* Caller resolution for non-manifested files (e.g., `bin/foo.py` calling `cmd_X`). The graph only includes nodes from the allowlist.
+* Edge weights / call frequency. Edges are unweighted; one declaration = one edge.
+* Auto-detecting cluster boundaries. Path-prefix-based clusters are the v1 definition; richer clustering (e.g., cohesion-derived clusters) is a research follow-up.
 
 ## Implementation Notes
 
-- Pattern: `cmd_graph` follows `cmd_extract` / `cmd_validate` shape — manifest block, dispatch entry, pure bash + awk + jq (no graphviz dep — DOT is just text emission).
-- Walk `cmd_index`'s output (`.ccanvil/state/manifests.json`) when present; otherwise re-extract per file from the allowlist (same fallback shape as `cmd_query`).
-- Cluster derivation: a small helper `_node_cluster <path>` returns the cluster string per AC-2. Function-level entries inherit the file's cluster.
-- Edge normalization: caller `skill:/<n>` form maps to `.claude/skills/<n>/SKILL.md` for matching against nodes (re-uses `_diff_normalize_caller_path`).
-- DOT rendering: tight emission — `digraph G { ...; subgraph cluster_<name> { ... }; <edges>; }`. No external dot binary dependency at substrate level; that's the consumer's call.
-- Live-API contract risk: NONE. Pure local file walk + JSON/text emission.
+* Pattern: `cmd_graph` follows `cmd_extract` / `cmd_validate` shape — manifest block, dispatch entry, pure bash + awk + jq (no graphviz dep — DOT is just text emission).
+* Walk `cmd_index`'s output (`.ccanvil/state/manifests.json`) when present; otherwise re-extract per file from the allowlist (same fallback shape as `cmd_query`).
+* Cluster derivation: a small helper `_node_cluster <path>` returns the cluster string per AC-2. Function-level entries inherit the file's cluster.
+* Edge normalization: caller `skill:/<n>` form maps to `.claude/skills/<n>/SKILL.md` for matching against nodes (re-uses `_diff_normalize_caller_path`).
+* DOT rendering: tight emission — `digraph G { ...; subgraph cluster_<name> { ... }; <edges>; }`. No external dot binary dependency at substrate level; that's the consumer's call.
+* Live-API contract risk: NONE. Pure local file walk + JSON/text emission.
 
 <!-- NODE-SPECIFIC-START -->
 <!-- Add project-specific content below this line. -->

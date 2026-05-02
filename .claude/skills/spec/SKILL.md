@@ -52,6 +52,7 @@ Write a specification for the feature described in the arguments. Every spec req
 - `/spec <work-ref> <description>` — write a spec with an explicit work reference
 - `/spec idea <num> [description]` — write a spec from an existing idea (the idea UID serves as the work ref)
 - `/spec BTS-130 <description>` — Linear-provider shorthand (resolves to `linear:BTS-130`)
+- `/spec --review <feature-id>` — **critic mode** (BTS-266); reads existing spec + validate-spec envelope, spawns spec-writer agent in critic mode for ONE blocking finding (or PASS)
 
 A work ref is one of:
 
@@ -59,6 +60,36 @@ A work ref is one of:
 - An explicit `<provider>:<id>` prefix (e.g., `linear:BTS-130`, `local:idea-29`) — overrides routing
 
 ## Steps
+
+0. **BTS-266 critic-mode branch.** If the first argument is `--review`, the second argument is the `<feature-id>` — skip Steps 1-11 (drafting). Critic-mode flow:
+
+   ```bash
+   FEATURE_ID="$2"
+   bash .ccanvil/scripts/docs-check.sh validate-spec --feature "$FEATURE_ID" --project-dir . > /tmp/spec-validate.json 2>&1 || {
+     # validate-spec exits 2 on missing-spec OR drift; both pass through to operator
+     cat /tmp/spec-validate.json >&2
+     # Continue: drift is OK to critique; missing-spec aborts (validate-spec already emitted ERROR)
+     grep -q "spec not found" /tmp/spec-validate.json && exit 2
+   }
+   SPEC_PATH="docs/specs/${FEATURE_ID}.md"
+   VALIDATE_ENVELOPE=$(cat /tmp/spec-validate.json)
+   ```
+
+   Then spawn the `spec-writer` agent via the Agent tool with prompt shape:
+
+   ```
+   MODE=critic
+
+   SPEC_PATH: <SPEC_PATH>
+   VALIDATE_SPEC_ENVELOPE: <VALIDATE_ENVELOPE>
+
+   Read the spec end-to-end. Apply the Critic Mode rules from your agent definition.
+   Return EXACTLY ONE: either "PASS — no blocking ambiguity found." or one structured
+   {class, line_ref, criterion, why_blocking} finding. ONE finding per pass — pick
+   the load-bearing ambiguity, not all of them.
+   ```
+
+   Render the agent's response under a `## Critic Finding` (or `## Critic Pass`) section in the operator-facing report. Operator decides: revise spec → re-run `/spec --review` → iterate.
 
 1. **Read the template:** Read `.ccanvil/templates/spec.md` for the specification format.
 

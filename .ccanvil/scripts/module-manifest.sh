@@ -788,13 +788,28 @@ cmd_index() {
   mv "$out.tmp" "$out"
 }
 
+cmd_seed_allowlist() {
+  local dir="."
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --dir) dir="$2"; shift 2 ;;
+      *)     echo "Usage: module-manifest.sh seed-allowlist [--dir <path>]" >&2; return 2 ;;
+    esac
+  done
+  if [[ ! -d "$dir" ]]; then
+    echo "ERROR: directory not found: $dir" >&2
+    return 2
+  fi
+}
+
 cmd="${1:-}"
 shift || true
 case "$cmd" in
-  extract)  cmd_extract "$@" ;;
-  validate) cmd_validate "$@" ;;
-  query)    cmd_query "$@" ;;
-  index)    cmd_index "$@" ;;
-  "")       echo "Usage: module-manifest.sh {extract|validate|query|index} [args]" >&2; exit 2 ;;
-  *)        echo "Usage: module-manifest.sh {extract|validate|query|index} [args]" >&2; exit 2 ;;
+  extract)        cmd_extract "$@" ;;
+  validate)       cmd_validate "$@" ;;
+  query)          cmd_query "$@" ;;
+  index)          cmd_index "$@" ;;
+  seed-allowlist) cmd_seed_allowlist "$@" ;;
+  "")             echo "Usage: module-manifest.sh {extract|validate|query|index|seed-allowlist} [args]" >&2; exit 2 ;;
+  *)              echo "Usage: module-manifest.sh {extract|validate|query|index|seed-allowlist} [args]" >&2; exit 2 ;;
 esac

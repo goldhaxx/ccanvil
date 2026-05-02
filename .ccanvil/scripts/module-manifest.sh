@@ -676,8 +676,12 @@ _maybe_regenerate_index() {
 }
 
 # @manifest
-# purpose: Filter the manifest index by `<key>:<value>` substring match across scalar and array fields.
+# purpose: Filter the manifest index by `<key>:<value>` substring match across scalar and array fields, OR by targeted lens flags (--by-side-effect, --callers-of, --depends-on, --by-failure-mode) for cross-cutting structural questions.
 # input: positional <expr> (form `<key>:<value>`)
+# input: flag --by-side-effect <pattern>
+# input: flag --callers-of <id>
+# input: flag --depends-on <id>
+# input: flag --by-failure-mode <pattern>
 # output: stdout JSON array of matching manifest objects
 # output: exit-codes 0 always (empty array on no match), 2 on usage error
 # depends-on: jq
@@ -685,11 +689,101 @@ _maybe_regenerate_index() {
 # side-effect: regenerates-index-if-stale
 # failure-mode: missing-expr | exit=2 | visible=stderr-usage
 # failure-mode: malformed-expr | exit=2 | visible=stderr-error
+# failure-mode: mutually-exclusive | exit=2 | visible=stderr-error
+# failure-mode: missing-flag-value | exit=2 | visible=stderr-error
 # contract: returns-empty-array-on-no-match
 # contract: matches-substring-not-exact
 # anchor: BTS-239 (origin)
+# anchor: BTS-270 (lens flags)
 cmd_query() {
-  local expr="${1:-}"
+  # BTS-270: parse lens flags. Mutually exclusive with each other AND with the
+  # positional <key>:<value> expression. Falls through to legacy positional
+  # parsing when no flags are present.
+  local lens_flag="" lens_value="" expr=""
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --by-side-effect|--callers-of|--depends-on|--by-failure-mode)
+        # @failure-mode: mutually-exclusive
+        if [[ -n "$lens_flag" || -n "$expr" ]]; then
+          echo "ERROR: query flags are mutually exclusive" >&2
+          return 2
+        fi
+        lens_flag="$1"
+        # @failure-mode: missing-flag-value
+        if [[ $# -lt 2 || -z "$2" ]]; then
+          echo "ERROR: $1 requires a pattern" >&2
+          return 2
+        fi
+        lens_value="$2"
+        shift 2
+        ;;
+      --*)
+        echo "ERROR: unknown flag: $1" >&2
+        return 2
+        ;;
+      *)
+        if [[ -n "$lens_flag" ]]; then
+          echo "ERROR: query flags are mutually exclusive" >&2
+          return 2
+        fi
+        if [[ -n "$expr" ]]; then
+          echo "ERROR: only one positional expression allowed" >&2
+          return 2
+        fi
+        expr="$1"
+        shift
+        ;;
+    esac
+  done
+
+  # Lens-flag dispatch.
+  if [[ -n "$lens_flag" ]]; then
+    local out=".ccanvil/state/manifests.json"
+    _maybe_regenerate_index "$out" || return $?
+    case "$lens_flag" in
+      --by-side-effect)
+        jq --arg v "$lens_value" '
+          [ to_entries[]
+            | .key as $k | .value as $m
+            | select(($m["side-effect"] // []) | any(contains($v)))
+            | {id: $m.id, path: ($k | split(":")[0]),
+               "side-effect": [($m["side-effect"] // [])[] | select(contains($v))]}
+          ]' "$out"
+        ;;
+      --callers-of)
+        # Match either literal id OR skill: form mapping.
+        jq --arg v "$lens_value" '
+          ($v | sub("^.*\\.claude/skills/"; "") | sub("/SKILL\\.md.*"; "")) as $maybe_skill |
+          [ to_entries[]
+            | .key as $k | .value as $m
+            | select(($m.caller // []) | any(. == $v or . == "skill:/" + $maybe_skill))
+            | {id: $m.id, path: ($k | split(":")[0]),
+               caller: [($m.caller // [])[] | select(. == $v or . == "skill:/" + $maybe_skill)]}
+          ]' "$out"
+        ;;
+      --depends-on)
+        jq --arg v "$lens_value" '
+          [ to_entries[]
+            | .key as $k | .value as $m
+            | select(($m["depends-on"] // []) | any(. == $v))
+            | {id: $m.id, path: ($k | split(":")[0]),
+               "depends-on": [($m["depends-on"] // [])[] | select(. == $v)]}
+          ]' "$out"
+        ;;
+      --by-failure-mode)
+        jq --arg v "$lens_value" '
+          [ to_entries[]
+            | .key as $k | .value as $m
+            | select(($m["failure-mode"] // []) | any(contains($v)))
+            | {id: $m.id, path: ($k | split(":")[0]),
+               "failure-mode": [($m["failure-mode"] // [])[] | select(contains($v))]}
+          ]' "$out"
+        ;;
+    esac
+    return 0
+  fi
+
+  # Legacy positional shape: <key>:<value>.
   # @failure-mode: missing-expr
   if [[ -z "$expr" ]]; then
     echo "Usage: module-manifest.sh query <key>:<value>" >&2

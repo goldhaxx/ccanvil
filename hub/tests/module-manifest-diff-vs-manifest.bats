@@ -22,6 +22,16 @@ setup() {
   echo "$output" | jq -e '.status == "ok"'
 }
 
+# AC-5: new-side-effect-not-declared. Diff adds `# @side-effect: writes-undeclared-marker`
+# inside cmd_query's body, but `writes-undeclared-marker` not in declared side-effect array.
+@test "diff-vs-manifest: new @side-effect marker → new-side-effect-not-declared drift" {
+  set -e
+  run bash "$SCRIPT" diff-vs-manifest --diff "$REPO_ROOT/hub/tests/fixtures/manifest/diffs/new-side-effect.diff"
+  [ "$status" -eq 2 ]
+  echo "$output" | jq -e '.status == "drift"'
+  echo "$output" | jq -e '[.drift[] | select(.drift_type == "new-side-effect-not-declared" and .id == "cmd_query" and .value == "writes-undeclared-marker")] | length >= 1'
+}
+
 # AC-4: new-exit-path-not-declared. Diff adds `+ return 7` inside cmd_query's body
 # but no failure-mode entry has exit=7 → drift entry.
 @test "diff-vs-manifest: new exit code in body → new-exit-path-not-declared drift" {

@@ -1161,6 +1161,21 @@ cmd_diff_vs_manifest() {
           fi
         done
 
+        # ---- new-side-effect detection ----
+        # Match `# @side-effect: <id>` markers added inside the body.
+        if [[ "$line_text" =~ ^[[:space:]]*#[[:space:]]*@side-effect:[[:space:]]*([A-Za-z0-9_.-]+) ]]; then
+          local se_id="${BASH_REMATCH[1]}"
+          local declared_se
+          declared_se=$(echo "$prim_obj" | jq -r '."side-effect" // [] | .[]?')
+          if ! grep -qxF "$se_id" <<< "$declared_se"; then
+            drift_entries+="$(jq -nc \
+              --arg p "${path}:${prim_id}" \
+              --arg id "$prim_id" \
+              --arg v "$se_id" \
+              '{path:$p,id:$id,drift_type:"new-side-effect-not-declared",value:$v}')"$'\n'
+          fi
+        fi
+
         # ---- new-exit-path detection ----
         # Match `return N` or `exit N` (N != 0) at start-of-trimmed-line.
         if [[ "$line_text" =~ ^[[:space:]]*(return|exit)[[:space:]]+([1-9][0-9]*) ]]; then

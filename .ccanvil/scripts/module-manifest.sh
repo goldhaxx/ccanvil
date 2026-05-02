@@ -817,6 +817,10 @@ cmd_seed_allowlist() {
       echo "$entry"
     }
 
+    # Render to a buffer first; emit canonical header + sectioned output once
+    # all candidates are resolved. Section headers only fire when the section
+    # has at least one entry — keeps empty-substrate output truly empty.
+    local scripts_buf="" skills_buf="" md_buf="" hooks_buf=""
     local f fn fns
     if [[ -d .ccanvil/scripts ]]; then
       for f in .ccanvil/scripts/*.sh; do
@@ -824,10 +828,12 @@ cmd_seed_allowlist() {
         fns=$(grep -oE '^cmd_[a-z_]+' "$f" | sort -u)
         if [[ -n "$fns" ]]; then
           while IFS= read -r fn; do
-            _seed_emit "${f}:${fn}"
+            local entry; entry=$(_seed_emit "${f}:${fn}") || true
+            [[ -n "$entry" ]] && scripts_buf+="${entry}"$'\n'
           done <<< "$fns"
         else
-          _seed_emit "$f"
+          local entry; entry=$(_seed_emit "$f") || true
+          [[ -n "$entry" ]] && scripts_buf+="${entry}"$'\n'
         fi
       done
     fi
@@ -839,11 +845,13 @@ cmd_seed_allowlist() {
         f="${skill_dir}SKILL.md"
         [[ -f "$f" ]] || continue
         name=$(awk '/^---$/{c++; next} c==1 && /^name:/{sub(/^name:[[:space:]]*/,""); gsub(/^["\x27]|["\x27]$/,""); print; exit}' "$f")
+        local entry
         if [[ -n "$name" ]]; then
-          _seed_emit "${f}:${name}"
+          entry=$(_seed_emit "${f}:${name}") || true
         else
-          _seed_emit "$f"
+          entry=$(_seed_emit "$f") || true
         fi
+        [[ -n "$entry" ]] && skills_buf+="${entry}"$'\n'
       done
     fi
 
@@ -853,7 +861,8 @@ cmd_seed_allowlist() {
       [[ -d "$md_dir" ]] || continue
       for f in "$md_dir"/*.md; do
         [[ -f "$f" ]] || continue
-        _seed_emit "$f"
+        local entry; entry=$(_seed_emit "$f") || true
+        [[ -n "$entry" ]] && md_buf+="${entry}"$'\n'
       done
     done
 
@@ -861,9 +870,23 @@ cmd_seed_allowlist() {
     if [[ -d .claude/hooks ]]; then
       for f in .claude/hooks/*.sh; do
         [[ -f "$f" ]] || continue
-        _seed_emit "$f"
+        local entry; entry=$(_seed_emit "$f") || true
+        [[ -n "$entry" ]] && hooks_buf+="${entry}"$'\n'
       done
     fi
+
+    # Render. Header is conditional on having at least one entry — empty
+    # substrate (AC-3) emits nothing.
+    if [[ -n "$scripts_buf$skills_buf$md_buf$hooks_buf" ]]; then
+      echo "# Proposed manifest allowlist (BTS-267 seed-allowlist)."
+      echo "# Review entries below, then pipe to .ccanvil/manifest-allowlist.txt."
+      echo
+      [[ -n "$scripts_buf" ]] && { echo "# Shell scripts"; printf '%s' "$scripts_buf"; echo; }
+      [[ -n "$skills_buf"  ]] && { echo "# Skills";        printf '%s' "$skills_buf";  echo; }
+      [[ -n "$md_buf"      ]] && { echo "# Rules / agents / commands"; printf '%s' "$md_buf"; echo; }
+      [[ -n "$hooks_buf"   ]] && { echo "# Hooks";         printf '%s' "$hooks_buf"; }
+    fi
+    exit 0
   )
 }
 

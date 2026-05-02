@@ -21,3 +21,16 @@ setup() {
   echo "$output" | jq -e '.drift == []'
   echo "$output" | jq -e '.status == "ok"'
 }
+
+# AC-2: new-caller-not-declared. New skill file invokes cmd_extract; primitive's
+# manifest caller list does NOT include the new skill path → drift entry.
+@test "diff-vs-manifest: new caller in added file → new-caller-not-declared drift" {
+  set -e
+  run bash "$SCRIPT" diff-vs-manifest --diff "$REPO_ROOT/hub/tests/fixtures/manifest/diffs/new-caller.diff"
+  [ "$status" -eq 2 ]
+  echo "$output" | jq -e '.status == "drift"'
+  echo "$output" | jq -e '.drift | length >= 1'
+  echo "$output" | jq -e '[.drift[] | select(.drift_type == "new-caller-not-declared")] | length >= 1'
+  # Specifically: the new skill path appears as the value in some new-caller drift entry.
+  echo "$output" | jq -e '[.drift[] | select(.drift_type == "new-caller-not-declared" and .value == ".claude/skills/test-new-caller/SKILL.md")] | length >= 1'
+}

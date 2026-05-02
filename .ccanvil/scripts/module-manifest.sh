@@ -920,11 +920,113 @@ cmd_seed_allowlist() {
   )
 }
 
+# Walk a unified diff and emit a JSON object per touched file with its added-line
+# blob. Output: NDJSON, one object per file: {path, is_new, added}.
+# `added` is an array of strings (the +-prefix-stripped added lines).
+_diff_files_added() {
+  local diff_file="$1"
+  awk '
+    /^diff --git / { flush(); cur=""; isnew=0; next }
+    /^new file mode/ { isnew=1; next }
+    /^--- / { next }
+    /^\+\+\+ / {
+      flush()
+      cur=$2
+      sub(/^b\//, "", cur)
+      next
+    }
+    /^@@/ { in_hunk=1; next }
+    in_hunk && /^\+/ {
+      line=$0
+      sub(/^\+/, "", line)
+      if (cur != "") added[++count]=line
+    }
+    # context (" ") or removed ("-") lines — ignored intentionally.
+    function flush() {
+      if (cur != "" && count > 0) {
+        printf "{\"path\":\"%s\",\"is_new\":%d,\"added\":[", cur, isnew
+        for (i=1; i<=count; i++) {
+          gsub(/\\/, "\\\\", added[i])
+          gsub(/"/, "\\\"", added[i])
+          gsub(/\t/, "\\t", added[i])
+          if (i>1) printf ","
+          printf "\"%s\"", added[i]
+        }
+        printf "]}\n"
+      }
+      delete added; count=0; in_hunk=0
+    }
+    END { flush() }
+  ' "$diff_file"
+}
+
+# Read allowlist into two parallel arrays (function-level only for now):
+#   ALLOW_FN_PATH[cmd_X]=<path>
+#   ALLOW_FN_ID[cmd_X]=cmd_X
+# File-level entries are tracked separately; this helper handles function-level.
+_diff_load_function_allowlist() {
+  local allow="${1:-.ccanvil/manifest-allowlist.txt}"
+  [[ -f "$allow" ]] || return 0
+  local raw path fn
+  while IFS= read -r raw; do
+    [[ "$raw" =~ ^[[:space:]]*($|#) ]] && continue
+    if [[ "$raw" == *:* ]]; then
+      path="${raw%%:*}"
+      fn="${raw##*:}"
+      # function-level entries only — skill manifests use :<name> too,
+      # filter to cmd_*-style ids.
+      [[ "$fn" =~ ^cmd_ ]] || continue
+      printf '%s\t%s\n' "$fn" "$path"
+    fi
+  done < "$allow"
+}
+
+# Read manifest's `caller:` array for a given primitive.
+# Args: <containing-file> <fn-id>
+# Output: one caller value per line.
+_diff_get_callers() {
+  local path="$1" id="$2"
+  cmd_extract "$path" 2>/dev/null \
+    | jq -r --arg id "$id" '.[] | select(.id == $id) | .caller // [] | .[]?'
+}
+
+# Normalize a caller-eligible path to its skill: form (if applicable) for
+# matching against manifest declarations.
+# .claude/skills/<n>/SKILL.md  → skill:/<n>
+# .claude/commands/<n>.md      → skill:/<n>
+# Otherwise: echo the literal path (path-form match).
+_diff_normalize_caller_path() {
+  local path="$1"
+  if [[ "$path" =~ ^\.claude/skills/([^/]+)/SKILL\.md$ ]]; then
+    echo "skill:/${BASH_REMATCH[1]}"
+  elif [[ "$path" =~ ^\.claude/commands/([^/]+)\.md$ ]]; then
+    echo "skill:/${BASH_REMATCH[1]}"
+  else
+    echo "$path"
+  fi
+}
+
+# @manifest
+# purpose: Walk a unified diff and detect manifest-drift introduced by added lines (new caller / new depends-on / new exit path / new side-effect not declared) — deterministic Layer 3 gate that replaces operator-attention prose nudges.
+# input: flag --diff <path|->
+# output: stdout JSON envelope {drift:[{path,id,drift_type,value}],status:"ok"|"drift"}
+# output: exit-codes 0 no-drift, 2 drift-detected|usage-error|diff-file-not-found
+# depends-on: jq
+# depends-on: awk
+# depends-on: cmd_extract
+# side-effect: reads-diff-and-allowlist
+# failure-mode: usage-error | exit=2 | visible=stderr-usage
+# failure-mode: diff-file-not-found | exit=2 | visible=stderr-error
+# failure-mode: drift-detected | exit=2 | visible=stdout-envelope-status-drift
+# contract: empty-diff-emits-empty-drift-array
+# contract: drift-array-mirrors-cmd_validate-shape
+# anchor: BTS-268 (origin)
 cmd_diff_vs_manifest() {
   local diff_path=""
   while [[ $# -gt 0 ]]; do
     case "$1" in
       --diff) diff_path="$2"; shift 2 ;;
+      # @failure-mode: usage-error
       *)      echo "Usage: module-manifest.sh diff-vs-manifest --diff <path|->" >&2; return 2 ;;
     esac
   done
@@ -932,13 +1034,77 @@ cmd_diff_vs_manifest() {
     echo "Usage: module-manifest.sh diff-vs-manifest --diff <path|->" >&2
     return 2
   fi
+  # @failure-mode: diff-file-not-found
   if [[ "$diff_path" != "-" && ! -f "$diff_path" ]]; then
     echo "ERROR: diff file not found: $diff_path" >&2
     return 2
   fi
 
-  # Stub: emit empty drift envelope. Real drift detection lands in Steps 3-6.
-  printf '{"drift":[],"status":"ok"}\n'
+  # Stdin support: spool to tempfile, then re-enter file path.
+  local tmp_diff=""
+  if [[ "$diff_path" == "-" ]]; then
+    tmp_diff=$(mktemp)
+    # @side-effect: reads-diff-and-allowlist
+    cat - > "$tmp_diff"
+    diff_path="$tmp_diff"
+  fi
+
+  # Load function-level allowlist (cmd_X → path map).
+  local allow_table
+  allow_table=$(_diff_load_function_allowlist)
+
+  # Walk diff files and detect new-caller drift.
+  local drift_entries=""
+  local files_json
+  files_json=$(_diff_files_added "$diff_path")
+
+  local file_obj path is_new added
+  while IFS= read -r file_obj; do
+    [[ -z "$file_obj" ]] && continue
+    path=$(echo "$file_obj" | jq -r '.path')
+    # Normalize this caller-eligible path for matching against manifest caller lists.
+    local caller_norm
+    caller_norm=$(_diff_normalize_caller_path "$path")
+
+    # For each cmd_X on the allowlist, check if any added line in this file invokes it.
+    while IFS=$'\t' read -r fn primitive_path; do
+      [[ -z "$fn" ]] && continue
+      # Skip self-calls — if the diffed file IS the primitive's own file, those are
+      # depends-on / exit / side-effect concerns, not new-caller drift.
+      [[ "$path" == "$primitive_path" ]] && continue
+
+      # Did any added line in this file mention cmd_X (word-boundary)?
+      if echo "$file_obj" | jq -r '.added[]' | grep -qE "\b${fn}\b"; then
+        # Look up primitive's existing caller list.
+        local declared_callers
+        declared_callers=$(_diff_get_callers "$primitive_path" "$fn")
+        # Match either skill:/<n> form or literal path form.
+        if ! echo "$declared_callers" | grep -qxF "$caller_norm" \
+             && ! echo "$declared_callers" | grep -qxF "$path"; then
+          drift_entries+="$(jq -nc \
+            --arg p "${primitive_path}:${fn}" \
+            --arg id "$fn" \
+            --arg v "$path" \
+            '{path:$p,id:$id,drift_type:"new-caller-not-declared",value:$v}')"$'\n'
+        fi
+      fi
+    done <<< "$allow_table"
+  done <<< "$files_json"
+
+  # Cleanup.
+  [[ -n "$tmp_diff" ]] && rm -f "$tmp_diff"
+
+  # Render envelope.
+  local drift_array
+  if [[ -z "$drift_entries" ]]; then
+    drift_array='[]'
+  else
+    drift_array=$(echo "$drift_entries" | jq -s '.')
+  fi
+  local status_val="ok"
+  [[ "$drift_array" != '[]' ]] && status_val="drift"
+  jq -nc --argjson d "$drift_array" --arg s "$status_val" '{drift:$d,status:$s}'
+  [[ "$status_val" == "drift" ]] && return 2 || return 0
 }
 
 cmd="${1:-}"

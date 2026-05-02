@@ -1147,11 +1147,8 @@ cmd_diff_vs_manifest() {
         [[ -z "$prim_obj" ]] && continue
 
         # ---- depends-on candidate detection ----
-        # Tokens we recognize as candidate deps:
-        #   *.sh script names; bare jq/awk/grep/sed/curl/git util names
         local deps_declared
         deps_declared=$(echo "$prim_obj" | jq -r '."depends-on" // [] | .[]?')
-        # Match script-with-extension tokens.
         local dep_token
         for dep_token in $(echo "$line_text" | grep -oE '[a-z][a-zA-Z0-9_-]*\.sh' | sort -u); do
           if ! grep -qxF "$dep_token" <<< "$deps_declared" \
@@ -1163,6 +1160,27 @@ cmd_diff_vs_manifest() {
               '{path:$p,id:$id,drift_type:"new-depends-on-not-declared",value:$v}')"$'\n'
           fi
         done
+
+        # ---- new-exit-path detection ----
+        # Match `return N` or `exit N` (N != 0) at start-of-trimmed-line.
+        if [[ "$line_text" =~ ^[[:space:]]*(return|exit)[[:space:]]+([1-9][0-9]*) ]]; then
+          local exit_code="${BASH_REMATCH[2]}"
+          # Read failure-mode array; extract declared exit codes via `exit=<N>` segment.
+          local declared_exits
+          declared_exits=$(echo "$prim_obj" \
+            | jq -r '."failure-mode" // [] | .[] | capture("exit=(?<n>[0-9]+|passthrough|propagate|\\*)") // empty | .n' \
+            | sort -u)
+          # `*` / passthrough / propagate accept any code.
+          if grep -qxE '^(\*|passthrough|propagate)$' <<< "$declared_exits"; then
+            : # accepted
+          elif ! grep -qxF "$exit_code" <<< "$declared_exits"; then
+            drift_entries+="$(jq -nc \
+              --arg p "${path}:${prim_id}" \
+              --arg id "$prim_id" \
+              --arg v "$exit_code" \
+              '{path:$p,id:$id,drift_type:"new-exit-path-not-declared",value:$v}')"$'\n'
+          fi
+        fi
       done <<< "$added_records"
     fi
   done <<< "$files_json"

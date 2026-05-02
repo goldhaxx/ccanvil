@@ -22,6 +22,16 @@ setup() {
   echo "$output" | jq -e '.status == "ok"'
 }
 
+# AC-4: new-exit-path-not-declared. Diff adds `+ return 7` inside cmd_query's body
+# but no failure-mode entry has exit=7 → drift entry.
+@test "diff-vs-manifest: new exit code in body → new-exit-path-not-declared drift" {
+  set -e
+  run bash "$SCRIPT" diff-vs-manifest --diff "$REPO_ROOT/hub/tests/fixtures/manifest/diffs/new-exit-path.diff"
+  [ "$status" -eq 2 ]
+  echo "$output" | jq -e '.status == "drift"'
+  echo "$output" | jq -e '[.drift[] | select(.drift_type == "new-exit-path-not-declared" and .id == "cmd_query" and .value == "7")] | length >= 1'
+}
+
 # AC-3: new-depends-on-not-declared. Diff adds `bash linear-query.sh ...` inside
 # cmd_query's body, but linear-query.sh is NOT in cmd_query's declared depends-on.
 @test "diff-vs-manifest: new depends-on in body → new-depends-on-not-declared drift" {

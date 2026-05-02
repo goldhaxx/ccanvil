@@ -1097,26 +1097,37 @@ cmd_diff_vs_manifest() {
     caller_norm=$(_diff_normalize_caller_path "$path")
 
     # ----- new-caller drift -----
-    # For each cmd_X on the allowlist, check if any added line in this file invokes it.
-    while IFS=$'\t' read -r fn primitive_path; do
-      [[ -z "$fn" ]] && continue
-      # Skip self-calls — if the diffed file IS the primitive's own file, those are
-      # depends-on / exit / side-effect concerns, not new-caller drift.
-      [[ "$path" == "$primitive_path" ]] && continue
+    # Caller-eligible paths: runtime-invocation surfaces only. Skip docs/specs,
+    # tests, fixtures, and lockfile/allowlist text — those mention cmd_* names
+    # in prose or assertions, not as callers.
+    local caller_eligible=0
+    case "$path" in
+      .claude/skills/*/SKILL.md|.claude/commands/*.md|.claude/rules/*.md|.claude/agents/*.md|.claude/hooks/*.sh|.ccanvil/scripts/*.sh)
+        caller_eligible=1
+        ;;
+    esac
 
-      if echo "$file_obj" | jq -r '.added[].text' | grep -qE "\b${fn}\b"; then
-        local declared_callers
-        declared_callers=$(_diff_get_callers "$primitive_path" "$fn")
-        if ! echo "$declared_callers" | grep -qxF "$caller_norm" \
-             && ! echo "$declared_callers" | grep -qxF "$path"; then
-          drift_entries+="$(jq -nc \
-            --arg p "${primitive_path}:${fn}" \
-            --arg id "$fn" \
-            --arg v "$path" \
-            '{path:$p,id:$id,drift_type:"new-caller-not-declared",value:$v}')"$'\n'
+    if (( caller_eligible == 1 )); then
+      while IFS=$'\t' read -r fn primitive_path; do
+        [[ -z "$fn" ]] && continue
+        # Skip self-calls — if the diffed file IS the primitive's own file, those are
+        # depends-on / exit / side-effect concerns, not new-caller drift.
+        [[ "$path" == "$primitive_path" ]] && continue
+
+        if echo "$file_obj" | jq -r '.added[].text' | grep -qE "\b${fn}\b"; then
+          local declared_callers
+          declared_callers=$(_diff_get_callers "$primitive_path" "$fn")
+          if ! echo "$declared_callers" | grep -qxF "$caller_norm" \
+               && ! echo "$declared_callers" | grep -qxF "$path"; then
+            drift_entries+="$(jq -nc \
+              --arg p "${primitive_path}:${fn}" \
+              --arg id "$fn" \
+              --arg v "$path" \
+              '{path:$p,id:$id,drift_type:"new-caller-not-declared",value:$v}')"$'\n'
+          fi
         fi
-      fi
-    done <<< "$allow_table"
+      done <<< "$allow_table"
+    fi
 
     # ----- new-depends-on / new-exit-path / new-side-effect drift (in-body) -----
     # These only apply when the diffed file is itself manifested. Per added line,
@@ -1147,10 +1158,14 @@ cmd_diff_vs_manifest() {
         [[ -z "$prim_obj" ]] && continue
 
         # ---- depends-on candidate detection ----
+        # Skip self-references — when the dep token matches the host file's basename,
+        # the line just mentions the script's own name (likely in prose or echo).
+        local self_basename="${path##*/}"
         local deps_declared
         deps_declared=$(echo "$prim_obj" | jq -r '."depends-on" // [] | .[]?')
         local dep_token
         for dep_token in $(echo "$line_text" | grep -oE '[a-z][a-zA-Z0-9_-]*\.sh' | sort -u); do
+          [[ "$dep_token" == "$self_basename" ]] && continue
           if ! grep -qxF "$dep_token" <<< "$deps_declared" \
                && ! grep -qF "$dep_token" <<< "$deps_declared"; then
             drift_entries+="$(jq -nc \

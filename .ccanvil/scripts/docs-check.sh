@@ -47,7 +47,7 @@ PROJECT_TREE_SUBCOMMANDS=(
   evidence-scan-session lifecycle-state
   artifact-read artifact-write route-of ssot-migrate
   session-info assert-pr-title remote-presence
-  stasis-carry-forward ship-finalize
+  stasis-carry-forward ship-finalize validate-spec
 )
 
 # ---------------------------------------------------------------------------
@@ -6720,6 +6720,139 @@ _print_usage() {
   echo "Usage: docs-check.sh {$verbs} [args...]" >&2
 }
 
+# @manifest
+# purpose: Layer 1 (Spec-Driven Development) structural validator — reads docs/specs/<id>.md (or Linear-routed Document) and emits JSON envelope assessing AC count, Given/When/Then coverage, error-criterion presence, and file-reference resolution; warn-but-don't-block gate invoked by /spec final step.
+# input: --feature <id>
+# input: --project-dir <path>
+# output: stdout JSON envelope {coverage, missing_file_refs, findings, status}
+# output: exit-codes 0 ok, 2 drift|usage-error|spec-not-found
+# depends-on: jq
+# depends-on: awk
+# depends-on: cmd_artifact_read
+# side-effect: reads-spec-content
+# failure-mode: usage-error | exit=2 | visible=stderr-usage
+# failure-mode: spec-not-found | exit=2 | visible=stderr-error
+# failure-mode: drift-detected | exit=2 | visible=stdout-envelope-status-drift
+# contract: warn-but-dont-block-via-/spec-final-step
+# contract: envelope-shape-mirrors-cmd_validate
+# anchor: BTS-265 (origin)
+cmd_validate_spec() {
+  local feature=""
+  local project_dir="."
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --feature)     feature="$2"; shift 2 ;;
+      --project-dir) project_dir="$2"; shift 2 ;;
+      # @failure-mode: usage-error
+      *) echo "Usage: docs-check.sh validate-spec --feature <id> [--project-dir <path>]" >&2; return 2 ;;
+    esac
+  done
+  if [[ -z "$feature" ]]; then
+    echo "Usage: docs-check.sh validate-spec --feature <id>" >&2
+    return 2
+  fi
+
+  local spec_content
+  local spec_path="$project_dir/docs/specs/${feature}.md"
+  # @side-effect: reads-spec-content
+  if [[ -f "$spec_path" ]]; then
+    spec_content=$(cat "$spec_path")
+  else
+    if ! spec_content=$(cmd_artifact_read --kind spec --feature "$feature" --project-dir "$project_dir" 2>/dev/null); then
+      # @failure-mode: spec-not-found
+      echo "ERROR: spec not found: docs/specs/${feature}.md" >&2
+      return 2
+    fi
+    if [[ -z "$spec_content" ]]; then
+      echo "ERROR: spec not found: docs/specs/${feature}.md" >&2
+      return 2
+    fi
+  fi
+
+  # Parse Acceptance Criteria section.
+  local ac_section
+  ac_section=$(echo "$spec_content" | awk '
+    /^## Acceptance Criteria/ { in_sec=1; next }
+    in_sec && /^## / { in_sec=0 }
+    in_sec { print }
+  ')
+
+  local ac_count gwt_count error_count
+  ac_count=$(echo "$ac_section" | grep -cE '^[[:space:]]*- \[ ?[xX]? ?\] \*\*AC-' || true)
+  gwt_count=$(echo "$ac_section" | grep -ciE 'given.*when.*then|given:.*when:.*then:' || true)
+  error_count=$(echo "$ac_section" | grep -ciE '\b(error|edge|fail|invalid)\b' || true)
+
+  # Parse Affected Files table for file refs.
+  local af_section
+  af_section=$(echo "$spec_content" | awk '
+    /^## Affected Files/ { in_sec=1; next }
+    in_sec && /^## / { in_sec=0 }
+    in_sec { print }
+  ')
+
+  local file_refs_total=0 file_refs_resolved=0
+  local missing_file_refs="[]"
+  local missing_acc=""
+  local row line path change
+  while IFS= read -r row; do
+    [[ "$row" =~ ^\| ]] || continue
+    [[ "$row" =~ ^\|[[:space:]]*-+ ]] && continue
+    [[ "$row" =~ ^\|[[:space:]]*File[[:space:]]*\| ]] && continue
+    path=$(echo "$row" | awk -F'\\|' '{print $2}' | grep -oE '`[^`]+`' | head -1 | tr -d '`')
+    change=$(echo "$row" | awk -F'\\|' '{print $3}' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
+    [[ -z "$path" ]] && continue
+    file_refs_total=$((file_refs_total + 1))
+    if [[ "$change" =~ ^New ]] || [[ "$path" == *"*"* ]]; then
+      file_refs_resolved=$((file_refs_resolved + 1))
+    elif [[ -e "$project_dir/$path" ]]; then
+      file_refs_resolved=$((file_refs_resolved + 1))
+    else
+      missing_acc+="$(jq -nc --arg p "$path" --arg r "$row" '{path:$p,row:$r}')"$'\n'
+    fi
+  done <<< "$af_section"
+
+  if [[ -n "$missing_acc" ]]; then
+    missing_file_refs=$(echo "$missing_acc" | jq -s '.')
+  fi
+
+  # Determine status.
+  local status_val="ok"
+  local findings=()
+  # @failure-mode: drift-detected
+  if (( ac_count == 0 )); then
+    findings+=("no-acceptance-criteria")
+    status_val="drift"
+  fi
+  if (( ac_count >= 4 && gwt_count == 0 )); then
+    findings+=("missing-given-when-then")
+    status_val="drift"
+  fi
+  if (( error_count == 0 )); then
+    findings+=("missing-error-criterion")
+    status_val="drift"
+  fi
+  if [[ "$missing_file_refs" != "[]" ]]; then
+    findings+=("unresolved-file-refs")
+    status_val="drift"
+  fi
+
+  local findings_json
+  findings_json=$(printf '%s\n' "${findings[@]:-}" | jq -R . | jq -s 'map(select(length > 0))')
+
+  jq -nc \
+    --argjson ac "$ac_count" \
+    --argjson gwt "$gwt_count" \
+    --argjson err "$error_count" \
+    --argjson rr "$file_refs_resolved" \
+    --argjson rt "$file_refs_total" \
+    --argjson mfr "$missing_file_refs" \
+    --argjson f "$findings_json" \
+    --arg s "$status_val" \
+    '{coverage:{ac_count:$ac,gwt_count:$gwt,error_criterion_count:$err,file_refs_resolved:$rr,file_refs_total:$rt},missing_file_refs:$mfr,findings:$f,status:$s}'
+
+  [[ "$status_val" == "drift" ]] && return 2 || return 0
+}
+
 cmd="${1:-}"
 shift || true
 
@@ -6775,6 +6908,7 @@ case "$cmd" in
   route-of)          cmd_route_of "$@" ;;
   ssot-migrate)      cmd_ssot_migrate "$@" ;;
   session-info)      cmd_session_info "$@" ;;
+  validate-spec)     cmd_validate_spec "$@" ;;
   *)
     _print_usage
     exit 1

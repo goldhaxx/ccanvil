@@ -788,13 +788,146 @@ cmd_index() {
   mv "$out.tmp" "$out"
 }
 
+# @manifest
+# purpose: Walk a downstream-node substrate and emit a proposed manifest allowlist on stdout, in canonical format with section headers, deduped against an existing allowlist when present.
+# input: flag --dir <path> (default cwd)
+# output: stdout proposed-allowlist text
+# output: exit-codes 0 ok, 2 usage-error|directory-not-found
+# depends-on: grep
+# depends-on: awk
+# side-effect: reads-substrate-and-existing-allowlist
+# failure-mode: usage-error | exit=2 | visible=stderr-usage
+# failure-mode: directory-not-found | exit=2 | visible=stderr-error
+# contract: empty-substrate-emits-empty-stdout
+# contract: dedup-against-existing-allowlist-when-present
+# contract: section-headers-only-when-section-has-entries
+# anchor: BTS-267 (origin)
+cmd_seed_allowlist() {
+  local dir="."
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --dir) dir="$2"; shift 2 ;;
+      # @failure-mode: usage-error
+      *)     echo "Usage: module-manifest.sh seed-allowlist [--dir <path>]" >&2; return 2 ;;
+    esac
+  done
+  # @failure-mode: directory-not-found
+  if [[ ! -d "$dir" ]]; then
+    echo "ERROR: directory not found: $dir" >&2
+    return 2
+  fi
+  # @side-effect: reads-substrate-and-existing-allowlist
+
+  (
+    cd "$dir" || exit 2
+
+    # Read existing allowlist into a dedup set (when present).
+    local existing="" allow=".ccanvil/manifest-allowlist.txt"
+    if [[ -f "$allow" ]]; then
+      existing=$(grep -vE '^\s*(#|$)' "$allow" | sort -u)
+    fi
+    # Read hub-managed paths from .ccanvil/ccanvil.lock so the seed only
+    # proposes node-owned candidates. A fresh node that just pulled has all
+    # hub-distributed files in the lockfile — filtering them yields a true
+    # "what's mine to manifest?" answer instead of 100+ phantom candidates.
+    local hub_paths="" lock=".ccanvil/ccanvil.lock"
+    if [[ -f "$lock" ]]; then
+      hub_paths=$(jq -r '.files | keys[]' "$lock" 2>/dev/null || true)
+    fi
+    _seed_emit() {
+      local entry="$1"
+      # Strip optional :fn suffix to get the bare path for lockfile lookup.
+      local path="${entry%%:*}"
+      if [[ -n "$hub_paths" ]] && grep -qxF "$path" <<< "$hub_paths"; then
+        return 0
+      fi
+      if [[ -n "$existing" ]] && grep -qxF "$entry" <<< "$existing"; then
+        return 0
+      fi
+      echo "$entry"
+    }
+
+    # Render to a buffer first; emit canonical header + sectioned output once
+    # all candidates are resolved. Section headers only fire when the section
+    # has at least one entry — keeps empty-substrate output truly empty.
+    local scripts_buf="" skills_buf="" md_buf="" hooks_buf=""
+    local f fn fns
+    if [[ -d .ccanvil/scripts ]]; then
+      for f in .ccanvil/scripts/*.sh; do
+        [[ -f "$f" ]] || continue
+        fns=$(grep -oE '^cmd_[a-z_]+' "$f" | sort -u)
+        if [[ -n "$fns" ]]; then
+          while IFS= read -r fn; do
+            local entry; entry=$(_seed_emit "${f}:${fn}") || true
+            [[ -n "$entry" ]] && scripts_buf+="${entry}"$'\n'
+          done <<< "$fns"
+        else
+          local entry; entry=$(_seed_emit "$f") || true
+          [[ -n "$entry" ]] && scripts_buf+="${entry}"$'\n'
+        fi
+      done
+    fi
+
+    # Skills — frontmatter `name:` resolves the manifest id.
+    local skill_dir name
+    if [[ -d .claude/skills ]]; then
+      for skill_dir in .claude/skills/*/; do
+        f="${skill_dir}SKILL.md"
+        [[ -f "$f" ]] || continue
+        name=$(awk '/^---$/{c++; next} c==1 && /^name:/{sub(/^name:[[:space:]]*/,""); gsub(/^["\x27]|["\x27]$/,""); print; exit}' "$f")
+        local entry
+        if [[ -n "$name" ]]; then
+          entry=$(_seed_emit "${f}:${name}") || true
+        else
+          entry=$(_seed_emit "$f") || true
+        fi
+        [[ -n "$entry" ]] && skills_buf+="${entry}"$'\n'
+      done
+    fi
+
+    # Rules / agents / commands — basename matches manifest id, plain path emit.
+    local md_dir
+    for md_dir in .claude/rules .claude/agents .claude/commands; do
+      [[ -d "$md_dir" ]] || continue
+      for f in "$md_dir"/*.md; do
+        [[ -f "$f" ]] || continue
+        local entry; entry=$(_seed_emit "$f") || true
+        [[ -n "$entry" ]] && md_buf+="${entry}"$'\n'
+      done
+    done
+
+    # Hooks — file-level entries.
+    if [[ -d .claude/hooks ]]; then
+      for f in .claude/hooks/*.sh; do
+        [[ -f "$f" ]] || continue
+        local entry; entry=$(_seed_emit "$f") || true
+        [[ -n "$entry" ]] && hooks_buf+="${entry}"$'\n'
+      done
+    fi
+
+    # Render. Header is conditional on having at least one entry — empty
+    # substrate (AC-3) emits nothing.
+    if [[ -n "$scripts_buf$skills_buf$md_buf$hooks_buf" ]]; then
+      echo "# Proposed manifest allowlist (BTS-267 seed-allowlist)."
+      echo "# Review entries below, then pipe to .ccanvil/manifest-allowlist.txt."
+      echo
+      [[ -n "$scripts_buf" ]] && { echo "# Shell scripts"; printf '%s' "$scripts_buf"; echo; }
+      [[ -n "$skills_buf"  ]] && { echo "# Skills";        printf '%s' "$skills_buf";  echo; }
+      [[ -n "$md_buf"      ]] && { echo "# Rules / agents / commands"; printf '%s' "$md_buf"; echo; }
+      [[ -n "$hooks_buf"   ]] && { echo "# Hooks";         printf '%s' "$hooks_buf"; }
+    fi
+    exit 0
+  )
+}
+
 cmd="${1:-}"
 shift || true
 case "$cmd" in
-  extract)  cmd_extract "$@" ;;
-  validate) cmd_validate "$@" ;;
-  query)    cmd_query "$@" ;;
-  index)    cmd_index "$@" ;;
-  "")       echo "Usage: module-manifest.sh {extract|validate|query|index} [args]" >&2; exit 2 ;;
-  *)        echo "Usage: module-manifest.sh {extract|validate|query|index} [args]" >&2; exit 2 ;;
+  extract)        cmd_extract "$@" ;;
+  validate)       cmd_validate "$@" ;;
+  query)          cmd_query "$@" ;;
+  index)          cmd_index "$@" ;;
+  seed-allowlist) cmd_seed_allowlist "$@" ;;
+  "")             echo "Usage: module-manifest.sh {extract|validate|query|index|seed-allowlist} [args]" >&2; exit 2 ;;
+  *)              echo "Usage: module-manifest.sh {extract|validate|query|index|seed-allowlist} [args]" >&2; exit 2 ;;
 esac

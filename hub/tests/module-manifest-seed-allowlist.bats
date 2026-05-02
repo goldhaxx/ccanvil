@@ -12,3 +12,13 @@ setup() {
   [ "$status" -eq 2 ]
   [[ "$output" =~ "directory not found" ]]
 }
+
+# AC-3: empty substrate (no .ccanvil/ and no .claude/) → exit 0, empty stdout.
+@test "seed-allowlist: empty node directory exits 0 with no entries" {
+  empty_node="$BATS_TEST_TMPDIR/empty-node"
+  mkdir -p "$empty_node"
+  run bash "$SCRIPT" seed-allowlist --dir "$empty_node"
+  [ "$status" -eq 0 ]
+  # No proposed entries — stdout may be empty or comment-only.
+  [[ -z "$(echo "$output" | grep -vE '^\s*(#|$)')" ]]
+}

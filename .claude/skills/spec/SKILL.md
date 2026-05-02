@@ -105,6 +105,16 @@ A work ref is one of:
     durable state, the auto-transition to Todo can still proceed, and the
     operator retries the printed recipe at their convenience.
 
+8b. **BTS-265: Layer 1 structural validation (warn-only).** After the local archive write and (when applicable) the Linear dispatch, invoke the deterministic spec validator:
+
+    ```bash
+    bash .ccanvil/scripts/docs-check.sh validate-spec --feature "$feature_id" --project-dir . > /tmp/spec-validate.json 2>/dev/null
+    ```
+
+    Parse the JSON envelope (`{coverage, missing_file_refs, findings, status}`). When `status == "drift"`, surface the findings under a `## Validation Findings` section in the operator-facing summary (Step 11) — do NOT block the flow. Operator decides whether to revise the spec before activating.
+
+    This pairs with L1-B's `/spec --review` critic-mode hand-off (BTS-266) — when that ships, the critic agent reads this same JSON envelope as one of its inputs.
+
 9. **If from an idea:** Run `bash .ccanvil/scripts/docs-check.sh idea-update <num> promoted`
 
 10. **BTS-136: auto-transition Linear ticket to Todo.** If the resolved work ref is `linear:<ID>`, dispatch the transition via `operations.sh resolve ticket.transition <ID> todo`. BTS-164 migrated this verb to `mechanism: http` — the resolver returns a complete `linear-query.sh save-issue` command in `.invocation.command`. Eval it:

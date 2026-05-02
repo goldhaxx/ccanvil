@@ -78,3 +78,37 @@ EOSH
   echo "$entries" | grep -qF '.ccanvil/scripts/mega.sh:cmd_one'
   echo "$entries" | grep -qE '^\.ccanvil/scripts/single\.sh$'
 }
+
+# AC-1: skill SKILL.md emits path:<id> using frontmatter name field.
+@test "seed-allowlist: skill SKILL.md emits path:<name>" {
+  set -e
+  node="$BATS_TEST_TMPDIR/skill-node"
+  mkdir -p "$node/.claude/skills/foo"
+  cat > "$node/.claude/skills/foo/SKILL.md" <<'EOMD'
+---
+name: foo
+description: A test skill
+---
+body
+EOMD
+  run bash "$SCRIPT" seed-allowlist --dir "$node"
+  [ "$status" -eq 0 ]
+  entries=$(echo "$output" | grep -vE '^\s*(#|$)')
+  echo "$entries" | grep -qE '^\.claude/skills/foo/SKILL\.md:foo$'
+}
+
+# AC-1: rules/agents/commands emit bare path (basename matches id).
+@test "seed-allowlist: rule/agent/command markdown emits bare path" {
+  set -e
+  node="$BATS_TEST_TMPDIR/md-node"
+  mkdir -p "$node/.claude/rules" "$node/.claude/agents" "$node/.claude/commands"
+  echo "# rule" > "$node/.claude/rules/example.md"
+  echo "# agent" > "$node/.claude/agents/helper.md"
+  echo "# command" > "$node/.claude/commands/dispatch.md"
+  run bash "$SCRIPT" seed-allowlist --dir "$node"
+  [ "$status" -eq 0 ]
+  entries=$(echo "$output" | grep -vE '^\s*(#|$)')
+  echo "$entries" | grep -qE '^\.claude/rules/example\.md$'
+  echo "$entries" | grep -qE '^\.claude/agents/helper\.md$'
+  echo "$entries" | grep -qE '^\.claude/commands/dispatch\.md$'
+}

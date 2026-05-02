@@ -803,18 +803,45 @@ cmd_seed_allowlist() {
 
   (
     cd "$dir" || exit 2
-    [[ -d .ccanvil/scripts ]] || exit 0
+
     local f fn fns
-    for f in .ccanvil/scripts/*.sh; do
-      [[ -f "$f" ]] || continue
-      fns=$(grep -oE '^cmd_[a-z_]+' "$f" | sort -u)
-      if [[ -n "$fns" ]]; then
-        while IFS= read -r fn; do
-          echo "${f}:${fn}"
-        done <<< "$fns"
-      else
+    if [[ -d .ccanvil/scripts ]]; then
+      for f in .ccanvil/scripts/*.sh; do
+        [[ -f "$f" ]] || continue
+        fns=$(grep -oE '^cmd_[a-z_]+' "$f" | sort -u)
+        if [[ -n "$fns" ]]; then
+          while IFS= read -r fn; do
+            echo "${f}:${fn}"
+          done <<< "$fns"
+        else
+          echo "$f"
+        fi
+      done
+    fi
+
+    # Skills — frontmatter `name:` resolves the manifest id.
+    local skill_dir name
+    if [[ -d .claude/skills ]]; then
+      for skill_dir in .claude/skills/*/; do
+        f="${skill_dir}SKILL.md"
+        [[ -f "$f" ]] || continue
+        name=$(awk '/^---$/{c++; next} c==1 && /^name:/{sub(/^name:[[:space:]]*/,""); gsub(/^["\x27]|["\x27]$/,""); print; exit}' "$f")
+        if [[ -n "$name" ]]; then
+          echo "${f}:${name}"
+        else
+          echo "$f"
+        fi
+      done
+    fi
+
+    # Rules / agents / commands — basename matches manifest id, plain path emit.
+    local md_dir
+    for md_dir in .claude/rules .claude/agents .claude/commands; do
+      [[ -d "$md_dir" ]] || continue
+      for f in "$md_dir"/*.md; do
+        [[ -f "$f" ]] || continue
         echo "$f"
-      fi
+      done
     done
   )
 }

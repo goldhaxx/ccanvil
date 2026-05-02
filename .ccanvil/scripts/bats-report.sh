@@ -144,13 +144,35 @@ if (( parallel_mode )); then
 fi
 bats_cmd+=("${passthrough[@]+"${passthrough[@]}"}")
 
+# BTS-277: resolve jobs_used / cpus_total for the metrics envelope.
+# jobs is set above only when the parallel branch fires; default to 1.
+jobs_used="${jobs:-1}"
+cpus_total="${cpus:-}"
+if [[ -z "$cpus_total" ]]; then
+  cpus_total=$(sysctl -n hw.logicalcpu 2>/dev/null || nproc 2>/dev/null || echo 1)
+fi
+
 # Run bats ONCE, capture to tempfile.
 # @side-effect: writes-temp-file
 tmp=$(mktemp)
 trap 'rm -f "$tmp"' EXIT
 
+# BTS-277: wall-time around the bats invocation. Use perl Time::HiRes
+# (ships on macOS + Linux) for ms-precision; fall back to second-precision
+# if perl is missing.
+_now_ms() {
+  if command -v perl >/dev/null 2>&1; then
+    perl -MTime::HiRes -e 'printf "%d", Time::HiRes::time()*1000' 2>/dev/null
+  else
+    echo "$(($(date +%s) * 1000))"
+  fi
+}
+start_ms=$(_now_ms)
 "${bats_cmd[@]}" > "$tmp" 2>&1
 bats_exit=$?
+end_ms=$(_now_ms)
+wall_ms=$((end_ms - start_ms))
+(( wall_ms < 0 )) && wall_ms=0
 # @failure-mode: bats-suite-failed
 
 ok=$(grep -cE '^ok ' "$tmp" 2>/dev/null || true)
@@ -197,7 +219,10 @@ if (( json_mode )); then
     --arg tail "$tail_output" \
     --argjson exit "$bats_exit" \
     --argjson timings "$timings_json" \
-    '{ok:$ok, not_ok:$not_ok, total:$total, tail:$tail, raw_exit:$exit, timings:$timings}'
+    --argjson wall_ms "$wall_ms" \
+    --argjson jobs "$jobs_used" \
+    --argjson cpus "$cpus_total" \
+    '{ok:$ok, not_ok:$not_ok, total:$total, tail:$tail, raw_exit:$exit, timings:$timings, wall_ms:$wall_ms, jobs:$jobs, cpus:$cpus}'
 else
   cat "$tmp"
   echo "---"
@@ -208,6 +233,31 @@ else
     # Left-align: pad ms column to 6 chars.
     echo "$timings_tsv" | awk -F'\t' '{ printf "%-6s %s\n", $1, $2 }'
   fi
+fi
+
+# BTS-277: append run-summary to .ccanvil/state/bats-runs.jsonl (AC-3).
+# State dir is overridable via BATS_REPORT_STATE_DIR for testability.
+state_dir="${BATS_REPORT_STATE_DIR:-.ccanvil/state}"
+jsonl_path="$state_dir/bats-runs.jsonl"
+parallel_bool=false
+(( parallel_mode == 1 )) && parallel_bool=true
+jsonl_entry=$(jq -c -n \
+  --argjson epoch "$(date +%s)" \
+  --argjson wall_ms "$wall_ms" \
+  --argjson ok "$ok" \
+  --argjson not_ok "$not_ok" \
+  --argjson total "$total" \
+  --argjson jobs "$jobs_used" \
+  --argjson cpus "$cpus_total" \
+  --argjson raw_exit "$bats_exit" \
+  --argjson parallel "$parallel_bool" \
+  '{epoch:$epoch, wall_ms:$wall_ms, ok:$ok, not_ok:$not_ok, total:$total, jobs:$jobs, cpus:$cpus, raw_exit:$raw_exit, parallel:$parallel}')
+# @side-effect: writes-bats-runs-jsonl
+if mkdir -p "$state_dir" 2>/dev/null && printf '%s\n' "$jsonl_entry" >> "$jsonl_path" 2>/dev/null; then
+  :
+else
+  # @failure-mode: jsonl-append-failed
+  echo "WARN: bats-runs.jsonl append skipped — could not write $jsonl_path" >&2
 fi
 
 exit "$bats_exit"

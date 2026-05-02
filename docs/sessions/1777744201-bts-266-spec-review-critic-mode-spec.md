@@ -30,30 +30,30 @@ Today specs are drafted by Claude and accepted by the operator with no programma
 ## Affected Files
 
 | File | Change |
-|------|--------|
+| -- | -- |
 | `.claude/skills/spec/SKILL.md` | Modified — add --review branch (Step 0a) |
 | `.claude/agents/spec-writer.md` | Modified — add Critic Mode section |
 | `hub/tests/spec-review-flag.bats` | New — dispatch shape coverage |
 
 ## Dependencies
 
-- **Requires:** BTS-265 `validate-spec` primitive (shipped — Layer 1 structural envelope is consumed by the critic).
-- **Blocked by:** none.
+* **Requires:** BTS-265 `validate-spec` primitive (shipped — Layer 1 structural envelope is consumed by the critic).
+* **Blocked by:** none.
 
 ## Out of Scope
 
-- Multi-finding output. ONE BLOCKING per pass. Operator iterates: revise spec → re-run `/spec --review`. This compounds quality without overwhelming the operator with a critique fire-hose.
-- Retroactive re-running on completed/archived specs. Critic mode is for in-flight drafts; archived specs are immutable historical record.
-- Automatic spec rewriting (i.e., "fix it for me"). The agent surfaces the issue + reasoning; operator decides whether to accept, push back, or scope-down. Mirrors how code reviewers work — they flag, they don't auto-merge.
-- Adding a new substrate primitive. This ticket is pure skill flag + agent prose — no new `cmd_*`, no allowlist entry. Layer 1 critic-mode is fundamentally semantic; substrate machinery doesn't help.
-- Bats coverage of the agent's actual output quality. Agent behavior is inherently stochastic; bats covers the deterministic dispatch shape (validate-spec runs first; envelope is captured), not the semantic finding.
+* Multi-finding output. ONE BLOCKING per pass. Operator iterates: revise spec → re-run `/spec --review`. This compounds quality without overwhelming the operator with a critique fire-hose.
+* Retroactive re-running on completed/archived specs. Critic mode is for in-flight drafts; archived specs are immutable historical record.
+* Automatic spec rewriting (i.e., "fix it for me"). The agent surfaces the issue + reasoning; operator decides whether to accept, push back, or scope-down. Mirrors how code reviewers work — they flag, they don't auto-merge.
+* Adding a new substrate primitive. This ticket is pure skill flag + agent prose — no new `cmd_*`, no allowlist entry. Layer 1 critic-mode is fundamentally semantic; substrate machinery doesn't help.
+* Bats coverage of the agent's actual output quality. Agent behavior is inherently stochastic; bats covers the deterministic dispatch shape (validate-spec runs first; envelope is captured), not the semantic finding.
 
 ## Implementation Notes
 
-- Skill flow for `--review <id>`: skip Steps 1-10 (drafting). Run validate-spec, capture envelope. Spawn spec-writer agent with prompt: `MODE=critic\n\nSPEC_PATH: docs/specs/<id>.md\nVALIDATE_SPEC_ENVELOPE: <json>\n\nReturn EXACTLY ONE blocking finding OR the literal "PASS — no blocking ambiguity found.". Finding shape: {class, line_ref, criterion, why_blocking}. Classes: <enumerate>.`
-- Agent prose mirrors `code-reviewer.md`'s manifest-aware section structure — start with what the mode is, when it activates, what inputs, what output, what discipline.
-- Re-using the existing `spec-writer` agent (rather than creating a new `spec-critic`) keeps the agent registry small and lets the same agent context-switch between draft mode (from `/spec`) and critic mode (from `/spec --review`).
-- Live-API risk: NONE. Agent invocation is local Claude reasoning; no external services called.
+* Skill flow for `--review <id>`: skip Steps 1-10 (drafting). Run validate-spec, capture envelope. Spawn spec-writer agent with prompt: `MODE=critic\n\nSPEC_PATH: docs/specs/<id>.md\nVALIDATE_SPEC_ENVELOPE: <json>\n\nReturn EXACTLY ONE blocking finding OR the literal "PASS — no blocking ambiguity found.". Finding shape: {class, line_ref, criterion, why_blocking}. Classes: <enumerate>.`
+* Agent prose mirrors `code-reviewer.md`'s manifest-aware section structure — start with what the mode is, when it activates, what inputs, what output, what discipline.
+* Re-using the existing `spec-writer` agent (rather than creating a new `spec-critic`) keeps the agent registry small and lets the same agent context-switch between draft mode (from `/spec`) and critic mode (from `/spec --review`).
+* Live-API risk: NONE. Agent invocation is local Claude reasoning; no external services called.
 
 <!-- NODE-SPECIFIC-START -->
 <!-- Add project-specific content below this line. -->

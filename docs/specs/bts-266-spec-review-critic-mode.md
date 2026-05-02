@@ -4,7 +4,7 @@
 > Work: linear:BTS-266
 > Created: 1777743393
 > Subject: /spec --review critic-mode hand-off
-> Status: In Progress
+> Status: Complete
 
 ## Summary
 

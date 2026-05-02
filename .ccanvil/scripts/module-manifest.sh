@@ -804,6 +804,19 @@ cmd_seed_allowlist() {
   (
     cd "$dir" || exit 2
 
+    # Read existing allowlist into a dedup set (when present).
+    local existing="" allow=".ccanvil/manifest-allowlist.txt"
+    if [[ -f "$allow" ]]; then
+      existing=$(grep -vE '^\s*(#|$)' "$allow" | sort -u)
+    fi
+    _seed_emit() {
+      local entry="$1"
+      if [[ -n "$existing" ]] && grep -qxF "$entry" <<< "$existing"; then
+        return 0
+      fi
+      echo "$entry"
+    }
+
     local f fn fns
     if [[ -d .ccanvil/scripts ]]; then
       for f in .ccanvil/scripts/*.sh; do
@@ -811,10 +824,10 @@ cmd_seed_allowlist() {
         fns=$(grep -oE '^cmd_[a-z_]+' "$f" | sort -u)
         if [[ -n "$fns" ]]; then
           while IFS= read -r fn; do
-            echo "${f}:${fn}"
+            _seed_emit "${f}:${fn}"
           done <<< "$fns"
         else
-          echo "$f"
+          _seed_emit "$f"
         fi
       done
     fi
@@ -827,9 +840,9 @@ cmd_seed_allowlist() {
         [[ -f "$f" ]] || continue
         name=$(awk '/^---$/{c++; next} c==1 && /^name:/{sub(/^name:[[:space:]]*/,""); gsub(/^["\x27]|["\x27]$/,""); print; exit}' "$f")
         if [[ -n "$name" ]]; then
-          echo "${f}:${name}"
+          _seed_emit "${f}:${name}"
         else
-          echo "$f"
+          _seed_emit "$f"
         fi
       done
     fi
@@ -840,7 +853,7 @@ cmd_seed_allowlist() {
       [[ -d "$md_dir" ]] || continue
       for f in "$md_dir"/*.md; do
         [[ -f "$f" ]] || continue
-        echo "$f"
+        _seed_emit "$f"
       done
     done
 
@@ -848,7 +861,7 @@ cmd_seed_allowlist() {
     if [[ -d .claude/hooks ]]; then
       for f in .claude/hooks/*.sh; do
         [[ -f "$f" ]] || continue
-        echo "$f"
+        _seed_emit "$f"
       done
     fi
   )

@@ -126,3 +126,26 @@ EOMD
   echo "$entries" | grep -qE '^\.claude/hooks/protect-foo\.sh$'
   echo "$entries" | grep -qE '^\.claude/hooks/lint-bar\.sh$'
 }
+
+# AC-2: dedup against existing allowlist — emit only NEW candidates.
+@test "seed-allowlist: dedup against existing .ccanvil/manifest-allowlist.txt" {
+  set -e
+  node="$BATS_TEST_TMPDIR/dedup-node"
+  mkdir -p "$node/.ccanvil/scripts" "$node/.ccanvil"
+  cat > "$node/.ccanvil/scripts/foo.sh" <<'EOSH'
+#!/usr/bin/env bash
+cmd_alpha() { echo a; }
+cmd_beta() { echo b; }
+EOSH
+  cat > "$node/.ccanvil/manifest-allowlist.txt" <<'EOAL'
+# Existing allowlist
+.ccanvil/scripts/foo.sh:cmd_alpha
+EOAL
+  run bash "$SCRIPT" seed-allowlist --dir "$node"
+  [ "$status" -eq 0 ]
+  entries=$(echo "$output" | grep -vE '^\s*(#|$)')
+  # cmd_alpha already in allowlist — should be filtered out (count must be 0).
+  [ "$(echo "$entries" | grep -cF '.ccanvil/scripts/foo.sh:cmd_alpha')" -eq 0 ]
+  # cmd_beta is new — should be emitted.
+  echo "$entries" | grep -qF '.ccanvil/scripts/foo.sh:cmd_beta'
+}

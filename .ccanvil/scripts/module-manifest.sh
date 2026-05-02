@@ -1253,9 +1253,7 @@ _graph_node_cluster() {
 # output: stdout JSON envelope or DOT source
 # output: exit-codes 0 ok, 2 unknown-format
 # depends-on: jq
-# depends-on: cmd_extract
-# depends-on: _graph_node_cluster
-# depends-on: _diff_normalize_caller_path
+# depends-on: cmd_index
 # side-effect: reads-allowlist-and-manifest-files
 # failure-mode: unknown-format | exit=2 | visible=stderr-error
 # contract: empty-allowlist-emits-empty-envelope-status-ok

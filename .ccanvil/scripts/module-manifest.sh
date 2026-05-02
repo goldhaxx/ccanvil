@@ -935,11 +935,26 @@ _diff_files_added() {
       sub(/^b\//, "", cur)
       next
     }
-    /^@@/ { in_hunk=1; next }
+    /^@@/ {
+      in_hunk=1
+      # Extract enclosing function context (everything after the second `@@`).
+      ctx=""
+      m=match($0, /@@ -[0-9]+(,[0-9]+)? \+[0-9]+(,[0-9]+)? @@/)
+      if (m > 0) {
+        rest=substr($0, m + RLENGTH)
+        sub(/^[[:space:]]+/, "", rest)
+        ctx=rest
+      }
+      hunk_ctx=ctx
+      next
+    }
     in_hunk && /^\+/ {
       line=$0
       sub(/^\+/, "", line)
-      if (cur != "") added[++count]=line
+      if (cur != "") {
+        added[++count]=line
+        added_ctx[count]=hunk_ctx
+      }
     }
     # context (" ") or removed ("-") lines — ignored intentionally.
     function flush() {
@@ -949,15 +964,30 @@ _diff_files_added() {
           gsub(/\\/, "\\\\", added[i])
           gsub(/"/, "\\\"", added[i])
           gsub(/\t/, "\\t", added[i])
+          gsub(/\\/, "\\\\", added_ctx[i])
+          gsub(/"/, "\\\"", added_ctx[i])
           if (i>1) printf ","
-          printf "\"%s\"", added[i]
+          printf "{\"text\":\"%s\",\"ctx\":\"%s\"}", added[i], added_ctx[i]
         }
         printf "]}\n"
       }
-      delete added; count=0; in_hunk=0
+      delete added; delete added_ctx; count=0; in_hunk=0
     }
     END { flush() }
   ' "$diff_file"
+}
+
+# Given a hunk context string (whatever follows the `@@` anchor) and a file path,
+# return the manifested primitive id this hunk is inside, or empty.
+# Examples of context:
+#   "cmd_query() {"    → cmd_query
+#   "function foo() {" → foo
+#   ""                  → empty (file-level scope or unknown)
+_diff_ctx_to_primitive_id() {
+  local ctx="$1"
+  if [[ "$ctx" =~ ^([a-zA-Z_][a-zA-Z0-9_]*)\(\) ]]; then
+    echo "${BASH_REMATCH[1]}"
+  fi
 }
 
 # Read allowlist into two parallel arrays (function-level only for now):
@@ -1066,6 +1096,7 @@ cmd_diff_vs_manifest() {
     local caller_norm
     caller_norm=$(_diff_normalize_caller_path "$path")
 
+    # ----- new-caller drift -----
     # For each cmd_X on the allowlist, check if any added line in this file invokes it.
     while IFS=$'\t' read -r fn primitive_path; do
       [[ -z "$fn" ]] && continue
@@ -1073,12 +1104,9 @@ cmd_diff_vs_manifest() {
       # depends-on / exit / side-effect concerns, not new-caller drift.
       [[ "$path" == "$primitive_path" ]] && continue
 
-      # Did any added line in this file mention cmd_X (word-boundary)?
-      if echo "$file_obj" | jq -r '.added[]' | grep -qE "\b${fn}\b"; then
-        # Look up primitive's existing caller list.
+      if echo "$file_obj" | jq -r '.added[].text' | grep -qE "\b${fn}\b"; then
         local declared_callers
         declared_callers=$(_diff_get_callers "$primitive_path" "$fn")
-        # Match either skill:/<n> form or literal path form.
         if ! echo "$declared_callers" | grep -qxF "$caller_norm" \
              && ! echo "$declared_callers" | grep -qxF "$path"; then
           drift_entries+="$(jq -nc \
@@ -1089,6 +1117,54 @@ cmd_diff_vs_manifest() {
         fi
       fi
     done <<< "$allow_table"
+
+    # ----- new-depends-on / new-exit-path / new-side-effect drift (in-body) -----
+    # These only apply when the diffed file is itself manifested. Per added line,
+    # use the hunk context to attribute to the right primitive.
+    local file_is_manifested=0
+    if grep -qxF "$path" <<< "$(echo "$allow_table" | awk -F'\t' '{print $2}' | sort -u)"; then
+      file_is_manifested=1
+    fi
+
+    if (( file_is_manifested == 1 )); then
+      # Walk added lines via jq → tab-separated text + ctx pairs.
+      local added_records line_text line_ctx prim_id manifest_json
+      added_records=$(echo "$file_obj" | jq -r '.added[] | @base64')
+      # Cache the file's full manifest extraction once.
+      manifest_json=$(cmd_extract "$path" 2>/dev/null || echo "[]")
+
+      while IFS= read -r b64; do
+        [[ -z "$b64" ]] && continue
+        line_text=$(echo "$b64" | base64 -d | jq -r '.text')
+        line_ctx=$(echo "$b64" | base64 -d | jq -r '.ctx')
+        prim_id=$(_diff_ctx_to_primitive_id "$line_ctx")
+        # If hunk context didn't yield a primitive, skip body-scoped checks
+        # (could be at file-scope; out of scope for first ramp).
+        [[ -z "$prim_id" ]] && continue
+        # Verify prim_id is in this file's manifest.
+        local prim_obj
+        prim_obj=$(echo "$manifest_json" | jq -c --arg id "$prim_id" '.[] | select(.id == $id)')
+        [[ -z "$prim_obj" ]] && continue
+
+        # ---- depends-on candidate detection ----
+        # Tokens we recognize as candidate deps:
+        #   *.sh script names; bare jq/awk/grep/sed/curl/git util names
+        local deps_declared
+        deps_declared=$(echo "$prim_obj" | jq -r '."depends-on" // [] | .[]?')
+        # Match script-with-extension tokens.
+        local dep_token
+        for dep_token in $(echo "$line_text" | grep -oE '[a-z][a-zA-Z0-9_-]*\.sh' | sort -u); do
+          if ! grep -qxF "$dep_token" <<< "$deps_declared" \
+               && ! grep -qF "$dep_token" <<< "$deps_declared"; then
+            drift_entries+="$(jq -nc \
+              --arg p "${path}:${prim_id}" \
+              --arg id "$prim_id" \
+              --arg v "$dep_token" \
+              '{path:$p,id:$id,drift_type:"new-depends-on-not-declared",value:$v}')"$'\n'
+          fi
+        done
+      done <<< "$added_records"
+    fi
   done <<< "$files_json"
 
   # Cleanup.

@@ -22,6 +22,16 @@ setup() {
   echo "$output" | jq -e '.status == "ok"'
 }
 
+# AC-3: new-depends-on-not-declared. Diff adds `bash linear-query.sh ...` inside
+# cmd_query's body, but linear-query.sh is NOT in cmd_query's declared depends-on.
+@test "diff-vs-manifest: new depends-on in body → new-depends-on-not-declared drift" {
+  set -e
+  run bash "$SCRIPT" diff-vs-manifest --diff "$REPO_ROOT/hub/tests/fixtures/manifest/diffs/new-depends-on.diff"
+  [ "$status" -eq 2 ]
+  echo "$output" | jq -e '.status == "drift"'
+  echo "$output" | jq -e '[.drift[] | select(.drift_type == "new-depends-on-not-declared" and .id == "cmd_query" and .value == "linear-query.sh")] | length >= 1'
+}
+
 # AC-2: new-caller-not-declared. New skill file invokes cmd_extract; primitive's
 # manifest caller list does NOT include the new skill path → drift entry.
 @test "diff-vs-manifest: new caller in added file → new-caller-not-declared drift" {

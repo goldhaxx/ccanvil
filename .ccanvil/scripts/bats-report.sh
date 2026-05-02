@@ -122,8 +122,15 @@ if (( parallel_mode )); then
 
   if (( has_parallel )); then
     cpus=$(sysctl -n hw.logicalcpu 2>/dev/null || nproc 2>/dev/null || echo 4)
-    jobs=$((cpus / 2))
-    (( jobs < 2 )) && jobs=2
+    # BTS-277: prefer perf-core count over logical/2; env override wins.
+    perf="${BATS_REPORT_PERF_CORES:-}"
+    [[ -z "$perf" ]] && perf=$(sysctl -n hw.perflevel0.physicalcpu 2>/dev/null || echo "")
+    if [[ "$perf" =~ ^[0-9]+$ ]] && (( perf >= 2 )); then
+      jobs="$perf"
+    else
+      jobs=$((cpus / 2))
+      (( jobs < 2 )) && jobs=2
+    fi
     bats_cmd+=(--jobs "$jobs")
   else
     # @side-effect: writes-stderr-warn-on-missing-parallel

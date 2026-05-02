@@ -920,14 +920,327 @@ cmd_seed_allowlist() {
   )
 }
 
+# Walk a unified diff and emit a JSON object per touched file with its added-line
+# blob. Output: NDJSON, one object per file: {path, is_new, added}.
+# `added` is an array of strings (the +-prefix-stripped added lines).
+_diff_files_added() {
+  local diff_file="$1"
+  awk '
+    /^diff --git / { flush(); cur=""; isnew=0; next }
+    /^new file mode/ { isnew=1; next }
+    /^--- / { next }
+    /^\+\+\+ / {
+      flush()
+      cur=$2
+      sub(/^b\//, "", cur)
+      next
+    }
+    /^@@/ {
+      in_hunk=1
+      # Extract enclosing function context (everything after the second `@@`).
+      ctx=""
+      m=match($0, /@@ -[0-9]+(,[0-9]+)? \+[0-9]+(,[0-9]+)? @@/)
+      if (m > 0) {
+        rest=substr($0, m + RLENGTH)
+        sub(/^[[:space:]]+/, "", rest)
+        ctx=rest
+      }
+      hunk_ctx=ctx
+      next
+    }
+    in_hunk && /^\+/ {
+      line=$0
+      sub(/^\+/, "", line)
+      if (cur != "") {
+        added[++count]=line
+        added_ctx[count]=hunk_ctx
+      }
+    }
+    # context (" ") or removed ("-") lines — ignored intentionally.
+    function flush() {
+      if (cur != "" && count > 0) {
+        printf "{\"path\":\"%s\",\"is_new\":%d,\"added\":[", cur, isnew
+        for (i=1; i<=count; i++) {
+          gsub(/\\/, "\\\\", added[i])
+          gsub(/"/, "\\\"", added[i])
+          gsub(/\t/, "\\t", added[i])
+          gsub(/\\/, "\\\\", added_ctx[i])
+          gsub(/"/, "\\\"", added_ctx[i])
+          if (i>1) printf ","
+          printf "{\"text\":\"%s\",\"ctx\":\"%s\"}", added[i], added_ctx[i]
+        }
+        printf "]}\n"
+      }
+      delete added; delete added_ctx; count=0; in_hunk=0
+    }
+    END { flush() }
+  ' "$diff_file"
+}
+
+# Given a hunk context string (whatever follows the `@@` anchor) and a file path,
+# return the manifested primitive id this hunk is inside, or empty.
+# Examples of context:
+#   "cmd_query() {"    → cmd_query
+#   "function foo() {" → foo
+#   ""                  → empty (file-level scope or unknown)
+_diff_ctx_to_primitive_id() {
+  local ctx="$1"
+  if [[ "$ctx" =~ ^([a-zA-Z_][a-zA-Z0-9_]*)\(\) ]]; then
+    echo "${BASH_REMATCH[1]}"
+  fi
+}
+
+# Read allowlist into two parallel arrays (function-level only for now):
+#   ALLOW_FN_PATH[cmd_X]=<path>
+#   ALLOW_FN_ID[cmd_X]=cmd_X
+# File-level entries are tracked separately; this helper handles function-level.
+_diff_load_function_allowlist() {
+  local allow="${1:-.ccanvil/manifest-allowlist.txt}"
+  [[ -f "$allow" ]] || return 0
+  local raw path fn
+  while IFS= read -r raw; do
+    [[ "$raw" =~ ^[[:space:]]*($|#) ]] && continue
+    if [[ "$raw" == *:* ]]; then
+      path="${raw%%:*}"
+      fn="${raw##*:}"
+      # function-level entries only — skill manifests use :<name> too,
+      # filter to cmd_*-style ids.
+      [[ "$fn" =~ ^cmd_ ]] || continue
+      printf '%s\t%s\n' "$fn" "$path"
+    fi
+  done < "$allow"
+}
+
+# Read manifest's `caller:` array for a given primitive.
+# Args: <containing-file> <fn-id>
+# Output: one caller value per line.
+_diff_get_callers() {
+  local path="$1" id="$2"
+  cmd_extract "$path" 2>/dev/null \
+    | jq -r --arg id "$id" '.[] | select(.id == $id) | .caller // [] | .[]?'
+}
+
+# Normalize a caller-eligible path to its skill: form (if applicable) for
+# matching against manifest declarations.
+# .claude/skills/<n>/SKILL.md  → skill:/<n>
+# .claude/commands/<n>.md      → skill:/<n>
+# Otherwise: echo the literal path (path-form match).
+_diff_normalize_caller_path() {
+  local path="$1"
+  if [[ "$path" =~ ^\.claude/skills/([^/]+)/SKILL\.md$ ]]; then
+    echo "skill:/${BASH_REMATCH[1]}"
+  elif [[ "$path" =~ ^\.claude/commands/([^/]+)\.md$ ]]; then
+    echo "skill:/${BASH_REMATCH[1]}"
+  else
+    echo "$path"
+  fi
+}
+
+# @manifest
+# purpose: Walk a unified diff and detect manifest-drift introduced by added lines (new caller / new depends-on / new exit path / new side-effect not declared) — deterministic Layer 3 gate that replaces operator-attention prose nudges.
+# input: flag --diff <path|->
+# output: stdout JSON envelope {drift:[{path,id,drift_type,value}],status:"ok"|"drift"}
+# output: exit-codes 0 no-drift, 2 drift-detected|usage-error|diff-file-not-found
+# depends-on: jq
+# depends-on: awk
+# depends-on: cmd_extract
+# side-effect: reads-diff-and-allowlist
+# failure-mode: usage-error | exit=2 | visible=stderr-usage
+# failure-mode: diff-file-not-found | exit=2 | visible=stderr-error
+# failure-mode: drift-detected | exit=2 | visible=stdout-envelope-status-drift
+# contract: empty-diff-emits-empty-drift-array
+# contract: drift-array-mirrors-cmd_validate-shape
+# anchor: BTS-268 (origin)
+cmd_diff_vs_manifest() {
+  local diff_path=""
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --diff) diff_path="$2"; shift 2 ;;
+      # @failure-mode: usage-error
+      *)      echo "Usage: module-manifest.sh diff-vs-manifest --diff <path|->" >&2; return 2 ;;
+    esac
+  done
+  if [[ -z "$diff_path" ]]; then
+    echo "Usage: module-manifest.sh diff-vs-manifest --diff <path|->" >&2
+    return 2
+  fi
+  # @failure-mode: diff-file-not-found
+  if [[ "$diff_path" != "-" && ! -f "$diff_path" ]]; then
+    echo "ERROR: diff file not found: $diff_path" >&2
+    return 2
+  fi
+
+  # Stdin support: spool to tempfile, then re-enter file path.
+  local tmp_diff=""
+  if [[ "$diff_path" == "-" ]]; then
+    tmp_diff=$(mktemp)
+    # @side-effect: reads-diff-and-allowlist
+    cat - > "$tmp_diff"
+    diff_path="$tmp_diff"
+  fi
+
+  # Load function-level allowlist (cmd_X → path map).
+  local allow_table
+  allow_table=$(_diff_load_function_allowlist)
+
+  # Walk diff files and detect new-caller drift.
+  local drift_entries=""
+  local files_json
+  files_json=$(_diff_files_added "$diff_path")
+
+  local file_obj path is_new added
+  while IFS= read -r file_obj; do
+    [[ -z "$file_obj" ]] && continue
+    path=$(echo "$file_obj" | jq -r '.path')
+    # Normalize this caller-eligible path for matching against manifest caller lists.
+    local caller_norm
+    caller_norm=$(_diff_normalize_caller_path "$path")
+
+    # ----- new-caller drift -----
+    # Caller-eligible paths: runtime-invocation surfaces only. Skip docs/specs,
+    # tests, fixtures, and lockfile/allowlist text — those mention cmd_* names
+    # in prose or assertions, not as callers.
+    local caller_eligible=0
+    case "$path" in
+      .claude/skills/*/SKILL.md|.claude/commands/*.md|.claude/rules/*.md|.claude/agents/*.md|.claude/hooks/*.sh|.ccanvil/scripts/*.sh)
+        caller_eligible=1
+        ;;
+    esac
+
+    if (( caller_eligible == 1 )); then
+      while IFS=$'\t' read -r fn primitive_path; do
+        [[ -z "$fn" ]] && continue
+        # Skip self-calls — if the diffed file IS the primitive's own file, those are
+        # depends-on / exit / side-effect concerns, not new-caller drift.
+        [[ "$path" == "$primitive_path" ]] && continue
+
+        if echo "$file_obj" | jq -r '.added[].text' | grep -qE "\b${fn}\b"; then
+          local declared_callers
+          declared_callers=$(_diff_get_callers "$primitive_path" "$fn")
+          if ! echo "$declared_callers" | grep -qxF "$caller_norm" \
+               && ! echo "$declared_callers" | grep -qxF "$path"; then
+            drift_entries+="$(jq -nc \
+              --arg p "${primitive_path}:${fn}" \
+              --arg id "$fn" \
+              --arg v "$path" \
+              '{path:$p,id:$id,drift_type:"new-caller-not-declared",value:$v}')"$'\n'
+          fi
+        fi
+      done <<< "$allow_table"
+    fi
+
+    # ----- new-depends-on / new-exit-path / new-side-effect drift (in-body) -----
+    # These only apply when the diffed file is itself manifested. Per added line,
+    # use the hunk context to attribute to the right primitive.
+    local file_is_manifested=0
+    if grep -qxF "$path" <<< "$(echo "$allow_table" | awk -F'\t' '{print $2}' | sort -u)"; then
+      file_is_manifested=1
+    fi
+
+    if (( file_is_manifested == 1 )); then
+      # Walk added lines via jq → tab-separated text + ctx pairs.
+      local added_records line_text line_ctx prim_id manifest_json
+      added_records=$(echo "$file_obj" | jq -r '.added[] | @base64')
+      # Cache the file's full manifest extraction once.
+      manifest_json=$(cmd_extract "$path" 2>/dev/null || echo "[]")
+
+      while IFS= read -r b64; do
+        [[ -z "$b64" ]] && continue
+        line_text=$(echo "$b64" | base64 -d | jq -r '.text')
+        line_ctx=$(echo "$b64" | base64 -d | jq -r '.ctx')
+        prim_id=$(_diff_ctx_to_primitive_id "$line_ctx")
+        # If hunk context didn't yield a primitive, skip body-scoped checks
+        # (could be at file-scope; out of scope for first ramp).
+        [[ -z "$prim_id" ]] && continue
+        # Verify prim_id is in this file's manifest.
+        local prim_obj
+        prim_obj=$(echo "$manifest_json" | jq -c --arg id "$prim_id" '.[] | select(.id == $id)')
+        [[ -z "$prim_obj" ]] && continue
+
+        # ---- depends-on candidate detection ----
+        # Skip self-references — when the dep token matches the host file's basename,
+        # the line just mentions the script's own name (likely in prose or echo).
+        local self_basename="${path##*/}"
+        local deps_declared
+        deps_declared=$(echo "$prim_obj" | jq -r '."depends-on" // [] | .[]?')
+        local dep_token
+        for dep_token in $(echo "$line_text" | grep -oE '[a-z][a-zA-Z0-9_-]*\.sh' | sort -u); do
+          [[ "$dep_token" == "$self_basename" ]] && continue
+          if ! grep -qxF "$dep_token" <<< "$deps_declared" \
+               && ! grep -qF "$dep_token" <<< "$deps_declared"; then
+            drift_entries+="$(jq -nc \
+              --arg p "${path}:${prim_id}" \
+              --arg id "$prim_id" \
+              --arg v "$dep_token" \
+              '{path:$p,id:$id,drift_type:"new-depends-on-not-declared",value:$v}')"$'\n'
+          fi
+        done
+
+        # ---- new-side-effect detection ----
+        # Match `# @side-effect: <id>` markers added inside the body.
+        if [[ "$line_text" =~ ^[[:space:]]*#[[:space:]]*@side-effect:[[:space:]]*([A-Za-z0-9_.-]+) ]]; then
+          local se_id="${BASH_REMATCH[1]}"
+          local declared_se
+          declared_se=$(echo "$prim_obj" | jq -r '."side-effect" // [] | .[]?')
+          if ! grep -qxF "$se_id" <<< "$declared_se"; then
+            drift_entries+="$(jq -nc \
+              --arg p "${path}:${prim_id}" \
+              --arg id "$prim_id" \
+              --arg v "$se_id" \
+              '{path:$p,id:$id,drift_type:"new-side-effect-not-declared",value:$v}')"$'\n'
+          fi
+        fi
+
+        # ---- new-exit-path detection ----
+        # Match `return N` or `exit N` (N != 0) at start-of-trimmed-line.
+        if [[ "$line_text" =~ ^[[:space:]]*(return|exit)[[:space:]]+([1-9][0-9]*) ]]; then
+          local exit_code="${BASH_REMATCH[2]}"
+          # Read failure-mode array; extract declared exit codes via `exit=<N>` segment.
+          local declared_exits
+          declared_exits=$(echo "$prim_obj" \
+            | jq -r '."failure-mode" // [] | .[] | capture("exit=(?<n>[0-9]+|passthrough|propagate|\\*)") // empty | .n' \
+            | sort -u)
+          # `*` / passthrough / propagate accept any code.
+          if grep -qxE '^(\*|passthrough|propagate)$' <<< "$declared_exits"; then
+            : # accepted
+          elif ! grep -qxF "$exit_code" <<< "$declared_exits"; then
+            drift_entries+="$(jq -nc \
+              --arg p "${path}:${prim_id}" \
+              --arg id "$prim_id" \
+              --arg v "$exit_code" \
+              '{path:$p,id:$id,drift_type:"new-exit-path-not-declared",value:$v}')"$'\n'
+          fi
+        fi
+      done <<< "$added_records"
+    fi
+  done <<< "$files_json"
+
+  # Cleanup.
+  [[ -n "$tmp_diff" ]] && rm -f "$tmp_diff"
+
+  # Render envelope.
+  local drift_array
+  if [[ -z "$drift_entries" ]]; then
+    drift_array='[]'
+  else
+    drift_array=$(echo "$drift_entries" | jq -s '.')
+  fi
+  local status_val="ok"
+  # @failure-mode: drift-detected
+  [[ "$drift_array" != '[]' ]] && status_val="drift"
+  jq -nc --argjson d "$drift_array" --arg s "$status_val" '{drift:$d,status:$s}'
+  [[ "$status_val" == "drift" ]] && return 2 || return 0
+}
+
 cmd="${1:-}"
 shift || true
 case "$cmd" in
-  extract)        cmd_extract "$@" ;;
-  validate)       cmd_validate "$@" ;;
-  query)          cmd_query "$@" ;;
-  index)          cmd_index "$@" ;;
-  seed-allowlist) cmd_seed_allowlist "$@" ;;
-  "")             echo "Usage: module-manifest.sh {extract|validate|query|index|seed-allowlist} [args]" >&2; exit 2 ;;
-  *)              echo "Usage: module-manifest.sh {extract|validate|query|index|seed-allowlist} [args]" >&2; exit 2 ;;
+  extract)          cmd_extract "$@" ;;
+  validate)         cmd_validate "$@" ;;
+  query)            cmd_query "$@" ;;
+  index)            cmd_index "$@" ;;
+  seed-allowlist)   cmd_seed_allowlist "$@" ;;
+  diff-vs-manifest) cmd_diff_vs_manifest "$@" ;;
+  "")               echo "Usage: module-manifest.sh {extract|validate|query|index|seed-allowlist|diff-vs-manifest} [args]" >&2; exit 2 ;;
+  *)                echo "Usage: module-manifest.sh {extract|validate|query|index|seed-allowlist|diff-vs-manifest} [args]" >&2; exit 2 ;;
 esac

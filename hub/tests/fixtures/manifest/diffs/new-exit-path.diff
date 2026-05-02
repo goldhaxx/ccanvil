@@ -1,0 +1,13 @@
+diff --git a/.ccanvil/scripts/module-manifest.sh b/.ccanvil/scripts/module-manifest.sh
+index abc..def 100644
+--- a/.ccanvil/scripts/module-manifest.sh
++++ b/.ccanvil/scripts/module-manifest.sh
+@@ -100,6 +100,8 @@ cmd_query() {
+   local expr="${1:-}"
+   if [[ -z "$expr" ]]; then
+     echo "Usage: module-manifest.sh query <key>:<value>" >&2
++    # New unhandled error class — exit 7 not declared in manifest.
++    return 7
+     return 2
+   fi
+   _maybe_regenerate_index

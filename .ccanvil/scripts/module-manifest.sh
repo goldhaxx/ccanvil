@@ -920,14 +920,33 @@ cmd_seed_allowlist() {
   )
 }
 
+cmd_diff_vs_manifest() {
+  local diff_path=""
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --diff) diff_path="$2"; shift 2 ;;
+      *)      echo "Usage: module-manifest.sh diff-vs-manifest --diff <path|->" >&2; return 2 ;;
+    esac
+  done
+  if [[ -z "$diff_path" ]]; then
+    echo "Usage: module-manifest.sh diff-vs-manifest --diff <path|->" >&2
+    return 2
+  fi
+  if [[ "$diff_path" != "-" && ! -f "$diff_path" ]]; then
+    echo "ERROR: diff file not found: $diff_path" >&2
+    return 2
+  fi
+}
+
 cmd="${1:-}"
 shift || true
 case "$cmd" in
-  extract)        cmd_extract "$@" ;;
-  validate)       cmd_validate "$@" ;;
-  query)          cmd_query "$@" ;;
-  index)          cmd_index "$@" ;;
-  seed-allowlist) cmd_seed_allowlist "$@" ;;
-  "")             echo "Usage: module-manifest.sh {extract|validate|query|index|seed-allowlist} [args]" >&2; exit 2 ;;
-  *)              echo "Usage: module-manifest.sh {extract|validate|query|index|seed-allowlist} [args]" >&2; exit 2 ;;
+  extract)          cmd_extract "$@" ;;
+  validate)         cmd_validate "$@" ;;
+  query)            cmd_query "$@" ;;
+  index)            cmd_index "$@" ;;
+  seed-allowlist)   cmd_seed_allowlist "$@" ;;
+  diff-vs-manifest) cmd_diff_vs_manifest "$@" ;;
+  "")               echo "Usage: module-manifest.sh {extract|validate|query|index|seed-allowlist|diff-vs-manifest} [args]" >&2; exit 2 ;;
+  *)                echo "Usage: module-manifest.sh {extract|validate|query|index|seed-allowlist|diff-vs-manifest} [args]" >&2; exit 2 ;;
 esac

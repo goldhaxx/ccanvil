@@ -4,7 +4,7 @@
 > Work: linear:BTS-281
 > Created: 1777779636
 > Subject: Cache hub-wide module-manifest validate in bats fixtures
-> Status: In Progress
+> Status: Complete
 
 ## Summary
 

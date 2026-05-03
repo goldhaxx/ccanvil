@@ -4,7 +4,7 @@
 > Work: linear:BTS-277
 > Created: 1777754950
 > Subject: Bats observability + perf-core default
-> Status: In Progress
+> Status: Complete
 
 ## Summary
 

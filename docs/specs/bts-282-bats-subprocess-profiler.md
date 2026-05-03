@@ -4,7 +4,7 @@
 > Work: linear:BTS-282
 > Created: 1777771781
 > Subject: Bats subprocess profiler
-> Status: In Progress
+> Status: Complete
 
 ## Summary
 

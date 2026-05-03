@@ -7,16 +7,19 @@
 # that was inflating /pr and /recall wall-time.
 
 # @manifest
-# purpose: Run the bats suite exactly once and derive PASS/FAIL/TOTAL counts, raw tail, and optional per-test timings from a single capture — replaces the BTS-118 3×-invocation pattern (bats|tail; bats|grep ok; bats|grep not ok) that was 3× the wall-time. Optionally parallelizes via `bats --jobs N` when GNU parallel is installed.
-# input: --parallel (use bats --jobs N where N=max(2, cpu/2))
-# input: --json (emit structured {ok, not_ok, total, tail, raw_exit, timings} to stdout)
+# purpose: Run the bats suite exactly once and derive PASS/FAIL/TOTAL counts, raw tail, optional per-test timings, and a wall_ms/jobs/cpus metrics envelope from a single capture — replaces the BTS-118 3×-invocation pattern (bats|tail; bats|grep ok; bats|grep not ok) that was 3× the wall-time. Optionally parallelizes via `bats --jobs N` when GNU parallel is installed; --jobs default uses the host's perf-core count via `sysctl -n hw.perflevel0.physicalcpu` (12 on M4 Max), falling back to logicalcpu/2.
+# input: --parallel (use bats --jobs N where N defaults to perf-core count, falling back to logicalcpu/2)
+# input: --json (emit structured {ok, not_ok, total, tail, raw_exit, timings, wall_ms, jobs, cpus} to stdout)
 # input: --timings (run bats -T; append slowest-first timing table to human output)
 # input: --slow-top <N> (cap timing rows to N slowest; N=0 emits zero rows; non-integer fails with exit 2)
 # input: --help / -h (print usage and exit 0)
 # input: env BATS_REPORT_HAS_PARALLEL (=0 forces no-parallel branch even when parallel is installed; testability hook)
+# input: env BATS_REPORT_PERF_CORES (override the perf-core count probed via sysctl; testability + cross-host pinning)
+# input: env BATS_REPORT_STATE_DIR (override the directory where bats-runs.jsonl is appended; defaults to .ccanvil/state)
 # input: positional bats-args (target paths or filters like `-f 'pattern'`); defaults to `hub/tests/` when no path arg present
 # output: stdout (default): bats raw output + `---` separator + `PASS: <N> / FAIL: <M> / TOTAL: <T>`; with --timings, second `---` + `Timings (slowest first):` table
-# output: stdout (--json): JSON envelope `{ok, not_ok, total, tail, raw_exit, timings:[{test, ms}]}`
+# output: stdout (--json): JSON envelope `{ok, not_ok, total, tail, raw_exit, timings:[{test, ms}], wall_ms, jobs, cpus}`
+# output: side-effect appends one line to .ccanvil/state/bats-runs.jsonl per run with shape {epoch, wall_ms, ok, not_ok, total, jobs, cpus, raw_exit, parallel}
 # output: exit-code mirrors bats's exit (0 pass / non-zero fail / 2 invalid-arg)
 # caller: skill:/pr
 # caller: skill:/stasis
@@ -24,16 +27,21 @@
 # depends-on: bats
 # depends-on: jq
 # depends-on: mktemp
+# depends-on: perl
 # side-effect: writes-temp-file
 # side-effect: writes-stderr-warn-on-missing-parallel
+# side-effect: writes-bats-runs-jsonl
 # failure-mode: invalid-slow-top | exit=2 | visible=stderr-error | mitigation=pass-non-negative-integer
 # failure-mode: bats-suite-failed | exit=passthrough | visible=stdout-not-ok-lines | mitigation=fix-failing-test
+# failure-mode: jsonl-append-failed | exit=passthrough | visible=stderr-warn | mitigation=ensure-state-dir-writable
 # contract: single-bats-invocation
 # contract: silent-fallback-warn-on-missing-parallel
 # contract: counts-derived-from-single-capture
+# contract: metrics-envelope-includes-wall_ms-jobs-cpus
 # anchor: BTS-118 (origin)
 # anchor: BTS-137 (--timings / --slow-top)
 # anchor: BTS-251 (manifest seed)
+# anchor: BTS-277 (perf-core default + metrics envelope + bats-runs.jsonl)
 #
 # Usage:
 #   bats-report.sh [--parallel] [--json] [--timings] [--slow-top N] [--] [<bats-args>...]
@@ -59,7 +67,10 @@
 set -uo pipefail
 
 usage() {
-  sed -n '2,28p' "$0" | sed 's/^# \{0,1\}//'
+  # BTS-277: bumped range from 28→44 to surface new manifest fields
+  # (BATS_REPORT_PERF_CORES / BATS_REPORT_STATE_DIR / wall_ms / jobs / cpus
+  # / bats-runs.jsonl) in --help output.
+  sed -n '2,44p' "$0" | sed 's/^# \{0,1\}//'
 }
 
 parallel_mode=0

@@ -155,6 +155,19 @@ if (( parallel_mode )); then
 fi
 bats_cmd+=("${passthrough[@]+"${passthrough[@]}"}")
 
+# BTS-281: pre-warm module-manifest validate JSON ONCE before the suite runs,
+# expose via env var. The 4 bats files that need this read the cached path
+# instead of re-running validate. Skip when caller already set the env var
+# (allows opt-out + lets bats files run standalone with their own cache).
+if [[ -z "${BTS_MANIFEST_VALIDATE_CACHE:-}" ]] && [[ -x .ccanvil/scripts/module-manifest.sh ]]; then
+  __mm_cache=$(mktemp -t bts-281-manifest-validate.XXXXXX)
+  if bash .ccanvil/scripts/module-manifest.sh validate --json > "$__mm_cache" 2>/dev/null; then
+    export BTS_MANIFEST_VALIDATE_CACHE="$__mm_cache"
+  else
+    rm -f "$__mm_cache" 2>/dev/null
+  fi
+fi
+
 # BTS-277: resolve jobs_used / cpus_total for the metrics envelope.
 # jobs is set above only when the parallel branch fires; default to 1.
 jobs_used="${jobs:-1}"
@@ -166,7 +179,7 @@ fi
 # Run bats ONCE, capture to tempfile.
 # @side-effect: writes-temp-file
 tmp=$(mktemp)
-trap 'rm -f "$tmp"' EXIT
+trap 'rm -f "$tmp" "${BTS_MANIFEST_VALIDATE_CACHE:-}"' EXIT
 
 # BTS-277: wall-time around the bats invocation. Use perl Time::HiRes
 # (ships on macOS + Linux) for ms-precision; fall back to second-precision

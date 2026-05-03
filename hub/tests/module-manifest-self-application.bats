@@ -4,9 +4,16 @@
 # BTS-268: cmd_diff_vs_manifest added — 5 → 6 verbs.
 # BTS-269: cmd_graph added — 6 → 7 verbs.
 
+load _helpers/manifest-validate-cache
+
+setup_file() {
+  manifest_validate_cache_setup_file
+}
+
 setup() {
   REPO_ROOT="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"
   SCRIPT="$REPO_ROOT/.ccanvil/scripts/module-manifest.sh"
+  manifest_validate_cache_setup
 }
 
 @test "self-app: extract emits manifests for all 7 verbs (cmd_extract, cmd_validate, cmd_query, cmd_index, cmd_seed_allowlist, cmd_diff_vs_manifest, cmd_graph)" {
@@ -35,13 +42,8 @@ setup() {
 
 @test "self-app: full validate over allowlist exits 0 (BTS-240: now 11 entries)" {
   set -e
-  cd "$REPO_ROOT"
-  run bash "$SCRIPT" validate --json
-  [ "$status" -eq 0 ]
-  # BTS-240 grew the allowlist from 7 → 11 (added 4 markdown reference manifests).
-  # Sessions 9-10 will grow it further. This test asserts coverage matches total
-  # — the actual count check is delegated to the production drift-guard test which
-  # asserts `covered == total` regardless of magnitude.
+  # BTS-281: read cached validate JSON (run once per file in setup_file).
+  output=$(cat "$MANIFEST_VALIDATE_JSON")
   echo "$output" | jq -e '.coverage.covered == .coverage.total'
   echo "$output" | jq -e '.coverage.covered >= 11'
   echo "$output" | jq -e '.status == "ok"'

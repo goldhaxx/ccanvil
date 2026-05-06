@@ -33,26 +33,26 @@ Each criterion is independently testable. Binary pass/fail.
 ## Affected Files
 
 | File | Change |
-|------|--------|
+| -- | -- |
 | `global-commands/ccanvil-init.md` | Modified — Step 6 seed loop reduced to `docs/roadmap.md` only |
 | `hub/tests/ccanvil-init-skill.bats` | Modified — AC-10 test rewritten; new drift-guard test added |
 | `.ccanvil/scripts/docs-check.sh` | Modified — `cmd_artifact_read` honors `--project-dir` for local reads (AC-9 scope-up) |
 
 ## Dependencies
 
-- **Requires:** none — purely behavioral change to init script prose.
-- **Blocked by:** none.
+* **Requires:** none — purely behavioral change to init script prose.
+* **Blocked by:** none.
 
 ## Out of Scope
 
-- Modifying `.ccanvil/templates/spec.md` / `plan.md` / `stasis.md` themselves — they remain valid for `/spec`, `/plan`, `/stasis` to copy into branch-local locations on demand.
-- Healing already-initialized nodes that have placeholder lifecycle docs (e.g., microsoft365-toolbox) — that's a separate operator/agent action covered under BTS-314 (onboarding repair). This spec only fixes forward.
-- Changes to `/spec`, `/plan`, `/stasis` skills — they continue to write `docs/spec.md`/`docs/plan.md`/`docs/stasis.md` at the appropriate lifecycle phase.
-- Changes to `pr-cleanup` (which removes lifecycle docs at PR-ready) — already correct.
+* Modifying `.ccanvil/templates/spec.md` / `plan.md` / `stasis.md` themselves — they remain valid for `/spec`, `/plan`, `/stasis` to copy into branch-local locations on demand.
+* Healing already-initialized nodes that have placeholder lifecycle docs (e.g., microsoft365-toolbox) — that's a separate operator/agent action covered under BTS-314 (onboarding repair). This spec only fixes forward.
+* Changes to `/spec`, `/plan`, `/stasis` skills — they continue to write `docs/spec.md`/`docs/plan.md`/`docs/stasis.md` at the appropriate lifecycle phase.
+* Changes to `pr-cleanup` (which removes lifecycle docs at PR-ready) — already correct.
 
 ## Implementation Notes
 
-- Same file-edit shape as the BTS-237/241 docs-check refactors: surgical edit to one fenced block in a global skill markdown file.
-- Step 6's `if [[ -s "$f" ]]; then echo "PRESERVED: $f"; else cp ...; fi` pattern with a one-element list is acceptable; alternatively collapse to a direct `[[ -s docs/roadmap.md ]] || cp ... docs/roadmap.md` if cleaner.
-- Drift-guard test (AC-4) can grep the skill file content for the absence of the three filenames inside the Step 6 region, demarcated by `## Step 6` and `## Step 7` headers.
-- Sibling slice under BTS-316 (Modular provider connectivity / forklift-heal) — same root cause family as BTS-313/314 (init has no canonical activation flow), but a distinct concrete bug (lifecycle-doc seeding violates an invariant that's separate from provider-config fragility).
+* Same file-edit shape as the BTS-237/241 docs-check refactors: surgical edit to one fenced block in a global skill markdown file.
+* Step 6's `if [[ -s "$f" ]]; then echo "PRESERVED: $f"; else cp ...; fi` pattern with a one-element list is acceptable; alternatively collapse to a direct `[[ -s docs/roadmap.md ]] || cp ... docs/roadmap.md` if cleaner.
+* Drift-guard test (AC-4) can grep the skill file content for the absence of the three filenames inside the Step 6 region, demarcated by `## Step 6` and `## Step 7` headers.
+* Sibling slice under BTS-316 (Modular provider connectivity / forklift-heal) — same root cause family as BTS-313/314 (init has no canonical activation flow), but a distinct concrete bug (lifecycle-doc seeding violates an invariant that's separate from provider-config fragility).

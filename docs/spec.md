@@ -27,7 +27,8 @@ Each criterion is independently testable. Binary pass/fail.
 - [ ] **AC-5:** `hub/tests/ccanvil-init-skill.bats` AC-11 ("in-progress feature detection from docs/stasis.md header") is preserved or rewritten to reflect that `docs/stasis.md` is no longer seeded but may still exist on retrofitted nodes — the in-progress-feature detection logic only fires when stasis is genuinely PRESERVED (file existed pre-init), not seeded fresh.
 - [ ] **AC-6:** Edge: when init runs in `mature-repo` or `partial-ccanvil` mode and the project ALREADY has `docs/spec.md`/`docs/plan.md`/`docs/stasis.md`, the existing files are preserved (the `[[ -s "$f" ]]` branch never runs in the new flow because those files are no longer in the loop — preservation is automatic by absence).
 - [ ] **AC-7:** Error: post-fix, a freshly initialized project must report `lifecycle-state.state == "no-active-spec"` (benign) and a session-kind `/stasis` must complete without halt. Verified manually on a scratch directory or fresh node.
-- [ ] **AC-8:** Full bats suite passes (`bash .ccanvil/scripts/bats-report.sh --parallel`) — baseline 1992/1992 from session 21 maintained or improved.
+- [ ] **AC-8:** Full bats suite passes (`bash .ccanvil/scripts/bats-report.sh --parallel`) — baseline 1993/1993 maintained or improved.
+- [ ] **AC-9** (scope-up): `cmd_artifact_read` honors `--project-dir` for local-route reads. The local-route case in `.ccanvil/scripts/docs-check.sh` `cmd_artifact_read` reads `$project_dir/docs/<kind>.md`, not the cwd-relative `docs/<kind>.md`. Surfaced live during impl: an orphaned `docs/stasis.md` on main was leaking into `stasis-carry-forward` AC-5 fixture (test passed `--project-dir <tmpdir>` but substrate read hub-cwd's stasis). Pre-existing latent bug; in same locality as init-lifecycle work.
 
 ## Affected Files
 
@@ -35,6 +36,7 @@ Each criterion is independently testable. Binary pass/fail.
 |------|--------|
 | `global-commands/ccanvil-init.md` | Modified — Step 6 seed loop reduced to `docs/roadmap.md` only |
 | `hub/tests/ccanvil-init-skill.bats` | Modified — AC-10 test rewritten; new drift-guard test added |
+| `.ccanvil/scripts/docs-check.sh` | Modified — `cmd_artifact_read` honors `--project-dir` for local reads (AC-9 scope-up) |
 
 ## Dependencies
 

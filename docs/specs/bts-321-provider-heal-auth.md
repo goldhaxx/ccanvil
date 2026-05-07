@@ -4,7 +4,7 @@
 > Work: linear:BTS-321
 > Created: 1778170230
 > Subject: provider-heal-auth substrate (Phase 3 of provider-heal)
-> Status: In Progress
+> Status: Complete
 
 ## Summary
 

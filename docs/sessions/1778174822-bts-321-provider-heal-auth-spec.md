@@ -33,29 +33,29 @@ Each criterion is independently testable. Binary pass/fail.
 ## Affected Files
 
 | File | Change |
-|------|--------|
+| -- | -- |
 | `.ccanvil/scripts/docs-check.sh` | New: `cmd_provider_heal_auth` function + `provider-heal-auth` subcommand dispatch + `PROJECT_TREE_SUBCOMMANDS` registration (BTS-212 invariant) |
 | `hub/tests/provider-heal-auth.bats` | New: bats coverage for AC-1 through AC-6 using `LINEAR_QUERY_OVERRIDE` for viewer stub |
 | `.ccanvil/manifest-allowlist.txt` | Modified: register `cmd_provider_heal_auth` |
 
 ## Dependencies
 
-- **Requires:** existing `linear-query.sh viewer` subcommand (already shipped, BTS-164/166/167 era).
-- **Requires:** existing `LINEAR_QUERY_OVERRIDE` test pattern (already shipped, BTS-203 era).
-- **Blocked by:** none.
+* **Requires:** existing `linear-query.sh viewer` subcommand (already shipped, BTS-164/166/167 era).
+* **Requires:** existing `LINEAR_QUERY_OVERRIDE` test pattern (already shipped, BTS-203 era).
+* **Blocked by:** none.
 
 ## Out of Scope
 
-- **Auto-creating `.env` or prompting for the key.** The substrate is a read-only check; it surfaces the missing-key error with a clear remediation message but does not mutate `.env`.
-- **Composing into the `provider-heal` umbrella.** That's the next ship after Phase 3 lands — orchestrates Phase 1 (BTS-319) + Phase 2 (BTS-320) + Phase 3 (this) into one verb.
-- **OAuth or alternative auth flows.** API-key only.
-- **Verifying the key's specific scope/permissions.** Viewer smoke-test only confirms the key is valid for read-only auth. Other scopes are checked when the corresponding operations run.
+* **Auto-creating** `.env` or prompting for the key. The substrate is a read-only check; it surfaces the missing-key error with a clear remediation message but does not mutate `.env`.
+* **Composing into the** `provider-heal` umbrella. That's the next ship after Phase 3 lands — orchestrates Phase 1 (BTS-319) + Phase 2 (BTS-320) + Phase 3 (this) into one verb.
+* **OAuth or alternative auth flows.** API-key only.
+* **Verifying the key's specific scope/permissions.** Viewer smoke-test only confirms the key is valid for read-only auth. Other scopes are checked when the corresponding operations run.
 
 ## Implementation Notes
 
-- Mirror `cmd_provider_heal_preflight` (BTS-320) shape: read-only, `--project-dir` + `--json` flags, structured JSON envelope, deterministic stub via `LINEAR_QUERY_OVERRIDE`.
-- Source-order chain: shell env first, then `<project>/.env`, then `~/.env`. Must use a subshell or save/restore to prevent env leak — actually since this is a function inside docs-check.sh which itself runs as a fresh bash invocation per command call, the leak concern is automatically handled.
-- Inside the function, when sourcing `.env` files, use `set -a` + `source` + `set +a` to export every assignment temporarily for the viewer call.
-- `--json` output: parse viewer-id from `linear-query.sh viewer 2>/dev/null | jq -r '.id // empty'` for the success case; null on failure.
-- Anchor file references for AC-7 (per BTS-265 file-ref validator): `.ccanvil/scripts/linear-query.sh`, `.claude/rules/provider-integration.md`.
-- Pure read-only deterministic substrate per `.claude/rules/deterministic-first.md`.
+* Mirror `cmd_provider_heal_preflight` (BTS-320) shape: read-only, `--project-dir` + `--json` flags, structured JSON envelope, deterministic stub via `LINEAR_QUERY_OVERRIDE`.
+* Source-order chain: shell env first, then `<project>/.env`, then `~/.env`. Must use a subshell or save/restore to prevent env leak — actually since this is a function inside [docs-check.sh](<http://docs-check.sh>) which itself runs as a fresh bash invocation per command call, the leak concern is automatically handled.
+* Inside the function, when sourcing `.env` files, use `set -a` + `source` + `set +a` to export every assignment temporarily for the viewer call.
+* `--json` output: parse viewer-id from `linear-query.sh viewer 2>/dev/null | jq -r '.id // empty'` for the success case; null on failure.
+* Anchor file references for AC-7 (per BTS-265 file-ref validator): `.ccanvil/scripts/linear-query.sh`, `.claude/rules/provider-integration.md`.
+* Pure read-only deterministic substrate per `.claude/rules/deterministic-first.md`.

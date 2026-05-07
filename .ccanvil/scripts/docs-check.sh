@@ -42,7 +42,7 @@ PROJECT_TREE_SUBCOMMANDS=(
   sync-check pr-guard radar-gather
   idea-add idea-list idea-count idea-count-local idea-update idea-sync
   idea-pending-replay idea-review-icebox idea-migrate-state idea-migrate
-  idea-setup idea-upgrade provider-resolve-ids
+  idea-setup idea-upgrade provider-resolve-ids provider-heal-preflight
   refresh-plan-hash archive-stasis sessions-list legacy-refs-scan stamp-spec
   evidence-scan-session lifecycle-state
   artifact-read artifact-write route-of ssot-migrate
@@ -4590,6 +4590,131 @@ cmd_provider_resolve_ids() {
 }
 
 # ---------------------------------------------------------------------------
+# cmd_provider_heal_preflight — Phase 2 of provider-heal: read-only substrate-
+# drift gate. Runs ccanvil-sync.sh pull-plan against the configured hub and
+# exits non-zero if any non-zero action count remains.
+# ---------------------------------------------------------------------------
+# @manifest
+# purpose: Phase 2 of provider-heal — read-only substrate-drift gate that runs ccanvil-sync.sh pull-plan against the hub configured in .ccanvil/ccanvil.lock and exits non-zero with structured remediation when action counts (auto-update/new/section-merge/conflict) are non-zero; pairs with BTS-319 (provider-resolve-ids Phase 1) and BTS-321 (auth preflight Phase 3) into the future provider-heal umbrella verb
+# input: --project-dir <path>
+# input: --json (optional, structured envelope output)
+# input: env CCANVIL_SYNC_OVERRIDE (test-injection point for ccanvil-sync.sh stub)
+# output: stdout PREFLIGHT-OK message or JSON envelope
+# output: stderr structured remediation when drift detected
+# output: exit-codes 0 ok, 1 uninitialized-or-drift-detected, 2 unknown-flag, 3 wrapper-error
+# depends-on: jq
+# depends-on: ccanvil-sync.sh
+# side-effect: read-only
+# failure-mode: uninitialized-node | exit=1 | visible=stderr-ERROR-ccanvil.lock-missing | mitigation=run-/ccanvil-init
+# failure-mode: drift-detected | exit=1 | visible=stderr-action-counts-+-remediation | mitigation=run-/ccanvil-pull
+# failure-mode: wrapper-error | exit=3 | visible=stderr-WRAPPER-ERROR-prefix | mitigation=inspect-ccanvil-sync-stderr
+# contract: read-only-no-state-mutation
+# contract: never-invokes-pull-auto-or-pull-apply
+# anchor: BTS-320 (provider-heal Phase 2)
+cmd_provider_heal_preflight() {
+  # @side-effect: read-only
+  local project_dir="."
+  local json_out=0
+
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --project-dir) project_dir="${2:-.}"; shift 2 ;;
+      --json)        json_out=1; shift ;;
+      --) shift; break ;;
+      # @failure-mode: unknown-flag
+      --*) echo "Usage: docs-check.sh provider-heal-preflight [--project-dir <path>] [--json]" >&2; exit 2 ;;
+      *) shift ;;
+    esac
+  done
+
+  local lock="$project_dir/.ccanvil/ccanvil.lock"
+  if [[ ! -f "$lock" ]]; then
+    # @failure-mode: uninitialized-node
+    if (( json_out )); then
+      jq -n --arg lock "$lock" '{status:"uninitialized", action_counts:{auto_update:0, new:0, section_merge:0, conflict:0}, hub_path:null, error:"ccanvil.lock missing"}'
+    fi
+    echo "ERROR: $lock missing — node not initialized as ccanvil project. Run /ccanvil-init first." >&2
+    exit 1
+  fi
+
+  local hub_path
+  hub_path=$(jq -r '.hub_source // ""' "$lock")
+  # Tilde expansion
+  hub_path="${hub_path/#\~/$HOME}"
+  if [[ -z "$hub_path" ]]; then
+    if (( json_out )); then
+      jq -n '{status:"uninitialized", action_counts:{auto_update:0, new:0, section_merge:0, conflict:0}, hub_path:null, error:"hub_source missing in lock"}'
+    fi
+    echo "ERROR: $lock has no .hub_source field. Run /ccanvil-init to repair." >&2
+    exit 1
+  fi
+
+  local script_dir
+  script_dir="$(dirname "${BASH_SOURCE[0]}")"
+  local sync="${CCANVIL_SYNC_OVERRIDE:-$script_dir/ccanvil-sync.sh}"
+
+  local plan_stderr plan_stdout plan_rc
+  plan_stderr=$(mktemp)
+  if plan_stdout=$(bash "$sync" pull-plan "$hub_path" 2>"$plan_stderr"); then
+    plan_rc=0
+  else
+    plan_rc=$?
+  fi
+  if (( plan_rc != 0 )); then
+    # @failure-mode: wrapper-error
+    if (( json_out )); then
+      jq -n --arg hub "$hub_path" --arg err "$(cat "$plan_stderr")" \
+        '{status:"wrapper-error", action_counts:{auto_update:0, new:0, section_merge:0, conflict:0}, hub_path:$hub, error:$err}'
+    fi
+    echo "WRAPPER ERROR: ccanvil-sync.sh pull-plan exited $plan_rc:" >&2
+    cat "$plan_stderr" >&2
+    rm -f "$plan_stderr"
+    exit 3
+  fi
+  rm -f "$plan_stderr"
+
+  # Tally action counts. jq normalizes keys (auto-update → auto_update,
+  # section-merge → section_merge) so the JSON envelope and human output
+  # share a single canonical shape.
+  local counts_json
+  counts_json=$(echo "$plan_stdout" | jq '
+    [.[] | .action] | group_by(.) |
+    map({(.[0] | gsub("-"; "_")): length}) | add // {} |
+    {auto_update: (.auto_update // 0),
+     new: (.new // 0),
+     section_merge: (.section_merge // 0),
+     conflict: (.conflict // 0)}')
+
+  local total
+  total=$(echo "$counts_json" | jq '[.[]] | add')
+
+  if (( total == 0 )); then
+    if (( json_out )); then
+      jq -n --arg hub "$hub_path" --argjson counts "$counts_json" \
+        '{status:"ok", action_counts:$counts, hub_path:$hub}'
+    else
+      echo "PREFLIGHT-OK: substrate aligned with hub"
+    fi
+    return 0
+  fi
+
+  # @failure-mode: drift-detected
+  if (( json_out )); then
+    jq -n --arg hub "$hub_path" --argjson counts "$counts_json" \
+      '{status:"drift", action_counts:$counts, hub_path:$hub}'
+  else
+    {
+      echo "DRIFT DETECTED:"
+      # Emit hyphenated form in the human output (canonical user-facing term).
+      echo "$counts_json" | jq -r 'to_entries | .[] | select(.value > 0) | "  - \(.key | gsub("_"; "-")): \(.value)"'
+      echo ""
+      echo "Run /ccanvil-pull or 'bash .ccanvil/scripts/ccanvil-sync.sh pull-auto $hub_path' to align."
+    } >&2
+  fi
+  exit 1
+}
+
+# ---------------------------------------------------------------------------
 # cmd_legacy_refs_scan — Find references to legacy ccanvil verbs/artifacts.
 #
 # Scans a project dir for:
@@ -7040,6 +7165,7 @@ case "$cmd" in
   idea-migrate)      cmd_idea_migrate "$@" ;;
   idea-setup)        cmd_idea_setup "$@" ;;
   provider-resolve-ids) cmd_provider_resolve_ids "$@" ;;
+  provider-heal-preflight) cmd_provider_heal_preflight "$@" ;;
   idea-upgrade)      cmd_idea_upgrade "$@" ;;
   title-from-body)   cmd_title_from_body "$@" ;;
   legacy-refs-scan)  cmd_legacy_refs_scan "$@" ;;

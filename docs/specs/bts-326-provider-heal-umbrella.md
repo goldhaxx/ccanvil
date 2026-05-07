@@ -4,7 +4,7 @@
 > Work: linear:BTS-326
 > Created: 1778175238
 > Subject: provider-heal umbrella verb
-> Status: In Progress
+> Status: Complete
 
 ## Summary
 

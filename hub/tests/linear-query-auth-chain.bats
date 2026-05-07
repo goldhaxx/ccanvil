@@ -72,10 +72,13 @@ EOF
   cat > "$HOME/.env" <<EOF
 LINEAR_API_KEY=loses-to-env-var-from-home-env
 EOF
-  STUB_KEYCHAIN_VALUE="loses-to-env-var-from-keychain" _install_security_stub
+  _install_security_stub
   export LINEAR_API_KEY="exported-wins"
   _stage_viewer_stub
-  run bash -c "cd '$PROJECT' && source '$STUB_FIXTURE' && bash '$LQ' viewer"
+  # STUB_KEYCHAIN_VALUE must travel through the subprocess env (not via prefix
+  # on _install_security_stub, which only scopes to that function call) so the
+  # baked stub script reads it at runtime when linear-query.sh shells out.
+  run bash -c "cd '$PROJECT' && source '$STUB_FIXTURE' && STUB_KEYCHAIN_VALUE='loses-to-env-var-from-keychain' bash '$LQ' viewer"
   [ "$status" -eq 0 ]
   grep -F "Authorization: exported-wins" "$LINEAR_STUB_CAPTURE"
   ! grep -qE "loses-to-env-var" "$LINEAR_STUB_CAPTURE"
@@ -94,11 +97,12 @@ EOF
   cat > "$HOME/.env" <<EOF
 LINEAR_API_KEY=loses-to-project-env
 EOF
-  STUB_KEYCHAIN_VALUE="loses-to-project-env-from-keychain" _install_security_stub
+  _install_security_stub
   _stage_viewer_stub
-  run bash -c "cd '$PROJECT' && source '$STUB_FIXTURE' && bash '$LQ' viewer"
+  run bash -c "cd '$PROJECT' && source '$STUB_FIXTURE' && STUB_KEYCHAIN_VALUE='loses-to-project-env-from-keychain' bash '$LQ' viewer"
   [ "$status" -eq 0 ]
   grep -F "Authorization: project-env-wins" "$LINEAR_STUB_CAPTURE"
+  ! grep -qE "loses-to-project-env" "$LINEAR_STUB_CAPTURE"
 }
 
 # ===========================================================================
@@ -112,11 +116,12 @@ EOF
   cat > "$HOME/.env" <<EOF
 LINEAR_API_KEY=home-env-wins
 EOF
-  STUB_KEYCHAIN_VALUE="loses-to-home-env" _install_security_stub
+  _install_security_stub
   _stage_viewer_stub
-  run bash -c "cd '$PROJECT' && source '$STUB_FIXTURE' && bash '$LQ' viewer"
+  run bash -c "cd '$PROJECT' && source '$STUB_FIXTURE' && STUB_KEYCHAIN_VALUE='loses-to-home-env' bash '$LQ' viewer"
   [ "$status" -eq 0 ]
   grep -F "Authorization: home-env-wins" "$LINEAR_STUB_CAPTURE"
+  ! grep -qF "loses-to-home-env" "$LINEAR_STUB_CAPTURE"
 }
 
 @test "AC-3: ~/.env wins when project .env exists but lacks LINEAR_API_KEY" {
@@ -155,8 +160,10 @@ EOF
 @test "AC-4: keychain wins when no env var, no project .env, no ~/.env" {
   set -e
   PROJECT=$(_make_project)
-  STUB_KEYCHAIN_VALUE="keychain-wins" _install_security_stub
+  _install_security_stub
   _stage_viewer_stub
+  # STUB_KEYCHAIN_VALUE travels through `bash -c` env so the stub script
+  # reads it at runtime when linear-query.sh shells out to `security`.
   run bash -c "cd '$PROJECT' && source '$STUB_FIXTURE' && STUB_KEYCHAIN_VALUE='keychain-wins' bash '$LQ' viewer"
   [ "$status" -eq 0 ]
   grep -F "Authorization: keychain-wins" "$LINEAR_STUB_CAPTURE"

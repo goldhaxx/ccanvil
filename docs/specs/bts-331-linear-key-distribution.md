@@ -4,7 +4,7 @@
 > Work: linear:BTS-331
 > Created: 1778185600
 > Subject: LINEAR_API_KEY auth-chain extension — ~/.env + macOS Keychain
-> Status: In Progress
+> Status: Complete
 
 ## Summary
 

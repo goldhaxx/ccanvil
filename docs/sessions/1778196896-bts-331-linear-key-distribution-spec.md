@@ -1,9 +1,9 @@
-# Feature: LINEAR_API_KEY auth-chain extension — ~/.env + macOS Keychain
+# Feature: LINEAR_API_KEY auth-chain extension — \~/.env + macOS Keychain
 
 > Feature: bts-331-linear-key-distribution
 > Work: linear:BTS-331
 > Created: 1778185600
-> Subject: LINEAR_API_KEY auth-chain extension — ~/.env + macOS Keychain
+> Subject: LINEAR_API_KEY auth-chain extension — \~/.env + macOS Keychain
 > Status: In Progress
 
 ## Summary
@@ -14,7 +14,7 @@
 
 **When** I open a fresh shell in any ccanvil downstream node and dispatch a Linear-routed substrate primitive,
 **I want to** have my Linear API key auto-resolved from a single canonical location I configured once,
-**So that** every node works without per-project `.env` distribution and without the "set -a; source ~/projects/ccanvil/.env" ritual.
+**So that** every node works without per-project `.env` distribution and without the "set -a; source \~/projects/ccanvil/.env" ritual.
 
 ## Acceptance Criteria
 
@@ -34,32 +34,32 @@ Each criterion is independently testable. Binary pass/fail.
 ## Affected Files
 
 | File | Change |
-|------|--------|
+| -- | -- |
 | `.ccanvil/scripts/linear-query.sh` | Modified — extend `_load_env_if_needed` with `~/.env` then Keychain fallback; update `_require_api_key` error message (lines 82-128 region) |
 | `hub/tests/linear-query-auth-chain.bats` | New — AC-1 through AC-8 with `security` stub injection |
 | `.ccanvil/manifest-allowlist.txt` | Modified — register the new bats file |
 
 ## Dependencies
 
-- **Requires:** macOS host for AC-4/AC-7/AC-10 verification (graceful no-op on non-macOS per AC-6). Operator has already stored the key under `linear_api_key` in their login keychain (confirmed 2026-05-07).
-- **Blocked by:** Nothing.
+* **Requires:** macOS host for AC-4/AC-7/AC-10 verification (graceful no-op on non-macOS per AC-6). Operator has already stored the key under `linear_api_key` in their login keychain (confirmed 2026-05-07).
+* **Blocked by:** Nothing.
 
 ## Out of Scope
 
-- **Generic `secret-resolve` substrate primitive.** BTS-332 captures the broader research-and-design effort for a unified secret resolver and naming convention. This spec lands the minimum viable Linear-specific extension; generalization is a follow-on.
-- **Other providers' API keys** (GitHub, Notion, etc.). The scope is Linear only — the substrate touched (`linear-query.sh`) is provider-specific by name. Generalization waits for BTS-332.
-- **Distributing the key per-node.** Explicitly rejected — multiplies leak surface and key-rotation friction.
-- **Symlinks** between node `.env` and hub `.env`. Explicitly rejected per operator preference.
-- **Auto-migration from existing `~/projects/ccanvil/.env`** to `~/.env` or Keychain. The hub `.env` continues to work via tier 2; operator decides if/when to consolidate.
+* **Generic** `secret-resolve` substrate primitive. BTS-332 captures the broader research-and-design effort for a unified secret resolver and naming convention. This spec lands the minimum viable Linear-specific extension; generalization is a follow-on.
+* **Other providers' API keys** (GitHub, Notion, etc.). The scope is Linear only — the substrate touched (`linear-query.sh`) is provider-specific by name. Generalization waits for BTS-332.
+* **Distributing the key per-node.** Explicitly rejected — multiplies leak surface and key-rotation friction.
+* **Symlinks** between node `.env` and hub `.env`. Explicitly rejected per operator preference.
+* **Auto-migration from existing** `~/projects/ccanvil/.env` to `~/.env` or Keychain. The hub `.env` continues to work via tier 2; operator decides if/when to consolidate.
 
 ## Implementation Notes
 
-- Existing `_load_env_if_needed` is in `linear-query.sh` lines ~82–119. Extend the function in place; do NOT factor into a separate helper without revisiting the `set -a` scope-leak comment already in the source (the existing code calls out that scope behavior explicitly — preserve it across the new tiers).
-- Tier order (top wins): exported env → project-root `.env` (existing walk) → `~/.env` → `security find-generic-password -a "$USER" -s linear_api_key -w`.
-- Keychain query uses `2>/dev/null` to absorb the "item not found" stderr noise. Check both exit code AND non-empty stdout before exporting (AC-4).
-- `command -v security >/dev/null 2>&1` gates the Keychain tier — AC-6 graceful no-op pattern.
-- Bats `security` stub: write a small wrapper script in the test's `PATH=$STUB_DIR:$PATH` that responds based on `STUB_KEYCHAIN_VALUE` env var (mirrors the `LINEAR_QUERY_OVERRIDE` pattern from BTS-203).
-- Updated error message preserves the actionable shape — list tiers in resolution order, not alphabetical.
+* Existing `_load_env_if_needed` is in `linear-query.sh` lines \~82–119. Extend the function in place; do NOT factor into a separate helper without revisiting the `set -a` scope-leak comment already in the source (the existing code calls out that scope behavior explicitly — preserve it across the new tiers).
+* Tier order (top wins): exported env → project-root `.env` (existing walk) → `~/.env` → `security find-generic-password -a "$USER" -s linear_api_key -w`.
+* Keychain query uses `2>/dev/null` to absorb the "item not found" stderr noise. Check both exit code AND non-empty stdout before exporting (AC-4).
+* `command -v security >/dev/null 2>&1` gates the Keychain tier — AC-6 graceful no-op pattern.
+* Bats `security` stub: write a small wrapper script in the test's `PATH=$STUB_DIR:$PATH` that responds based on `STUB_KEYCHAIN_VALUE` env var (mirrors the `LINEAR_QUERY_OVERRIDE` pattern from BTS-203).
+* Updated error message preserves the actionable shape — list tiers in resolution order, not alphabetical.
 
 ## Open Questions
 

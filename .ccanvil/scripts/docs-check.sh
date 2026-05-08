@@ -5239,6 +5239,7 @@ cmd_provider_heal_auth() {
   # pre-check parity matches the actual call. Without this, operators who store
   # their key in keychain hit a fast-fail at this check before linear-query.sh's
   # own chain has a chance to resolve.
+  # @side-effect: invokes-subprocess-security
   if [[ -z "${LINEAR_API_KEY:-}" ]] && command -v security >/dev/null 2>&1; then
     local kc_value
     if kc_value=$(security find-generic-password -a "${USER:-$LOGNAME}" -s linear_api_key -w 2>/dev/null) \

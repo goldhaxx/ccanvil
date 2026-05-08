@@ -6640,12 +6640,15 @@ cmd_ssot_migrate() {
 # decision so skill prose (e.g. /spec) can branch on `linear` vs `local`
 # without reaching into private helpers. BTS-213.
 # Usage:
-#   docs-check.sh route-of <spec|plan|stasis> [--project-dir <dir>]
+#   docs-check.sh route-of <spec|plan|stasis|idea|backlog> [--project-dir <dir>]
 # Outputs "linear" or "local" on stdout. Exit 2 on missing/unknown kind.
+# BTS-316 (BTS-276 finding 4): allowlist extended from spec/plan/stasis to
+# include idea + backlog so provider-activate can canonically query routes
+# for all artifact kinds.
 # @manifest
-# purpose: Resolve which routing target (local|linear) governs a given lifecycle artifact (spec|plan|stasis) per ccanvil.json + ccanvil.local.json — read-only delegate to _lifecycle_route helper, exposed as a CLI surface for skills
+# purpose: Resolve which routing target (local|linear) governs a given lifecycle artifact (spec|plan|stasis|idea|backlog) per ccanvil.json + ccanvil.local.json — read-only delegate to _lifecycle_route helper, exposed as a CLI surface for skills and provider-activate
 # input: --project-dir <path>
-# input: positional <kind> ∈ {spec, plan, stasis}
+# input: positional <kind> ∈ {spec, plan, stasis, idea, backlog}
 # output: stdout routing target string ("local" or "linear")
 # output: exit-codes 0 ok, 2 unknown-flag/missing-kind
 # caller: skill:/spec
@@ -6654,8 +6657,10 @@ cmd_ssot_migrate() {
 # failure-mode: unknown-flag | exit=2 | visible=stderr-Usage
 # failure-mode: missing-kind | exit=2 | visible=stderr-Usage
 # contract: returns-local-by-default-when-unconfigured
+# contract: accepts-idea-and-backlog-kinds
 # anchor: BTS-204 (route-aware lifecycle)
 # anchor: BTS-241 (manifest seed)
+# anchor: BTS-316 (idea + backlog allowlist extension)
 cmd_route_of() {
   local kind="" project_dir="."
   while [[ $# -gt 0 ]]; do
@@ -6663,14 +6668,14 @@ cmd_route_of() {
       --project-dir) project_dir="${2:-.}"; shift 2 ;;
       --) shift; break ;;
       # @failure-mode: unknown-flag
-      --*) echo "Usage: docs-check.sh route-of <spec|plan|stasis> [--project-dir <path>]" >&2; exit 2 ;;
-      spec|plan|stasis) kind="$1"; shift ;;
+      --*) echo "Usage: docs-check.sh route-of <spec|plan|stasis|idea|backlog> [--project-dir <path>]" >&2; exit 2 ;;
+      spec|plan|stasis|idea|backlog) kind="$1"; shift ;;
       *) shift ;;
     esac
   done
   if [[ -z "$kind" ]]; then
     # @failure-mode: missing-kind
-    echo "Usage: docs-check.sh route-of <spec|plan|stasis> [--project-dir <dir>]" >&2
+    echo "Usage: docs-check.sh route-of <spec|plan|stasis|idea|backlog> [--project-dir <dir>]" >&2
     return 2
   fi
   # @side-effect: reads-config-files

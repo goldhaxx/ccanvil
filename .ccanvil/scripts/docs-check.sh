@@ -4442,6 +4442,270 @@ cmd_idea_setup() {
 }
 
 # ---------------------------------------------------------------------------
+# Operator-config commands — manage $HOME/.ccanvil/operator.json, the
+# operator-wide defaults tier consumed by the 3-tier merge_config in
+# operations.sh (BTS-316). Provides scripts and skills with deterministic
+# get/set semantics over operator-wide settings without hand-editing JSON.
+# ---------------------------------------------------------------------------
+
+# _operator_config_file — emit $HOME/.ccanvil/operator.json or "" when HOME unset.
+# Mirrors operations.sh::_operator_config_path; duplicated here so docs-check.sh
+# stays self-contained (no cross-script source).
+_operator_config_file() {
+  if [[ -n "${HOME:-}" ]]; then
+    echo "$HOME/.ccanvil/operator.json"
+  else
+    echo ""
+  fi
+}
+
+# _operator_config_dir — parent dir of operator.json. Used by set/init for mkdir.
+_operator_config_dir() {
+  if [[ -n "${HOME:-}" ]]; then
+    echo "$HOME/.ccanvil"
+  else
+    echo ""
+  fi
+}
+
+# _operator_config_atomic_write — write content via temp+mv to keep readers
+# from seeing half-written JSON during set/init.
+_operator_config_atomic_write() {
+  local content="$1"
+  local file
+  file=$(_operator_config_file)
+  if [[ -z "$file" ]]; then
+    echo "ERROR: HOME unset; cannot write operator.json" >&2
+    return 1
+  fi
+  local dir
+  dir=$(_operator_config_dir)
+  mkdir -p "$dir"
+  local tmp
+  tmp=$(mktemp "${dir}/.operator.XXXXXX") || {
+    echo "ERROR: mktemp failed in $dir" >&2
+    return 1
+  }
+  printf '%s\n' "$content" > "$tmp"
+  if ! jq empty "$tmp" 2>/dev/null; then
+    rm -f "$tmp"
+    echo "ERROR: refused to write malformed JSON to $file" >&2
+    return 1
+  fi
+  mv "$tmp" "$file"
+}
+
+# cmd_operator_config_init — Seed $HOME/.ccanvil/operator.json with the
+# canonical operator-wide defaults shape. Idempotent.
+# @manifest
+# purpose: Seed $HOME/.ccanvil/operator.json with the canonical operator-wide defaults shape — providers.linear.team plus default_routes for spec/plan/stasis/idea kinds — so subsequent provider-activate invocations can fall back to operator-config team rather than requiring per-node --team flags
+# input: --provider <name> (only "linear" supported in Phase 1)
+# input: --team <name>
+# input: env HOME (operator-config home directory base)
+# output: writes $HOME/.ccanvil/operator.json with seeded shape
+# output: stdout one-line summary "operator-config initialized: <file>"
+# output: exit-codes 0 ok, 1 missing-flag-or-write-failure, 2 unknown-flag
+# depends-on: jq
+# depends-on: _operator_config_atomic_write
+# side-effect: writes-operator-json
+# failure-mode: missing-team | exit=1 | visible=stderr-error-team-required | mitigation=pass-team-flag
+# failure-mode: non-linear-provider | exit=1 | visible=stderr-error-only-linear-supported | mitigation=use-linear
+# failure-mode: home-unset | exit=1 | visible=stderr-error-HOME-unset | mitigation=set-HOME-env
+# contract: idempotent-on-rerun
+# contract: only-linear-provider-phase-1
+# anchor: BTS-316 (operator-config layer)
+cmd_operator_config_init() {
+  local provider="" team=""
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --provider) provider="$2"; shift 2 ;;
+      --team)     team="$2";     shift 2 ;;
+      --) shift; break ;;
+      # @failure-mode: unknown-flag
+      --*) echo "Usage: docs-check.sh operator-config init --provider linear --team <name>" >&2; return 2 ;;
+      *) shift ;;
+    esac
+  done
+  # @failure-mode: non-linear-provider
+  [[ "$provider" == "linear" ]] || { echo "ERROR: --provider must be 'linear' (only linear supported in Phase 1)" >&2; return 1; }
+  # @failure-mode: missing-team
+  [[ -n "$team" ]] || { echo "ERROR: --team is required" >&2; return 1; }
+
+  local file
+  file=$(_operator_config_file)
+  # @failure-mode: home-unset
+  [[ -n "$file" ]] || { echo "ERROR: HOME unset; cannot resolve operator-config path" >&2; return 1; }
+
+  # Build the seeded shape, deep-merging into any existing content so that
+  # init is idempotent and preserves user-added keys.
+  local existing='{}'
+  if [[ -f "$file" ]]; then
+    if ! jq empty "$file" 2>/dev/null; then
+      echo "ERROR: $file is not valid JSON; refusing to overwrite" >&2
+      return 1
+    fi
+    existing=$(cat "$file")
+  fi
+  local seed
+  seed=$(jq -n --arg provider "$provider" --arg team "$team" '
+    {
+      providers: { ($provider): { team: $team } },
+      default_routes: { spec: $provider, plan: $provider, stasis: $provider, idea: $provider }
+    }')
+  # Deep-merge: existing tier wins (preserves user customizations); seed
+  # only fills in absent keys. Ensures idempotency when called repeatedly.
+  local merged
+  merged=$(echo "$existing $seed" | jq -s '.[1] * .[0]')
+
+  # @side-effect: writes-operator-json
+  _operator_config_atomic_write "$merged" || return 1
+  echo "operator-config initialized: $file"
+}
+
+# cmd_operator_config_get — Read a dotted-path key from operator.json.
+# @manifest
+# purpose: Read a dotted-path key (e.g. providers.linear.team) from $HOME/.ccanvil/operator.json — returns empty string + exit 0 when key or file is absent so callers can use `[[ -z "$x" ]]` for default-fallback logic without exit-code branching
+# input: positional <dotted.key>
+# input: env HOME
+# output: stdout key value or empty
+# output: exit-codes 0 always (treat as best-effort read)
+# depends-on: jq
+# depends-on: _operator_config_file
+# side-effect: reads-operator-json
+# failure-mode: missing-file | exit=0 | visible=empty-stdout | mitigation=run-operator-config-init
+# failure-mode: missing-key | exit=0 | visible=empty-stdout | mitigation=run-operator-config-set
+# contract: never-errors-on-missing
+# anchor: BTS-316 (operator-config layer)
+cmd_operator_config_get() {
+  local key="${1:-}"
+  if [[ -z "$key" ]]; then
+    echo "Usage: docs-check.sh operator-config get <dotted.key>" >&2
+    return 2
+  fi
+  local file
+  file=$(_operator_config_file)
+  # @failure-mode: missing-file
+  [[ -n "$file" && -f "$file" ]] || { echo ""; return 0; }
+  # @side-effect: reads-operator-json
+  # Convert dotted-path to jq getpath. `getpath(["a","b","c"])` returns null
+  # for missing intermediate keys; we map null→empty for shell-friendly output.
+  jq -r --arg k "$key" '
+    ($k | split(".")) as $path |
+    getpath($path) // empty
+  ' "$file" 2>/dev/null || { echo ""; return 0; }
+}
+
+# cmd_operator_config_set — Write a dotted-path key to operator.json.
+# @manifest
+# purpose: Write a dotted-path key (e.g. providers.linear.team) into $HOME/.ccanvil/operator.json — creates the file and parent directory atomically when absent so callers (skills, scripts) can persist operator-wide settings without hand-editing JSON
+# input: positional <dotted.key>
+# input: positional <value>
+# input: env HOME
+# output: writes $HOME/.ccanvil/operator.json with the updated key
+# output: exit-codes 0 ok, 1 home-unset-or-write-failure, 2 missing-args
+# depends-on: jq
+# depends-on: _operator_config_atomic_write
+# side-effect: writes-operator-json
+# failure-mode: missing-args | exit=2 | visible=stderr-Usage | mitigation=pass-key-and-value
+# failure-mode: home-unset | exit=1 | visible=stderr-error-HOME-unset | mitigation=set-HOME-env
+# failure-mode: invalid-existing-json | exit=1 | visible=stderr-error-not-valid-JSON | mitigation=delete-or-fix-operator-json
+# contract: creates-file-and-parent-dir-when-absent
+# contract: atomic-write-via-temp-mv
+# anchor: BTS-316 (operator-config layer)
+cmd_operator_config_set() {
+  local key="${1:-}"
+  local value="${2:-}"
+  if [[ -z "$key" ]]; then
+    # @failure-mode: missing-args
+    echo "Usage: docs-check.sh operator-config set <dotted.key> <value>" >&2
+    return 2
+  fi
+  local file
+  file=$(_operator_config_file)
+  # @failure-mode: home-unset
+  [[ -n "$file" ]] || { echo "ERROR: HOME unset; cannot resolve operator-config path" >&2; return 1; }
+
+  local existing='{}'
+  if [[ -f "$file" ]]; then
+    # @failure-mode: invalid-existing-json
+    if ! jq empty "$file" 2>/dev/null; then
+      echo "ERROR: $file is not valid JSON; refusing to mutate" >&2
+      return 1
+    fi
+    existing=$(cat "$file")
+  fi
+
+  local updated
+  updated=$(echo "$existing" | jq --arg k "$key" --arg v "$value" '
+    ($k | split(".")) as $path |
+    setpath($path; $v)
+  ')
+
+  # @side-effect: writes-operator-json
+  _operator_config_atomic_write "$updated" || return 1
+}
+
+# cmd_operator_config_show — Pretty-print operator.json content.
+# @manifest
+# purpose: Pretty-print the full operator-config JSON so operators and skills can inspect operator-wide settings — emits {} when the file is absent so callers (e.g. /radar) can render a "no operator config" branch via simple jq tests
+# input: env HOME
+# output: stdout pretty-printed JSON content (or {} when absent)
+# output: exit-codes 0 always (best-effort read)
+# depends-on: jq
+# depends-on: _operator_config_file
+# side-effect: reads-operator-json
+# failure-mode: missing-file | exit=0 | visible=empty-object-stdout | mitigation=run-operator-config-init
+# contract: never-errors-on-missing
+# anchor: BTS-316 (operator-config layer)
+cmd_operator_config_show() {
+  local file
+  file=$(_operator_config_file)
+  # @failure-mode: missing-file
+  if [[ -z "$file" || ! -f "$file" ]]; then
+    echo "{}"
+    return 0
+  fi
+  # @side-effect: reads-operator-json
+  if ! jq empty "$file" 2>/dev/null; then
+    echo "ERROR: $file is not valid JSON" >&2
+    return 1
+  fi
+  jq '.' "$file"
+}
+
+# cmd_operator_config — Subcommand dispatcher for operator-config {init|get|set|show}.
+# @manifest
+# purpose: Dispatch operator-config subcommand routing — single CLI surface that branches to cmd_operator_config_{init,get,set,show} per the first positional arg; mirrors the cmd_idea / cmd_provider_heal sub-dispatcher shape for consistency
+# input: positional <subcommand> ∈ {init, get, set, show}
+# input: positional <subcommand-args...>
+# output: subcommand-specific (delegated)
+# output: exit-codes 0 ok, 2 unknown-subcommand, plus delegated codes
+# depends-on: cmd_operator_config_init
+# depends-on: cmd_operator_config_get
+# depends-on: cmd_operator_config_set
+# depends-on: cmd_operator_config_show
+# side-effect: dispatcher-only
+# failure-mode: unknown-subcommand | exit=2 | visible=stderr-Usage | mitigation=use-init-get-set-show
+# contract: passes-args-verbatim-to-subcommand
+# anchor: BTS-316 (operator-config layer)
+cmd_operator_config() {
+  local sub="${1:-}"
+  if [[ -z "$sub" ]]; then
+    echo "Usage: docs-check.sh operator-config {init|get|set|show} [args...]" >&2
+    return 2
+  fi
+  shift
+  case "$sub" in
+    init) cmd_operator_config_init "$@" ;;
+    get)  cmd_operator_config_get "$@" ;;
+    set)  cmd_operator_config_set "$@" ;;
+    show) cmd_operator_config_show "$@" ;;
+    # @failure-mode: unknown-subcommand
+    *)    echo "Usage: docs-check.sh operator-config {init|get|set|show} [args...]" >&2; return 2 ;;
+  esac
+}
+
+# ---------------------------------------------------------------------------
 # cmd_provider_resolve_ids — Resolve Linear provider IDs (team_id, project_id,
 # state_ids[8], label_ids[idea]) from live API + deep-merge into
 # .claude/ccanvil.local.json. Phase 1 of the provider-heal umbrella surfaced
@@ -7409,6 +7673,7 @@ case "$cmd" in
   provider-heal-preflight) cmd_provider_heal_preflight "$@" ;;
   provider-heal-auth) cmd_provider_heal_auth "$@" ;;
   provider-heal) cmd_provider_heal "$@" ;;
+  operator-config) cmd_operator_config "$@" ;;
   idea-upgrade)      cmd_idea_upgrade "$@" ;;
   title-from-body)   cmd_title_from_body "$@" ;;
   legacy-refs-scan)  cmd_legacy_refs_scan "$@" ;;

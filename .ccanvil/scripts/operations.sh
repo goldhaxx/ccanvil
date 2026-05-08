@@ -116,33 +116,54 @@ done
 
 CONFIG_FILE=""
 
-# merge_config — Merge ccanvil.json (hub) with ccanvil.local.json (node).
+# _operator_config_path — Return the operator-config file path.
+# Reads $HOME directly; emits empty when HOME is unset (treated as "no
+# operator tier" by callers). BTS-316.
+_operator_config_path() {
+  if [[ -n "${HOME:-}" ]]; then
+    echo "$HOME/.ccanvil/operator.json"
+  else
+    echo ""
+  fi
+}
+
+# merge_config — 3-tier merge of operator + ccanvil.json (hub) +
+# ccanvil.local.json (node).
 #
-# Outputs the effective config JSON to stdout. Uses RFC 7396 deep merge
-# via jq's * operator — node wins on conflict (permissive, Option A).
+# Tiers (lowest precedence first):
+#   1. Operator: $HOME/.ccanvil/operator.json — operator-wide defaults (BTS-316)
+#   2. Hub: <dir>/.claude/ccanvil.json — distributed via ccanvil-sync
+#   3. Node: <dir>/.claude/ccanvil.local.json — local overrides
 #
-# Exit 0: success (even if both files are missing — outputs {}).
-# Exit 1: a file exists but contains invalid JSON.
+# Outputs the effective config JSON to stdout via RFC 7396 deep merge
+# (jq's * operator). Later tiers override earlier ones; node wins on conflict.
+#
+# Missing tiers are skipped silently (no error). When all three are absent,
+# emits {} and exits 0.
+#
+# Exit 0: success.
+# Exit 1: any existing tier file contains invalid JSON; stderr names the file.
 merge_config() {
   local dir="$1"
+  local operator_file
+  operator_file=$(_operator_config_path)
   local hub_file="$dir/.claude/ccanvil.json"
   local local_file="$dir/.claude/ccanvil.local.json"
 
-  # Neither file exists → empty config
-  if [[ ! -f "$hub_file" && ! -f "$local_file" ]]; then
-    echo '{}'
-    return 0
+  # Validate each tier file that exists. Order matters: error message
+  # names the offending file, not a downstream symptom.
+  if [[ -n "$operator_file" && -f "$operator_file" ]]; then
+    if ! jq empty "$operator_file" 2>/dev/null; then
+      echo "ERROR: $operator_file is not valid JSON" >&2
+      return 1
+    fi
   fi
-
-  # Validate hub file if it exists
   if [[ -f "$hub_file" ]]; then
     if ! jq empty "$hub_file" 2>/dev/null; then
       echo "ERROR: .claude/ccanvil.json is not valid JSON" >&2
       return 1
     fi
   fi
-
-  # Validate local file if it exists
   if [[ -f "$local_file" ]]; then
     if ! jq empty "$local_file" 2>/dev/null; then
       echo "ERROR: .claude/ccanvil.local.json is not valid JSON" >&2
@@ -150,20 +171,35 @@ merge_config() {
     fi
   fi
 
-  # Only hub file → return hub content
-  if [[ -f "$hub_file" && ! -f "$local_file" ]]; then
-    jq '.' "$hub_file"
+  # Collect existing tier files in precedence order (operator → hub → node).
+  local tiers=()
+  if [[ -n "$operator_file" && -f "$operator_file" ]]; then
+    tiers+=("$operator_file")
+  fi
+  if [[ -f "$hub_file" ]]; then
+    tiers+=("$hub_file")
+  fi
+  if [[ -f "$local_file" ]]; then
+    tiers+=("$local_file")
+  fi
+
+  # No tiers → empty config (preserves existing 2-tier "neither file" behavior).
+  if (( ${#tiers[@]} == 0 )); then
+    echo '{}'
     return 0
   fi
 
-  # Only local file → return local content
-  if [[ ! -f "$hub_file" && -f "$local_file" ]]; then
-    jq '.' "$local_file"
+  # Single tier → emit its content directly (cheaper, identical to multi-tier
+  # reduce when N=1).
+  if (( ${#tiers[@]} == 1 )); then
+    jq '.' "${tiers[0]}"
     return 0
   fi
 
-  # Both files exist → deep merge (node wins on conflict)
-  jq -s '.[0] * .[1]' "$hub_file" "$local_file"
+  # Multi-tier deep merge. `reduce` walks tier files in order; later tiers
+  # override earlier ones. Equivalent to .[0] * .[1] * .[2] for 3 tiers and
+  # extends naturally if more tiers are added later.
+  jq -s 'reduce .[] as $x ({}; . * $x)' "${tiers[@]}"
 }
 
 read_config() {

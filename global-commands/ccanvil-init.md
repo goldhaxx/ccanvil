@@ -107,6 +107,46 @@ bash .ccanvil/scripts/ccanvil-sync.sh init ~/projects/ccanvil
 ```
 This creates `.ccanvil/ccanvil.lock` and auto-registers the project in the hub's registry.
 
+## Step 10a — Provider activation (BTS-316)
+
+The node defaults to local provider (no Linear / no external services). To activate Linear at init time, the operator can pass flags OR be prompted interactively. Parse the user's `/ccanvil-init` invocation for these flags:
+
+- `--provider linear` — activate the linear provider
+- `--team <name>` — Linear team name (optional; falls back to `~/.ccanvil/operator.json` providers.linear.team if `operator-config init` has been run)
+- `--project <name>` — Linear project name (required when activating)
+- `--routes <list>` — comma-separated kinds to flip (e.g. `spec,plan,stasis,idea`); falls back to operator-config default_routes; hard default `spec,plan,stasis,idea`
+
+### Branch on flags vs interactive vs CI
+
+**Flag-driven (`--provider` present):** run provider-activate after registration. No prompt.
+```bash
+bash .ccanvil/scripts/docs-check.sh provider-activate \
+  --provider linear \
+  ${TEAM:+--team "$TEAM"} \
+  --project "$PROJECT" \
+  ${ROUTES:+--routes "$ROUTES"} \
+  --project-dir .
+```
+
+**Interactive (no `--provider` flag AND `[[ -t 0 ]]`):** prompt the user.
+- Ask: "Activate Linear for this node? [y/N]"
+- On `y` / `Y`: prompt for team (default = `cmd_operator_config_get providers.linear.team` value if non-empty), project (no default), routes (default = comma-list of kinds where operator-config default_routes equals "linear", or `spec,plan,stasis,idea`).
+- Then run `provider-activate` with the gathered values.
+- On `n`, empty, or any other input: skip activation; surface the post-hoc activation command.
+
+**Non-TTY (no `--provider` flag AND not interactive):** default to local. Surface the post-hoc command in the success message:
+```
+to activate a provider later: bash .ccanvil/scripts/docs-check.sh provider-activate --provider linear --team <name> --project <name>
+```
+
+### Why TTY-aware
+
+Agents (no TTY) and CI environments must NOT block on a prompt that never arrives. Humans (TTY) get the friendly upgrade path. Both reach the same `provider-activate` command — the verb is the single source of truth; the skill prose just chooses how to gather its inputs.
+
+### Operator-config first-run
+
+If the operator has never run `operator-config init`, the team prompt falls back to no default — they'll need to enter it explicitly. Subsequent invocations (after they've run `operator-config init` once) inherit the team automatically.
+
 ## Step 11 — Mode-aware git lifecycle (AC-8, AC-9)
 
 Branch on `$MODE`:

@@ -112,3 +112,36 @@ SKILL_FILE="$BATS_TEST_DIRNAME/../../global-commands/ccanvil-init.md"
   grep -q 'docs/stasis.md' "$SKILL_FILE"
   ! grep -q 'docs/checkpoint.md' "$SKILL_FILE"
 }
+
+# =========================================================================
+# BTS-316: provider-activation integration (Step 10a)
+# =========================================================================
+
+@test "BTS-316 AC-14: skill documents Step 10a — Provider activation" {
+  grep -qE 'Step 10a' "$SKILL_FILE"
+  grep -qE 'Provider activation' "$SKILL_FILE"
+}
+
+@test "BTS-316 AC-14: skill documents the four provider flags" {
+  grep -q 'provider-activate' "$SKILL_FILE"
+  grep -qE -- '--provider' "$SKILL_FILE"
+  grep -qE -- '--team' "$SKILL_FILE"
+  grep -qE -- '--project' "$SKILL_FILE"
+  grep -qE -- '--routes' "$SKILL_FILE"
+}
+
+@test "BTS-316 AC-15: skill documents the TTY-interactive prompt branch" {
+  grep -qE '\[\[ -t 0 \]\]' "$SKILL_FILE"
+  grep -qE 'Activate Linear' "$SKILL_FILE"
+}
+
+@test "BTS-316 AC-16: skill documents non-TTY default-local with post-hoc command" {
+  # The post-hoc activation command surfaces in the success message.
+  grep -q 'to activate a provider later' "$SKILL_FILE"
+  # That message includes the canonical provider-activate invocation.
+  grep -q 'docs-check.sh provider-activate' "$SKILL_FILE"
+}
+
+@test "BTS-316 AC-15: skill references operator-config team fallback" {
+  grep -q 'operator-config' "$SKILL_FILE"
+}

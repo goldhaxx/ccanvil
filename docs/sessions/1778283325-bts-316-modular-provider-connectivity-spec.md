@@ -10,7 +10,7 @@
 
 Provider activation today is a manual sequence the operator pieces together: configure auth (BTS-331), run `provider-heal` to resolve IDs (BTS-326), then hand-edit `.claude/ccanvil.local.json` to flip routing keys. There is no init-time path and no single command that activates a provider end-to-end. This forces every new node (most recently `tour-scheduler`) to start local and stay there, and turns "rotate keys" into a per-node ritual.
 
-This feature lands the **operator-config layer** (operator-wide defaults at `~/.ccanvil/operator.json`, hub-default + node-override semantics from BTS-380 Q3) and the **`provider-activate` switch** that composes existing primitives into one operator-facing verb. It works at init time (via `/ccanvil-init` flags or interactive prompt) AND post-init (operator runs the verb against an existing local-routed node to flip it). Closes BTS-313 (init-time activation) and BTS-314 (heal flow for drifted nodes) as folded scope; bolts onto the BTS-326 provider-heal umbrella.
+This feature lands the **operator-config layer** (operator-wide defaults at `~/.ccanvil/operator.json`, hub-default + node-override semantics from BTS-380 Q3) and the `provider-activate` switch that composes existing primitives into one operator-facing verb. It works at init time (via `/ccanvil-init` flags or interactive prompt) AND post-init (operator runs the verb against an existing local-routed node to flip it). Closes BTS-313 (init-time activation) and BTS-314 (heal flow for drifted nodes) as folded scope; bolts onto the BTS-326 provider-heal umbrella.
 
 ## Job To Be Done
 
@@ -47,8 +47,8 @@ Each criterion is independently testable. Binary pass/fail.
 ### /ccanvil-init integration
 
 - [ ] **AC-14:** `/ccanvil-init` skill prose accepts `--provider linear --team "<name>" --project "<name>" --routes <list>` flags. When provider flags are present, init runs `provider-activate` after registration (Step 10) and surfaces the result.
-- [ ] **AC-15:** When `--provider` is absent AND stdin is a TTY, `/ccanvil-init` prompts: "Activate a provider for this node? [linear/local] (default: local)". On `linear`, prompts for team (default from operator-config), project, and routes (default from operator-config). On `local` or empty, skips activation.
-- [ ] **AC-16:** When `--provider` is absent AND stdin is NOT a TTY (CI / agent without flags), `/ccanvil-init` defaults to local without prompting. Surfaces a one-line message: "to activate a provider later: bash docs-check.sh provider-activate --provider linear --team <name> --project <name>".
+- [ ] **AC-15:** When `--provider` is absent AND stdin is a TTY, `/ccanvil-init` prompts: "Activate a provider for this node? \[linear/local\] (default: local)". On `linear`, prompts for team (default from operator-config), project, and routes (default from operator-config). On `local` or empty, skips activation.
+- [ ] **AC-16:** When `--provider` is absent AND stdin is NOT a TTY (CI / agent without flags), `/ccanvil-init` defaults to local without prompting. Surfaces a one-line message: "to activate a provider later: bash [docs-check.sh](<http://docs-check.sh>) provider-activate --provider linear --team <name> --project <name>".
 
 ### Tests + manifests
 
@@ -65,38 +65,38 @@ Each criterion is independently testable. Binary pass/fail.
 ## Affected Files
 
 | File | Change |
-|------|--------|
+| -- | -- |
 | `.ccanvil/scripts/operations.sh` | Modify `merge_config()` to 3-tier (operator → hub → node); requires reading from `$HOME/.ccanvil/operator.json` |
 | `.ccanvil/scripts/docs-check.sh` | New: `cmd_operator_config_*` (init/get/set/show), `cmd_provider_activate`. Modify: `cmd_route_of` allowlist (+idea, +backlog) |
 | `global-commands/ccanvil-init.md` | Skill prose: add provider flags + interactive prompt branch (TTY-aware) |
 | `hub/tests/operator-config.bats` | New |
 | `hub/tests/provider-activate.bats` | New |
 | `hub/tests/route-of-idea-backlog.bats` | New |
-| `.ccanvil/manifest-allowlist.txt` | Add new cmd_* surfaces |
+| `.ccanvil/manifest-allowlist.txt` | Add new cmd\_\* surfaces |
 | `.claude/ccanvil.json` | Possibly: declare schema-version for operator-config tier (TBD during implementation) |
 
 ## Dependencies
 
-- **Requires:** BTS-326 (`provider-heal` umbrella shipped), BTS-331 (LINEAR_API_KEY auth chain), BTS-319 (`provider-resolve-ids`), `linear-query.sh` http substrate.
-- **Blocked by:** none.
+* **Requires:** BTS-326 (`provider-heal` umbrella shipped), BTS-331 (LINEAR_API_KEY auth chain), BTS-319 (`provider-resolve-ids`), `linear-query.sh` http substrate.
+* **Blocked by:** none.
 
 ## Out of Scope
 
-- Agent army / role definitions (BTS-380 component 2 — stays parked).
-- Overnight autonomy / Ralph loops (BTS-380 component 3 — stays parked).
-- Interrupt boundary semantics (BTS-380 Q1 — stays parked).
-- Stuck-state recovery defaults (BTS-380 Q4 — stays parked).
-- Legacy-data-scan pre-flip (BTS-337 — captured as follow-up; bolts onto `provider-activate` as an optional `--legacy-data-scan` flag in a later PR).
-- `work.resolve` rejecting bare `BTS-N` on local-provider (BTS-276 finding 3 — separate paper-cut PR).
-- `ticket.transition` local-provider error (BTS-276 finding 2 — separate paper-cut PR; depends on local-provider transition semantics design).
-- Multi-provider per node (e.g. specs in Linear + ideas in Notion). Single-provider-per-node enforced by current substrate; multi-provider is a future spec.
+* Agent army / role definitions (BTS-380 component 2 — stays parked).
+* Overnight autonomy / Ralph loops (BTS-380 component 3 — stays parked).
+* Interrupt boundary semantics (BTS-380 Q1 — stays parked).
+* Stuck-state recovery defaults (BTS-380 Q4 — stays parked).
+* Legacy-data-scan pre-flip (BTS-337 — captured as follow-up; bolts onto `provider-activate` as an optional `--legacy-data-scan` flag in a later PR).
+* `work.resolve` rejecting bare `BTS-N` on local-provider (BTS-276 finding 3 — separate paper-cut PR).
+* `ticket.transition` local-provider error (BTS-276 finding 2 — separate paper-cut PR; depends on local-provider transition semantics design).
+* Multi-provider per node (e.g. specs in Linear + ideas in Notion). Single-provider-per-node enforced by current substrate; multi-provider is a future spec.
 
 ## Implementation Notes
 
-- **Three-tier merge order:** operator → hub → node. Earlier tiers are defaults; later tiers override. Mirrors how `merge_config` already handles 2 tiers — extend the existing jq `.[0] * .[1] * .[2]` reduce.
-- **Operator-config home:** `$HOME/.ccanvil/operator.json`. Outside the workspace, so substrate that reads it must be in scripts that explicitly handle the path (no `guard-workspace.sh` issues — the script invocation reads HOME directly, no path arg crossing the guard).
-- **`provider-activate` composition:** call `cmd_provider_heal` for auth+drift+resolve, then a separate `_set_routes` helper that jq-edits `integrations.routing.{spec,plan,stasis,idea}` in `.claude/ccanvil.local.json`. Atomic write via temp+mv.
-- **TTY detection in init prose:** the skill prose instructs the agent to test `[[ -t 0 ]]` before prompting. Agents (no TTY) skip the prompt; humans (TTY) get the prompt.
-- **Test-stubbing pattern:** existing `LINEAR_QUERY_OVERRIDE` (BTS-203) covers Linear API; for `~/.ccanvil/operator.json` use `HOME` override (export `HOME="$BATS_TMPDIR/fake-home"` per test). No new test substrate needed.
-- **Manifest discipline:** every new `cmd_*` carries the full `@manifest` block. Failure-modes must enumerate auth-failed, drift-detected, resolve-failed, missing-flag, invalid-json. New surfaces added to `.ccanvil/manifest-allowlist.txt` BEFORE running validate.
-- **No breaking changes:** existing nodes that don't have `~/.ccanvil/operator.json` continue working unchanged — `merge_config` returns `{}` for the missing tier.
+* **Three-tier merge order:** operator → hub → node. Earlier tiers are defaults; later tiers override. Mirrors how `merge_config` already handles 2 tiers — extend the existing jq `.[0] * .[1] * .[2]` reduce.
+* **Operator-config home:** `$HOME/.ccanvil/operator.json`. Outside the workspace, so substrate that reads it must be in scripts that explicitly handle the path (no `guard-workspace.sh` issues — the script invocation reads HOME directly, no path arg crossing the guard).
+* `provider-activate` composition: call `cmd_provider_heal` for auth+drift+resolve, then a separate `_set_routes` helper that jq-edits `integrations.routing.{spec,plan,stasis,idea}` in `.claude/ccanvil.local.json`. Atomic write via temp+mv.
+* **TTY detection in init prose:** the skill prose instructs the agent to test `[[ -t 0 ]]` before prompting. Agents (no TTY) skip the prompt; humans (TTY) get the prompt.
+* **Test-stubbing pattern:** existing `LINEAR_QUERY_OVERRIDE` (BTS-203) covers Linear API; for `~/.ccanvil/operator.json` use `HOME` override (export `HOME="$BATS_TMPDIR/fake-home"` per test). No new test substrate needed.
+* **Manifest discipline:** every new `cmd_*` carries the full `@manifest` block. Failure-modes must enumerate auth-failed, drift-detected, resolve-failed, missing-flag, invalid-json. New surfaces added to `.ccanvil/manifest-allowlist.txt` BEFORE running validate.
+* **No breaking changes:** existing nodes that don't have `~/.ccanvil/operator.json` continue working unchanged — `merge_config` returns `{}` for the missing tier.

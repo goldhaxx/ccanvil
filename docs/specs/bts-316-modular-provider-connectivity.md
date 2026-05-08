@@ -4,7 +4,7 @@
 > Work: linear:BTS-316
 > Created: 1778272987
 > Subject: Modular provider connectivity — operator-config layer + activation
-> Status: In Progress
+> Status: Complete
 
 ## Summary
 

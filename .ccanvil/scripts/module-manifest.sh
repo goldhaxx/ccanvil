@@ -605,13 +605,13 @@ _caller_actually_calls_primitive() {
 }
 
 # @manifest
-# purpose: Walk allowlist; for each entry, extract + validate manifest against required-keys, declared callers, depends-on, and source markers; emit drift envelope. BTS-386 extension: also scans .claude/rules/*.md for tier-budget compliance — emits warn-shape rule-tier-budget-exceeded drift entries (exit 0 by default, exit 2 with --strict), block-shape rule-frontmatter-malformed drift entries (always exit 2), and frontmatter-missing info entries (advisory only).
+# purpose: Walk allowlist; for each entry, extract + validate manifest against required-keys, declared callers, depends-on, and source markers; emit drift envelope. BTS-386 extension: also scans .claude/rules/*.md for tier-budget compliance — emits warn-shape rule-tier-budget-exceeded entries to info[] (advisory; exit 0 by default, exit 2 with --strict), block-shape rule-frontmatter-malformed entries to drift[] (always exit 2), and frontmatter-missing entries to info[] (advisory only).
 # input: --json
 # input: --allowlist <path>
 # input: --strict
 # output: stdout JSON envelope on --json (coverage, drift, info, status)
 # output: stderr DRIFT lines per drift incident
-# output: exit-codes 0 clean-or-warn-only, 2 block-shape-drift|--strict-with-warn-drift
+# output: exit-codes 0 clean-or-info-only, 2 block-shape-drift|--strict-with-info-warn
 # depends-on: cmd_extract
 # depends-on: jq
 # depends-on: python3
@@ -622,7 +622,8 @@ _caller_actually_calls_primitive() {
 # contract: returns-0-on-empty-allowlist
 # contract: emits-coverage-and-drift-arrays
 # contract: bidirectional-validation-caller-and-marker
-# contract: warn-shape-drift-exit-0-by-default
+# contract: warn-shape-lives-in-info-array
+# contract: status-drift-iff-block-shape-drift
 # contract: info-array-always-present
 # anchor: BTS-239 (origin)
 # anchor: BTS-386 (rule-tier extension)
@@ -878,7 +879,12 @@ PY
       fi
       _tier=$(echo "$_fm_check" | jq -r '.tier // 0')
       if [[ "$_tier" == "0" ]] && (( _rule_tokens > 150 )); then
-        drift_records+=("$(jq -nc --arg p "$_rule_file" --arg id "$_rule_id" --argjson v "$_rule_tokens" \
+        # BTS-386: warn-shape advisory — emit to info[] (not drift[]) so
+        # existing consumers (stasis, validate-clean checks) continue to see
+        # status="ok" when only rule-tier signal is present. drift[] is
+        # reserved for block-shape (broken substrate). --strict still
+        # escalates to exit 2 by inspecting info[] for warn entries.
+        info_records+=("$(jq -nc --arg p "$_rule_file" --arg id "$_rule_id" --argjson v "$_rule_tokens" \
           '{path:$p, id:$id, reason:"rule-tier-budget-exceeded", value:$v, threshold:150}')")
       fi
     done
@@ -889,22 +895,21 @@ PY
   local status_str="ok"
   if [[ "$drift_count" -gt 0 ]]; then status_str="drift"; fi
 
-  # BTS-386: warn-shape vs block-shape exit code logic.
-  # warn-shape ⇔ reason == "rule-tier-budget-exceeded" (the only warn category today).
-  # block-shape ⇔ everything else in drift_records.
-  # Exit 2 iff any block-shape drift OR (--strict AND any warn-shape drift).
-  local has_block=0 has_warn=0
-  if [[ "$drift_count" -gt 0 ]]; then
+  # BTS-386: warn-shape lives in info[]; block-shape lives in drift[].
+  # Exit 2 iff any drift entry OR (--strict AND info has rule-tier-budget-exceeded).
+  local has_warn=0
+  if [[ "$info_count" -gt 0 ]]; then
     local _r _reason
-    for _r in "${drift_records[@]}"; do
+    for _r in "${info_records[@]}"; do
       _reason=$(echo "$_r" | jq -r '.reason')
       if [[ "$_reason" == "rule-tier-budget-exceeded" ]]; then
         has_warn=1
-      else
-        has_block=1
+        break
       fi
     done
   fi
+  local has_block=0
+  if [[ "$drift_count" -gt 0 ]]; then has_block=1; fi
 
   if [[ "$json_mode" -eq 1 ]]; then
     local drift_arr="[]"

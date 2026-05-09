@@ -81,11 +81,11 @@ Resolve a rule's bundle: `bash docs-check.sh rule-resolve <rule-id> --project-di
 
 **Validator behavior (BTS-386).** `bash module-manifest.sh validate --json` scans `.claude/rules/*.md` and emits:
 
-- `drift[].rule-tier-budget-exceeded` — tier-0 rule whose whole-file token estimate (char-count / 4) exceeds 150. Warn-shape: status=`drift` but exit code 0 by default. `--strict` flag escalates to exit 2.
-- `drift[].rule-frontmatter-malformed` — rule with malformed YAML frontmatter. Block-shape: always exit 2.
-- `info[].frontmatter-missing` — rule without frontmatter. Advisory only; doesn't change status. The validator continues with the back-compat default envelope.
+- `info[].rule-tier-budget-exceeded` — tier-0 rule whose whole-file token estimate (char-count / 4) exceeds 150. Advisory only; status stays `ok` (so existing consumers don't see false-alarm drift). Exit 0 by default; `--strict` flag escalates to exit 2.
+- `drift[].rule-frontmatter-malformed` — rule with malformed YAML frontmatter. Block-shape: always exit 2 with status=`drift`.
+- `info[].frontmatter-missing` — rule without frontmatter. Advisory only; the validator continues with the back-compat default envelope.
 
-The `info` array is always present in the JSON envelope (empty when no info entries). Use the warn-shape signal to identify atomization candidates without blocking PR finalize on rules that haven't been atomized yet.
+The `info` array is always present in the JSON envelope (empty when no info entries). Status is `drift` only when block-shape entries exist in `drift[]`; warn-shape signal lives in `info[]` and is the discoverable "atomization needed" list without blocking PR finalize.
 
 ### Stacks declaration (BTS-385)
 

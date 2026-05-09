@@ -27,34 +27,39 @@ _make_rule_project() {
   echo "$fx"
 }
 
-@test "BTS-386 Step 1: validate emits rule-tier-budget-exceeded drift on over-budget tier-0 rule" {
+@test "BTS-386 Step 1: validate emits rule-tier-budget-exceeded info entry on over-budget tier-0 rule" {
   set -e
   fx=$(_make_rule_project "over-budget-fx" "over-budget.md")
   cd "$fx"
   run bash "$MM" validate --json
-  echo "$output" | jq -e '.drift | map(select(.reason == "rule-tier-budget-exceeded")) | length == 1'
-  echo "$output" | jq -e '.drift | map(select(.reason == "rule-tier-budget-exceeded")) | .[0].path | endswith("over-budget.md")'
-  echo "$output" | jq -e '.drift | map(select(.reason == "rule-tier-budget-exceeded")) | .[0].value > 150'
-  echo "$output" | jq -e '.drift | map(select(.reason == "rule-tier-budget-exceeded")) | .[0].threshold == 150'
+  echo "$output" | jq -e '.info | map(select(.reason == "rule-tier-budget-exceeded")) | length == 1'
+  echo "$output" | jq -e '.info | map(select(.reason == "rule-tier-budget-exceeded")) | .[0].path | endswith("over-budget.md")'
+  echo "$output" | jq -e '.info | map(select(.reason == "rule-tier-budget-exceeded")) | .[0].value > 150'
+  echo "$output" | jq -e '.info | map(select(.reason == "rule-tier-budget-exceeded")) | .[0].threshold == 150'
 }
 
-@test "BTS-386 Step 3: under-budget tier-0 rule emits no drift entry" {
+@test "BTS-386 Step 3: under-budget tier-0 rule emits no info or drift entry" {
   set -e
   fx=$(_make_rule_project "under-budget-fx" "under-budget.md")
   cd "$fx"
   run bash "$MM" validate --json
   [ "$status" -eq 0 ]
   echo "$output" | jq -e '.drift | length == 0'
+  echo "$output" | jq -e '.info | length == 0'
   echo "$output" | jq -e '.status == "ok"'
 }
 
-@test "BTS-386 Step 3: over-budget alone exits 0 (warn-shape) with status=drift" {
+@test "BTS-386 Step 3: over-budget alone exits 0 with status=ok (info-only signal)" {
   set -e
   fx=$(_make_rule_project "over-budget-warn-fx" "over-budget.md")
   cd "$fx"
   run bash "$MM" validate --json
   [ "$status" -eq 0 ]
-  echo "$output" | jq -e '.status == "drift"'
+  # Status stays "ok" — warn-shape lives in info[], not drift[]. This preserves
+  # backward compat for existing consumers (stasis, /pr) that read .status.
+  echo "$output" | jq -e '.status == "ok"'
+  echo "$output" | jq -e '.drift | length == 0'
+  echo "$output" | jq -e '.info | length >= 1'
 }
 
 @test "BTS-386 Step 4: --strict escalates rule-tier-budget-exceeded to exit 2" {
@@ -62,8 +67,7 @@ _make_rule_project() {
   cd "$fx"
   run bash "$MM" validate --json --strict
   [ "$status" -eq 2 ]
-  echo "$output" | jq -e '.status == "drift"'
-  echo "$output" | jq -e '.drift | map(select(.reason == "rule-tier-budget-exceeded")) | length == 1'
+  echo "$output" | jq -e '.info | map(select(.reason == "rule-tier-budget-exceeded")) | length == 1'
 }
 
 @test "BTS-386 Step 5: frontmatter-missing rule emits info entry, no drift, exit 0" {

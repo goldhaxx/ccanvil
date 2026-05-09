@@ -12,7 +12,8 @@
 # input: --json (emit structured {ok, not_ok, total, tail, raw_exit, timings, wall_ms, jobs, cpus} to stdout)
 # input: --timings (run bats -T; append slowest-first timing table to human output)
 # input: --slow-top <N> (cap timing rows to N slowest; N=0 emits zero rows; non-integer fails with exit 2)
-# input: --progress (BTS-383: per-file orchestrated mode; emits `[N/M] <file>: PASS X/Y in T.Ts` on stderr after each file completes; aggregates output for the existing summary/JSON pipeline)
+# input: --progress (BTS-383: per-file orchestrated mode; emits `[N/M] <file>: PASS X/Y in T.Ts` on stderr after each file completes; aggregates output for the existing summary/JSON pipeline; spawns background heartbeat that emits every BATS_PROGRESS_HEARTBEAT_SECS so 0-byte stderr is impossible during long files)
+# input: env BATS_PROGRESS_HEARTBEAT_SECS (override --progress heartbeat interval in seconds; default 30; non-positive disables heartbeat)
 # input: --help / -h (print usage and exit 0)
 # input: env BATS_REPORT_HAS_PARALLEL (=0 forces no-parallel branch even when parallel is installed; testability hook)
 # input: env BATS_REPORT_PERF_CORES (override the perf-core count probed via sysctl; testability + cross-host pinning)
@@ -72,7 +73,7 @@ set -uo pipefail
 usage() {
   # BTS-383: bumped range from 44→47 to surface --progress + stderr-progress
   # output line + BTS-383 anchor.
-  sed -n '2,47p' "$0" | sed 's/^# \{0,1\}//'
+  sed -n '2,48p' "$0" | sed 's/^# \{0,1\}//'
 }
 
 parallel_mode=0
@@ -183,7 +184,7 @@ fi
 # Run bats ONCE, capture to tempfile.
 # @side-effect: writes-temp-file
 tmp=$(mktemp)
-trap 'rm -f "$tmp" "${BTS_MANIFEST_VALIDATE_CACHE:-}"' EXIT
+trap '[[ -n "${hb_pid:-}" ]] && kill "$hb_pid" 2>/dev/null; rm -f "$tmp" "${BTS_MANIFEST_VALIDATE_CACHE:-}"' EXIT INT TERM
 
 # BTS-277: wall-time around the bats invocation. Use perl Time::HiRes
 # (ships on macOS + Linux) for ms-precision; fall back to second-precision
@@ -203,6 +204,23 @@ if (( progress_mode )); then
   # completes. Aggregate captured TAP into $tmp so the existing summary,
   # --json, --timings, and bats-runs.jsonl pipelines downstream stay
   # unchanged. Exit code is the worst (max) per-file exit.
+  #
+  # Heartbeat: spawn a background process that emits `[heartbeat] still
+  # working — Ns elapsed` to stderr every BATS_PROGRESS_HEARTBEAT_SECS
+  # (default 30s). The cleanup trap installed above kills the process
+  # on EXIT/INT/TERM. This ensures 0-byte stderr is impossible during
+  # long-running files (BTS-383's central failure mode).
+  hb_secs="${BATS_PROGRESS_HEARTBEAT_SECS:-30}"
+  if [[ "$hb_secs" =~ ^[0-9]+$ ]] && (( hb_secs > 0 )); then
+    (
+      hb_elapsed=0
+      while sleep "$hb_secs"; do
+        hb_elapsed=$((hb_elapsed + hb_secs))
+        printf '[heartbeat] still working — %ds elapsed\n' "$hb_elapsed" >&2
+      done
+    ) &
+    hb_pid=$!
+  fi
   bp_files=()
   bp_extra_args=()
   for p in "${passthrough[@]+"${passthrough[@]}"}"; do

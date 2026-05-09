@@ -123,6 +123,35 @@ Parallelism (`--parallel`) uses `bats --jobs N` where N = max(2, cpu/2). Require
 
 Per-test timings (`--timings`, BTS-137) add `bats -T` to the invocation and parse the `in Nms` suffix. Use `--slow-top N` when you want only the worst offenders — helpful for prioritizing fixture consolidation. `--json --timings` emits `{timings: [{test, ms}]}` sorted slowest-first.
 
+## Test execution discipline — full-suite only at /pr (BTS-383)
+
+**Rule:** During iteration (between `/activate` and `/pr`), run ONLY targeted file-level bats fixtures for the surfaces you've just touched. The full-suite invocation (`bash .ccanvil/scripts/bats-report.sh --parallel`) is reserved for the `/pr` step's pre-flight check — that's its single canonical caller (BTS-118).
+
+**Why:**
+
+Anchored on BTS-383 (origin incident, 2026-05-08): a single feature session burned an estimated 1-2 hours of operator-idle time waiting on bats. The agent ran 8+ full-suite invocations (some in parallel, oversubscribing the CPU), repeatedly assumed buffered output meant a hung process, and stacked manifest validates 10+ deep. Targeted bats per logical edit would have surfaced 95%+ of regressions in <30s each; the full-suite at /pr time is the ground-truth ratification.
+
+**How to apply:**
+
+- After each red-green TDD cycle: run only the bats file you wrote/touched (`bats hub/tests/<your-file>.bats`).
+- After a logical commit boundary (a step in the plan completes): optionally run the bats files that touch the edited substrate — usually 3-8 files, not 140.
+- At `/pr` time only: the skill auto-runs `bats-report.sh --parallel` as a single pre-flight check. Do NOT run it manually before then; the cost-vs-value ratio is wrong.
+- Manifest validate (`module-manifest.sh validate`) is similarly cadenced — run after the commit that altered manifest-relevant code, not after every Edit. Each invocation forks 50-100+ bash subprocesses; stacking them oversubscribes the host.
+
+**Counter-example (this rule was forged here):**
+
+```bash
+# WRONG: agent ran this 8+ times over a single session, often in parallel.
+bash .ccanvil/scripts/bats-report.sh --parallel
+```
+
+```bash
+# RIGHT: targeted to the surface just touched.
+bats hub/tests/operator-config.bats hub/tests/provider-activate.bats
+```
+
+If you genuinely need full-suite mid-iteration (rare — usually means substrate-wide change), pick one invocation and let it block to completion. **Never run multiple bats jobs in parallel** — `--jobs N` already parallelizes within the run; stacking external runs exceeds the host's core count and slows every run 3-4×.
+
 <!-- NODE-SPECIFIC-START -->
 <!-- Add project-specific content below this line. -->
 <!-- Hub content above is updated via /ccanvil-pull. -->

@@ -605,14 +605,16 @@ _caller_actually_calls_primitive() {
 }
 
 # @manifest
-# purpose: Walk allowlist; for each entry, extract + validate manifest against required-keys, declared callers, depends-on, and source markers; emit drift envelope.
+# purpose: Walk allowlist; for each entry, extract + validate manifest against required-keys, declared callers, depends-on, and source markers; emit drift envelope. BTS-386 extension: also scans .claude/rules/*.md for tier-budget compliance — emits warn-shape rule-tier-budget-exceeded drift entries (exit 0 by default, exit 2 with --strict), block-shape rule-frontmatter-malformed drift entries (always exit 2), and frontmatter-missing info entries (advisory only).
 # input: --json
 # input: --allowlist <path>
-# output: stdout JSON envelope on --json (coverage, drift, status)
+# input: --strict
+# output: stdout JSON envelope on --json (coverage, drift, info, status)
 # output: stderr DRIFT lines per drift incident
-# output: exit-codes 0 clean, 2 drift detected
+# output: exit-codes 0 clean-or-warn-only, 2 block-shape-drift|--strict-with-warn-drift
 # depends-on: cmd_extract
 # depends-on: jq
+# depends-on: python3
 # depends-on: _function_body_grep
 # depends-on: _caller_actually_calls_primitive
 # side-effect: emits-DRIFT-stderr
@@ -620,13 +622,18 @@ _caller_actually_calls_primitive() {
 # contract: returns-0-on-empty-allowlist
 # contract: emits-coverage-and-drift-arrays
 # contract: bidirectional-validation-caller-and-marker
+# contract: warn-shape-drift-exit-0-by-default
+# contract: info-array-always-present
 # anchor: BTS-239 (origin)
+# anchor: BTS-386 (rule-tier extension)
 cmd_validate() {
-  local json_mode=0 allowlist=""
+  local json_mode=0 allowlist="" strict=0
   while [[ $# -gt 0 ]]; do
     case "$1" in
       --json) json_mode=1; shift ;;
       --allowlist) allowlist="$2"; shift 2 ;;
+      # BTS-386: escalate warn-shape rule-tier-budget-exceeded drift to exit 2.
+      --strict) strict=1; shift ;;
       *) shift ;;
     esac
   done
@@ -808,22 +815,114 @@ cmd_validate() {
   done
   fi
 
+  # BTS-386: rule-tier compliance scan. Iterates .claude/rules/*.md (relative to
+  # cwd; tests cd into a fixture project root). Parses top-level YAML frontmatter
+  # via python3+yaml (mirrors cmd_rule_resolve in docs-check.sh). Emits:
+  #   - drift: rule-tier-budget-exceeded (warn-shape — exit 0 unless --strict)
+  #   - drift: rule-frontmatter-malformed (block-shape — exit 2)
+  #   - info:  frontmatter-missing (advisory; never affects status)
+  local info_records=()
+  local _rule_files=(.claude/rules/*.md)
+  if [[ -e "${_rule_files[0]}" ]]; then
+    local _rule_file _rule_id _rule_size _rule_tokens _fm_check _fm_err _fm_no _tier
+    for _rule_file in "${_rule_files[@]}"; do
+      [[ -f "$_rule_file" ]] || continue
+      _rule_id=$(basename "$_rule_file" .md)
+      _rule_size=$(wc -c < "$_rule_file")
+      _rule_tokens=$((_rule_size / 4))
+      _fm_check=$(python3 - "$_rule_file" <<'PY'
+import sys, json
+try:
+    import yaml
+except ImportError:
+    print(json.dumps({"_skip": True}))
+    sys.exit(0)
+with open(sys.argv[1], "r") as f:
+    text = f.read()
+lines = text.splitlines()
+if not lines or lines[0].strip() != "---":
+    print(json.dumps({"_no_frontmatter": True, "tier": 0}))
+    sys.exit(0)
+end = None
+for i in range(1, len(lines)):
+    if lines[i].strip() == "---":
+        end = i
+        break
+if end is None:
+    print(json.dumps({"_error": "frontmatter-unclosed"}))
+    sys.exit(0)
+fm_text = "\n".join(lines[1:end])
+try:
+    fm = yaml.safe_load(fm_text) or {}
+except yaml.YAMLError as e:
+    print(json.dumps({"_error": "frontmatter-malformed", "reason": str(e)[:200]}))
+    sys.exit(0)
+if not isinstance(fm, dict):
+    print(json.dumps({"_error": "frontmatter-not-mapping"}))
+    sys.exit(0)
+print(json.dumps({"tier": fm.get("tier", 0)}))
+PY
+)
+      _fm_err=$(echo "$_fm_check" | jq -r '._error // empty')
+      _fm_no=$(echo "$_fm_check" | jq -r '._no_frontmatter // empty')
+      if [[ -n "$_fm_err" ]]; then
+        local _detail
+        _detail=$(echo "$_fm_check" | jq -r '.reason // empty')
+        drift_records+=("$(jq -nc --arg p "$_rule_file" --arg id "$_rule_id" --arg d "$_detail" \
+          '{path:$p, id:$id, reason:"rule-frontmatter-malformed", reason_detail:$d}')")
+        continue
+      fi
+      if [[ -n "$_fm_no" ]]; then
+        info_records+=("$(jq -nc --arg p "$_rule_file" --arg id "$_rule_id" \
+          '{path:$p, id:$id, reason:"frontmatter-missing"}')")
+      fi
+      _tier=$(echo "$_fm_check" | jq -r '.tier // 0')
+      if [[ "$_tier" == "0" ]] && (( _rule_tokens > 150 )); then
+        drift_records+=("$(jq -nc --arg p "$_rule_file" --arg id "$_rule_id" --argjson v "$_rule_tokens" \
+          '{path:$p, id:$id, reason:"rule-tier-budget-exceeded", value:$v, threshold:150}')")
+      fi
+    done
+  fi
+
   local drift_count="${#drift_records[@]}"
+  local info_count="${#info_records[@]}"
   local status_str="ok"
   if [[ "$drift_count" -gt 0 ]]; then status_str="drift"; fi
 
+  # BTS-386: warn-shape vs block-shape exit code logic.
+  # warn-shape ⇔ reason == "rule-tier-budget-exceeded" (the only warn category today).
+  # block-shape ⇔ everything else in drift_records.
+  # Exit 2 iff any block-shape drift OR (--strict AND any warn-shape drift).
+  local has_block=0 has_warn=0
+  if [[ "$drift_count" -gt 0 ]]; then
+    local _r _reason
+    for _r in "${drift_records[@]}"; do
+      _reason=$(echo "$_r" | jq -r '.reason')
+      if [[ "$_reason" == "rule-tier-budget-exceeded" ]]; then
+        has_warn=1
+      else
+        has_block=1
+      fi
+    done
+  fi
+
   if [[ "$json_mode" -eq 1 ]]; then
     local drift_arr="[]"
+    local info_arr="[]"
     if [[ "$drift_count" -gt 0 ]]; then
       drift_arr=$(printf '%s\n' "${drift_records[@]}" | jq -s '.')
     fi
-    jq -n --argjson covered "$covered" --argjson total "$total" --argjson drift "$drift_arr" --arg status "$status_str" \
-      '{coverage:{covered:$covered, total:$total}, drift:$drift, status:$status}'
+    if [[ "$info_count" -gt 0 ]]; then
+      info_arr=$(printf '%s\n' "${info_records[@]}" | jq -s '.')
+    fi
+    jq -n --argjson covered "$covered" --argjson total "$total" \
+      --argjson drift "$drift_arr" --argjson info "$info_arr" \
+      --arg status "$status_str" \
+      '{coverage:{covered:$covered, total:$total}, drift:$drift, info:$info, status:$status}'
   fi
 
-  if [[ "$drift_count" -gt 0 ]]; then
-    return 2
-  fi
+  if (( has_block )); then return 2; fi
+  if (( has_warn )) && (( strict )); then return 2; fi
   return 0
 }
 

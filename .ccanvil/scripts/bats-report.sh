@@ -12,7 +12,7 @@
 # input: --json (emit structured {ok, not_ok, total, tail, raw_exit, timings, wall_ms, jobs, cpus} to stdout)
 # input: --timings (run bats -T; append slowest-first timing table to human output)
 # input: --slow-top <N> (cap timing rows to N slowest; N=0 emits zero rows; non-integer fails with exit 2)
-# input: --progress (BTS-383: per-file orchestrated mode; emits `[N/M] <file>: PASS X/Y in T.Ts` on stderr after each file completes; aggregates output for the existing summary/JSON pipeline; spawns background heartbeat that emits every BATS_PROGRESS_HEARTBEAT_SECS so 0-byte stderr is impossible during long files)
+# input: --progress (BTS-383: streaming progress mode. With --parallel: defers to native `bats --jobs N` for speed + spawns periodic heartbeat (no per-file lines, since parallel TAP interleaves). Without --parallel: per-file orchestrated mode; emits `[N/M] <file>: PASS X/Y in T.Ts` on stderr after each file completes; aggregates output for the existing summary/JSON pipeline. Heartbeat fires in both sub-modes.)
 # input: env BATS_PROGRESS_HEARTBEAT_SECS (override --progress heartbeat interval in seconds; default 30; non-positive disables heartbeat)
 # input: --help / -h (print usage and exit 0)
 # input: env BATS_REPORT_HAS_PARALLEL (=0 forces no-parallel branch even when parallel is installed; testability hook)
@@ -239,18 +239,24 @@ _parse_failures() {
 }
 start_ms=$(_now_ms)
 if (( progress_mode )); then
-  # BTS-383 per-file orchestration. Walk the passthrough list, expand
-  # directories to top-level *.bats files, run each file as a separate
-  # `bats <args> <file>` subprocess, and emit progress to stderr as each
-  # completes. Aggregate captured TAP into $tmp so the existing summary,
-  # --json, --timings, and bats-runs.jsonl pipelines downstream stay
-  # unchanged. Exit code is the worst (max) per-file exit.
+  # BTS-383 streaming progress. Two sub-modes:
   #
-  # Heartbeat: spawn a background process that emits `[heartbeat] still
-  # working — Ns elapsed` to stderr every BATS_PROGRESS_HEARTBEAT_SECS
-  # (default 30s). The cleanup trap installed above kills the process
-  # on EXIT/INT/TERM. This ensures 0-byte stderr is impossible during
-  # long-running files (BTS-383's central failure mode).
+  # (a) --progress + --parallel: keep native `bats --jobs N` for speed
+  #     (TAP from parallel jobs interleaves so per-file `[N/M]` boundaries
+  #     are not extractable in a useful order); spawn ONLY a periodic
+  #     heartbeat so 0-byte stderr is impossible during the run. This is
+  #     the canonical /pr full-suite path.
+  #
+  # (b) --progress alone (no --parallel): per-file orchestration. Walk
+  #     the passthrough list, expand directories to top-level *.bats
+  #     files, run each as a separate `bats <args> <file>` subprocess,
+  #     emit `[N/M] <file>: PASS X/Y in T.Ts` to stderr as each
+  #     completes. Aggregate captured TAP into $tmp so the existing
+  #     summary, --json, --timings, and bats-runs.jsonl pipelines stay
+  #     unchanged.
+  #
+  # Heartbeat is shared across both branches. Cleanup trap above kills
+  # the process on EXIT/INT/TERM.
   hb_secs="${BATS_PROGRESS_HEARTBEAT_SECS:-30}"
   if [[ "$hb_secs" =~ ^[0-9]+$ ]] && (( hb_secs > 0 )); then
     (
@@ -262,49 +268,57 @@ if (( progress_mode )); then
     ) &
     hb_pid=$!
   fi
-  bp_files=()
-  bp_extra_args=()
-  for p in "${passthrough[@]+"${passthrough[@]}"}"; do
-    if [[ "$p" == -* ]]; then
-      bp_extra_args+=("$p")
-    elif [[ -d "$p" ]]; then
-      while IFS= read -r f; do bp_files+=("$f"); done < <(find "$p" -maxdepth 1 -name '*.bats' -type f | sort)
-    elif [[ -f "$p" ]]; then
-      bp_files+=("$p")
-    fi
-  done
-  bp_total="${#bp_files[@]}"
-  bats_exit=0
-  for (( bp_i = 0; bp_i < bp_total; bp_i++ )); do
-    bp_f="${bp_files[$bp_i]}"
-    bp_start=$(_now_ms)
-    bp_cmd=(bats)
-    (( timings_mode )) && bp_cmd+=(-T)
-    if (( ${#bp_extra_args[@]} > 0 )); then
-      bp_cmd+=("${bp_extra_args[@]}")
-    fi
-    bp_cmd+=("$bp_f")
-    bp_filetmp=$(mktemp)
-    "${bp_cmd[@]}" > "$bp_filetmp" 2>&1
-    bp_exit=$?
-    bp_end=$(_now_ms)
-    bp_ms=$((bp_end - bp_start))
-    bp_ok=$(grep -cE '^ok ' "$bp_filetmp" 2>/dev/null || true)
-    bp_not_ok=$(grep -cE '^not ok ' "$bp_filetmp" 2>/dev/null || true)
-    [[ -z "$bp_ok" ]] && bp_ok=0
-    [[ -z "$bp_not_ok" ]] && bp_not_ok=0
-    bp_filetotal=$((bp_ok + bp_not_ok))
-    if (( bp_not_ok > 0 )); then
-      bp_label="FAIL ${bp_ok}/${bp_filetotal}"
-    else
-      bp_label="PASS ${bp_ok}/${bp_filetotal}"
-    fi
-    bp_secs=$(awk -v ms="$bp_ms" 'BEGIN{ printf "%.1fs", ms/1000 }')
-    printf '[%d/%d] %s: %s in %s\n' "$((bp_i + 1))" "$bp_total" "$(basename "$bp_f")" "$bp_label" "$bp_secs" >&2
-    cat "$bp_filetmp" >> "$tmp"
-    rm -f "$bp_filetmp"
-    (( bp_exit > bats_exit )) && bats_exit=$bp_exit
-  done
+
+  if (( parallel_mode )); then
+    # Branch (a) — defer to native bats --jobs N (already in $bats_cmd).
+    "${bats_cmd[@]}" > "$tmp" 2>&1
+    bats_exit=$?
+  else
+    # Branch (b) — per-file orchestration with [N/M] emission.
+    bp_files=()
+    bp_extra_args=()
+    for p in "${passthrough[@]+"${passthrough[@]}"}"; do
+      if [[ "$p" == -* ]]; then
+        bp_extra_args+=("$p")
+      elif [[ -d "$p" ]]; then
+        while IFS= read -r f; do bp_files+=("$f"); done < <(find "$p" -maxdepth 1 -name '*.bats' -type f | sort)
+      elif [[ -f "$p" ]]; then
+        bp_files+=("$p")
+      fi
+    done
+    bp_total="${#bp_files[@]}"
+    bats_exit=0
+    for (( bp_i = 0; bp_i < bp_total; bp_i++ )); do
+      bp_f="${bp_files[$bp_i]}"
+      bp_start=$(_now_ms)
+      bp_cmd=(bats)
+      (( timings_mode )) && bp_cmd+=(-T)
+      if (( ${#bp_extra_args[@]} > 0 )); then
+        bp_cmd+=("${bp_extra_args[@]}")
+      fi
+      bp_cmd+=("$bp_f")
+      bp_filetmp=$(mktemp)
+      "${bp_cmd[@]}" > "$bp_filetmp" 2>&1
+      bp_exit=$?
+      bp_end=$(_now_ms)
+      bp_ms=$((bp_end - bp_start))
+      bp_ok=$(grep -cE '^ok ' "$bp_filetmp" 2>/dev/null || true)
+      bp_not_ok=$(grep -cE '^not ok ' "$bp_filetmp" 2>/dev/null || true)
+      [[ -z "$bp_ok" ]] && bp_ok=0
+      [[ -z "$bp_not_ok" ]] && bp_not_ok=0
+      bp_filetotal=$((bp_ok + bp_not_ok))
+      if (( bp_not_ok > 0 )); then
+        bp_label="FAIL ${bp_ok}/${bp_filetotal}"
+      else
+        bp_label="PASS ${bp_ok}/${bp_filetotal}"
+      fi
+      bp_secs=$(awk -v ms="$bp_ms" 'BEGIN{ printf "%.1fs", ms/1000 }')
+      printf '[%d/%d] %s: %s in %s\n' "$((bp_i + 1))" "$bp_total" "$(basename "$bp_f")" "$bp_label" "$bp_secs" >&2
+      cat "$bp_filetmp" >> "$tmp"
+      rm -f "$bp_filetmp"
+      (( bp_exit > bats_exit )) && bats_exit=$bp_exit
+    done
+  fi
 else
   "${bats_cmd[@]}" > "$tmp" 2>&1
   bats_exit=$?

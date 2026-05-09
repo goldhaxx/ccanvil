@@ -4,7 +4,7 @@
 > Work: linear:BTS-385
 > Created: 1778296380
 > Subject: Rule atomicity + content-tiering — substrate + seed transformations
-> Status: In Progress
+> Status: Complete
 
 ## Summary
 

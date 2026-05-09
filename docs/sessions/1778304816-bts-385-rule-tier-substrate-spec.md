@@ -8,17 +8,17 @@
 
 ## Summary
 
-Hub rule files have grown to ~1000-2300 tokens each by embedding war stories ("Why" sections), substrate-specific tooling references, anti-pattern catalogs, and incident evidence — all auto-loading on every Claude Code turn, on every node. Hub at 165% / tour-scheduler at 160% of the 8000-token soft context budget. Most expensive context category in the system.
+Hub rule files have grown to \~1000-2300 tokens each by embedding war stories ("Why" sections), substrate-specific tooling references, anti-pattern catalogs, and incident evidence — all auto-loading on every Claude Code turn, on every node. Hub at 165% / tour-scheduler at 160% of the 8000-token soft context budget. Most expensive context category in the system.
 
 Architecture detailed in `docs/research/rule-content-tiering.md` (committed `72bcf68`). Three-tier model: Tier 0 atoms (always-on directives, ≤150 tokens) / Tier 1 skills (on-invocation) / Tier 2 reference (on-demand). Stack-profile composition for stack-specific content. Frontmatter `tier:` + `stack:` + `anchors:` declares how each file loads.
 
-**This spec scopes Session A of the BTS-385 umbrella** — substrate (frontmatter schema, validation, resolve primitive) plus seed atom transformations on the smallest existing rules (proof-of-substrate dogfood). Sessions B (atomization audit on the larger rules), C (BTS-384 scope-tag composition), and D (CLAUDE.md/settings.json trim) ship as separate PRs after this lands.
+**This spec scopes Session A of the BTS-385 umbrella** — substrate (frontmatter schema, validation, resolve primitive) plus seed atom transformations on the smallest existing rules (proof-of-substrate dogfood). Sessions B (atomization audit on the larger rules), C (BTS-384 scope-tag composition), and D ([CLAUDE.md/settings.json](<http://CLAUDE.md/settings.json>) trim) ship as separate PRs after this lands.
 
 ## Job To Be Done
 
 **When** I author or update a hub rule, or when ccanvil-sync delivers rules to a node,
 **I want** rules to declare their tier explicitly so cheap directives stay always-on while deeper context (tooling references, war stories) loads only when relevant,
-**So that** the agent's auto-load context budget shrinks ~60% (13224 → ~5400 tokens) without losing access to any of the underlying knowledge.
+**So that** the agent's auto-load context budget shrinks \~60% (13224 → \~5400 tokens) without losing access to any of the underlying knowledge.
 
 ## Acceptance Criteria
 
@@ -54,7 +54,7 @@ Each criterion is independently testable. Binary pass/fail.
 
 ### Context-budget signal (substrate-level, not full target)
 
-- [ ] **AC-14:** After AC-8/9/10 land, `bash .ccanvil/scripts/context-budget.sh check --json` shows total auto-load tokens reduced by ≥1500 from current baseline (13224 → ≤11700). This is a partial-progress signal toward the full BTS-385 target (~5400); the seed-transformations alone don't hit the final number.
+- [ ] **AC-14:** After AC-8/9/10 land, `bash .ccanvil/scripts/context-budget.sh check --json` shows total auto-load tokens reduced by ≥1500 from current baseline (13224 → ≤11700). This is a partial-progress signal toward the full BTS-385 target (\~5400); the seed-transformations alone don't hit the final number.
 
 ### Validation
 
@@ -63,7 +63,7 @@ Each criterion is independently testable. Binary pass/fail.
 ## Affected Files
 
 | File | Change |
-|------|--------|
+| -- | -- |
 | `.ccanvil/scripts/module-manifest.sh` | Modified: extend scanner to handle rule-file frontmatter; add tier-budget lint |
 | `.ccanvil/scripts/docs-check.sh` | New: `cmd_rule_resolve`. Possibly: helper `_rule_frontmatter_parse` |
 | `.claude/rules/code-quality.md` | Modified: frontmatter added (no body changes) |
@@ -74,32 +74,32 @@ Each criterion is independently testable. Binary pass/fail.
 | `.claude/ccanvil.json` | Modified: declare `stacks: ["bats"]` |
 | `hub/tests/rule-frontmatter.bats` | New |
 | `hub/tests/rule-resolve.bats` | New |
-| `.ccanvil/manifest-allowlist.txt` | Add new cmd_* surfaces |
+| `.ccanvil/manifest-allowlist.txt` | Add new cmd\_\* surfaces |
 
 ## Dependencies
 
-- **Requires:** BTS-239 (manifest substrate — frontmatter parsing precedent), BTS-265 (validate-spec — JSON envelope precedent), BTS-310 (`docs/research/` Tier-2 precedent).
-- **Blocked by:** none.
-- **Blocks:** BTS-384 (scope-tag distribution filter — composes on top once rules carry frontmatter).
+* **Requires:** BTS-239 (manifest substrate — frontmatter parsing precedent), BTS-265 (validate-spec — JSON envelope precedent), BTS-310 (`docs/research/` Tier-2 precedent).
+* **Blocked by:** none.
+* **Blocks:** BTS-384 (scope-tag distribution filter — composes on top once rules carry frontmatter).
 
 ## Out of Scope
 
-- **Atomization audit on `tdd.md`, `provider-integration.md`, `evidence-required-for-captures.md`, `background-task-discipline.md`, `self-review.md`** — these are the larger / more substrate-bound rules. Each requires careful skill extraction and is its own PR. Captured as Session B follow-up ticket after this PR ships.
-- **BTS-384 scope-tag distribution filter** — composes on top of this substrate; ships as a separate PR (Session C).
-- **CLAUDE.md trim + settings.json review** — Session D scope; separate ticket.
-- **Skill-discovery mechanism for stack-conditional auto-load** — research §10 open question; for v1 the agent reads `anchors.apply` from atom frontmatter and Read's the skill manually. Hook-injection-on-file-edit is a future optimization.
-- **Reference docs as Linear Documents (BTS-204 SSOT extension)** — defer.
-- **Atom file naming convention overhaul** (e.g. renaming to `atom-<verb>.md`) — defer to atomization audit (Session B); v1 keeps existing filenames.
+* **Atomization audit on** `tdd.md`, `provider-integration.md`, `evidence-required-for-captures.md`, `background-task-discipline.md`, `self-review.md` — these are the larger / more substrate-bound rules. Each requires careful skill extraction and is its own PR. Captured as Session B follow-up ticket after this PR ships.
+* **BTS-384 scope-tag distribution filter** — composes on top of this substrate; ships as a separate PR (Session C).
+* **CLAUDE.md trim + settings.json review** — Session D scope; separate ticket.
+* **Skill-discovery mechanism for stack-conditional auto-load** — research §10 open question; for v1 the agent reads `anchors.apply` from atom frontmatter and Read's the skill manually. Hook-injection-on-file-edit is a future optimization.
+* **Reference docs as Linear Documents (BTS-204 SSOT extension)** — defer.
+* **Atom file naming convention overhaul** (e.g. renaming to `atom-<verb>.md`) — defer to atomization audit (Session B); v1 keeps existing filenames.
 
 ## Implementation Notes
 
-- **Frontmatter parser:** reuse the BTS-239 manifest substrate's YAML parser. Same shape (`---\nkey: value\n---`) but the schema differs (rule frontmatter has `tier`, `scope`, `stack`, `anchors`; manifest frontmatter has `purpose`, `input`, `output`, etc.). Likely a small refactor to share the parser between the two consumers.
-- **Token-counting for lint:** use the same heuristic as `context-budget.sh` (currently char-count / 4 approximation). Don't introduce a tokenizer dependency.
-- **Atomization for `workflow.md` + `deterministic-first.md`:** preserve the meaning verbatim — move text, don't rewrite. The Tier-2 reference is the same content with a heading, not a rewrite. After landing, `cmd_rule_resolve workflow` should return both the trimmed atom AND the reference path; an operator following the chain reads the same content they'd have seen before.
-- **`code-quality.md` frontmatter-only:** zero body changes. Tests must verify the file remains byte-identical except for the frontmatter prepend. Safest dogfood case.
-- **Backward-compat:** rule files without frontmatter MUST continue to function (default envelope). The hub itself is in mid-migration after this PR — only 3 of 8 rules carry frontmatter; the other 5 stay frontmatterless until Session B.
-- **No live-API risk:** all substrate work, no external API contract uncertainty. Doesn't trigger the live-API validation gate.
-- **TDD cadence (per the test-execution-discipline rule):** during iteration, run only the bats files touching modified surfaces. Full-suite at /pr time only.
+* **Frontmatter parser:** reuse the BTS-239 manifest substrate's YAML parser. Same shape (`---\nkey: value\n---`) but the schema differs (rule frontmatter has `tier`, `scope`, `stack`, `anchors`; manifest frontmatter has `purpose`, `input`, `output`, etc.). Likely a small refactor to share the parser between the two consumers.
+* **Token-counting for lint:** use the same heuristic as `context-budget.sh` (currently char-count / 4 approximation). Don't introduce a tokenizer dependency.
+* **Atomization for** `workflow.md` + `deterministic-first.md`: preserve the meaning verbatim — move text, don't rewrite. The Tier-2 reference is the same content with a heading, not a rewrite. After landing, `cmd_rule_resolve workflow` should return both the trimmed atom AND the reference path; an operator following the chain reads the same content they'd have seen before.
+* `code-quality.md` frontmatter-only: zero body changes. Tests must verify the file remains byte-identical except for the frontmatter prepend. Safest dogfood case.
+* **Backward-compat:** rule files without frontmatter MUST continue to function (default envelope). The hub itself is in mid-migration after this PR — only 3 of 8 rules carry frontmatter; the other 5 stay frontmatterless until Session B.
+* **No live-API risk:** all substrate work, no external API contract uncertainty. Doesn't trigger the live-API validation gate.
+* **TDD cadence (per the test-execution-discipline rule):** during iteration, run only the bats files touching modified surfaces. Full-suite at /pr time only.
 
 <!-- NODE-SPECIFIC-START -->
 <!-- Add project-specific content below this line. -->

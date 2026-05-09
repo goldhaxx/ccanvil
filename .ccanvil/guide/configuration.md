@@ -79,6 +79,14 @@ Atomized rules trim the body to the directive layer and route operational detail
 
 Resolve a rule's bundle: `bash docs-check.sh rule-resolve <rule-id> --project-dir .` returns `{rule, tier, scope, stack, anchors, body_path}`.
 
+**Validator behavior (BTS-386).** `bash module-manifest.sh validate --json` scans `.claude/rules/*.md` and emits:
+
+- `info[].rule-tier-budget-exceeded` — tier-0 rule whose whole-file token estimate (char-count / 4) exceeds 150. Advisory only; status stays `ok` (so existing consumers don't see false-alarm drift). Exit 0 by default; `--strict` flag escalates to exit 2.
+- `drift[].rule-frontmatter-malformed` — rule with malformed YAML frontmatter. Block-shape: always exit 2 with status=`drift`.
+- `info[].frontmatter-missing` — rule without frontmatter. Advisory only; the validator continues with the back-compat default envelope.
+
+The `info` array is always present in the JSON envelope (empty when no info entries). Status is `drift` only when block-shape entries exist in `drift[]`; warn-shape signal lives in `info[]` and is the discoverable "atomization needed" list without blocking PR finalize.
+
 ### Stacks declaration (BTS-385)
 
 `.claude/ccanvil.json` accepts a top-level `stacks:` array declaring the project's tech stacks (e.g. `["bats"]`, `["jest", "playwright"]`, `["pytest"]`). Defaults to `["any"]` when absent. Future Tier-1 skill loaders will use this to conditionally load stack-specific skills (`tdd-bats`, `tdd-jest`, etc.) — the field is declarative for now; substrate enforcement ships in a follow-up.

@@ -359,8 +359,16 @@ _resolve_node_role() {
   jq -r '.role // "substrate-consumer"' "$cfg" 2>/dev/null || echo "substrate-consumer"
 }
 
-# cmd_node_role — Thin verb wrapper around _resolve_node_role for testability
-# and operator queries. BTS-384.
+# @manifest
+# purpose: Operator-facing verb wrapping _resolve_node_role — prints the resolved node role for the given project_dir (defaults to cwd). BTS-384 substrate observable; consumed by tests and ad-hoc operator queries.
+# input: positional project_dir (optional; defaults to cwd)
+# output: stdout one-line role string ("hub-substrate-developer" | "substrate-consumer")
+# output: exit-codes 0 always
+# caller: hub/tests/ccanvil-role-field.bats
+# depends-on: _resolve_node_role
+# side-effect: reads-ccanvil-json
+# contract: defaults-to-substrate-consumer-when-key-or-file-absent
+# anchor: BTS-384 (origin)
 cmd_node_role() {
   local project_dir="${1:-$(pwd)}"
   _resolve_node_role "$project_dir"
@@ -384,15 +392,17 @@ extract_rule_scope() {
   ' "$file"
 }
 
-# is_scope_allowed_for_role — Apply the scope-filter rules. Echoes one of:
-#   "allowed"           — no frontmatter scope, scope:universal, or scope:substrate
-#                         when role=hub-substrate-developer
-#   "skipped:substrate" — scope:substrate × role=substrate-consumer
-#   "skipped:hub-only"  — scope:hub-only (any role)
-# Exit codes: 0 allowed, 1 skipped. Invalid scope values fail open (allowed) —
-# rule-scope-invalid is surfaced separately by `module-manifest.sh validate`.
-# Files without frontmatter scope are always allowed (covers scripts, hooks,
-# settings, and rule files that haven't yet adopted the scope field). BTS-384.
+# @manifest
+# purpose: Apply the BTS-384 scope-filter rules per file × node role. Returns "allowed" / exit 0 for non-rule-files, scope:universal, missing-scope, or scope:substrate × role=hub-substrate-developer. Returns "skipped:substrate" / exit 1 for scope:substrate × role=substrate-consumer. Returns "skipped:hub-only" / exit 1 for scope:hub-only regardless of role (hub-only never distributes; lives at the hub source by definition). Invalid scope values fail open (allowed); rule-scope-invalid is surfaced separately by module-manifest.sh validate.
+# input: positional file (path), positional role (hub-substrate-developer | substrate-consumer)
+# output: stdout one-line decision string
+# output: exit-codes 0 allowed, 1 skipped
+# caller: cmd_pull_plan
+# caller: cmd_scope_check
+# depends-on: extract_rule_scope
+# side-effect: reads-rule-frontmatter
+# contract: fail-open-on-invalid-scope
+# anchor: BTS-384 (origin)
 is_scope_allowed_for_role() {
   local file="$1" role="$2"
   local scope
@@ -410,7 +420,16 @@ is_scope_allowed_for_role() {
   esac
 }
 
-# cmd_scope_check — Verb wrapper for is_scope_allowed_for_role. BTS-384.
+# @manifest
+# purpose: Operator-facing verb wrapping is_scope_allowed_for_role — prints "allowed" or "skipped:<scope>" for a file × role pair. BTS-384 substrate observable; consumed by tests and ad-hoc operator queries.
+# input: positional file (path), positional role
+# output: stdout one-line decision string
+# output: exit-codes 0 allowed, 1 skipped
+# caller: hub/tests/rule-distribution-scope.bats
+# depends-on: is_scope_allowed_for_role
+# side-effect: reads-rule-frontmatter
+# contract: matches-cmd_pull_plan-filter-semantics
+# anchor: BTS-384 (origin)
 cmd_scope_check() {
   local file="${1:?file required}"
   local role="${2:?role required}"

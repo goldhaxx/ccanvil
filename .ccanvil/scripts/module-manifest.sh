@@ -906,11 +906,13 @@ if "scope" in fm:
         out["scope_value"] = str(scope)
 else:
     out["_scope_missing"] = True
-# BTS-384: vocabulary-leak scan. Only runs on `scope: universal` rules.
-# Body = lines after closing `---`, truncated at first `## Anchored on` heading
-# (anchor block exempt). Flags hub-specific tokens whose presence in stack-neutral
-# rule prose would poison downstream node agent context.
-if out.get("scope") == "universal":
+# BTS-384: vocabulary-leak scan. Runs on rules treated as universal — both
+# explicit `scope: universal` and missing-scope (which AC-1 specifies defaults
+# to universal). Body = lines after closing `---`, truncated at first
+# `## Anchored on` heading (anchor block exempt). Flags hub-specific tokens
+# whose presence in stack-neutral rule prose would poison downstream node
+# agent context.
+if out.get("scope") == "universal" or out.get("_scope_missing"):
     import re
     body_lines = lines[end+1:]
     anchor_idx = None

@@ -77,3 +77,14 @@ _make_rule_project() {
   echo "$output" | jq -e '.info | map(select(.reason == "rule-vocabulary-leak")) | length == 0'
   echo "$output" | jq -e '.drift | length == 0'
 }
+
+@test "BTS-384 Step 2 (AC-1 gap): missing-scope rule treated as universal — leak still fires" {
+  set -e
+  fx=$(_make_rule_project "missing-scope-leak-fx" "missing-scope-with-leak.md")
+  cd "$fx"
+  run bash "$MM" validate --json
+  [ "$status" -eq 0 ]
+  echo "$output" | jq -e '.info | map(select(.reason == "rule-vocabulary-leak")) | length == 1'
+  echo "$output" | jq -e '.info | map(select(.reason == "rule-vocabulary-leak")) | .[0].tokens | index("bats-report.sh") != null'
+  echo "$output" | jq -e '.info | map(select(.reason == "rule-scope-missing")) | length == 1'
+}

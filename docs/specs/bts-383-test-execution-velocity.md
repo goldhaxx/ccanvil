@@ -4,7 +4,7 @@
 > Work: linear:BTS-383
 > Created: 1778291503
 > Subject: Test execution velocity — bats observability + agent invocation
-> Status: In Progress
+> Status: Complete
 
 ## Summary
 

@@ -4,7 +4,7 @@
 > Work: linear:BTS-387
 > Created: 1778343025
 > Subject: Rule atomization audit — atomize remaining 4 rules
-> Status: In Progress
+> Status: Complete
 
 ## Summary
 

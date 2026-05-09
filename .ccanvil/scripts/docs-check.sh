@@ -4442,6 +4442,282 @@ cmd_idea_setup() {
 }
 
 # ---------------------------------------------------------------------------
+# Operator-config commands — manage $HOME/.ccanvil/operator.json, the
+# operator-wide defaults tier consumed by the 3-tier merge_config in
+# operations.sh (BTS-316). Provides scripts and skills with deterministic
+# get/set semantics over operator-wide settings without hand-editing JSON.
+# ---------------------------------------------------------------------------
+
+# _operator_config_file — emit $HOME/.ccanvil/operator.json or "" when HOME unset.
+# Mirrors operations.sh::_operator_config_path; duplicated here so docs-check.sh
+# stays self-contained (no cross-script source). CCANVIL_OPERATOR_CONFIG_OVERRIDE
+# wins for test-injection (BTS-316).
+_operator_config_file() {
+  if [[ -n "${CCANVIL_OPERATOR_CONFIG_OVERRIDE:-}" ]]; then
+    echo "$CCANVIL_OPERATOR_CONFIG_OVERRIDE"
+  elif [[ -n "${HOME:-}" ]]; then
+    echo "$HOME/.ccanvil/operator.json"
+  else
+    echo ""
+  fi
+}
+
+# _operator_config_dir — parent dir of operator.json. Used by set/init for mkdir.
+_operator_config_dir() {
+  if [[ -n "${CCANVIL_OPERATOR_CONFIG_OVERRIDE:-}" ]]; then
+    dirname "$CCANVIL_OPERATOR_CONFIG_OVERRIDE"
+  elif [[ -n "${HOME:-}" ]]; then
+    echo "$HOME/.ccanvil"
+  else
+    echo ""
+  fi
+}
+
+# _operator_config_atomic_write — write content via temp+mv to keep readers
+# from seeing half-written JSON during set/init.
+_operator_config_atomic_write() {
+  local content="$1"
+  local file
+  file=$(_operator_config_file)
+  if [[ -z "$file" ]]; then
+    echo "ERROR: HOME unset; cannot write operator.json" >&2
+    return 1
+  fi
+  local dir
+  dir=$(_operator_config_dir)
+  mkdir -p "$dir"
+  local tmp
+  tmp=$(mktemp "${dir}/.operator.XXXXXX") || {
+    echo "ERROR: mktemp failed in $dir" >&2
+    return 1
+  }
+  printf '%s\n' "$content" > "$tmp"
+  if ! jq empty "$tmp" 2>/dev/null; then
+    rm -f "$tmp"
+    echo "ERROR: refused to write malformed JSON to $file" >&2
+    return 1
+  fi
+  mv "$tmp" "$file"
+}
+
+# cmd_operator_config_init — Seed $HOME/.ccanvil/operator.json with the
+# canonical operator-wide defaults shape. Idempotent.
+# @manifest
+# purpose: Seed $HOME/.ccanvil/operator.json with the canonical operator-wide defaults shape — providers.linear.team plus default_routes for spec/plan/stasis/idea kinds — so subsequent provider-activate invocations can fall back to operator-config team rather than requiring per-node --team flags
+# input: --provider <name> (only "linear" supported in Phase 1)
+# input: --team <name>
+# input: env HOME (operator-config home directory base)
+# output: writes $HOME/.ccanvil/operator.json with seeded shape
+# output: stdout one-line summary "operator-config initialized: <file>"
+# output: exit-codes 0 ok, 1 missing-flag-or-write-failure, 2 unknown-flag
+# depends-on: jq
+# depends-on: _operator_config_atomic_write
+# side-effect: writes-operator-json
+# failure-mode: missing-team | exit=1 | visible=stderr-error-team-required | mitigation=pass-team-flag
+# failure-mode: non-linear-provider | exit=1 | visible=stderr-error-only-linear-supported | mitigation=use-linear
+# failure-mode: home-unset | exit=1 | visible=stderr-error-HOME-unset | mitigation=set-HOME-env
+# contract: idempotent-on-rerun
+# contract: only-linear-provider-phase-1
+# anchor: BTS-316 (operator-config layer)
+cmd_operator_config_init() {
+  local provider="" team=""
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --provider) provider="$2"; shift 2 ;;
+      --team)     team="$2";     shift 2 ;;
+      --) shift; break ;;
+      # @failure-mode: unknown-flag
+      --*) echo "Usage: docs-check.sh operator-config init --provider linear --team <name>" >&2; return 2 ;;
+      *) shift ;;
+    esac
+  done
+  # @failure-mode: non-linear-provider
+  [[ "$provider" == "linear" ]] || { echo "ERROR: --provider must be 'linear' (only linear supported in Phase 1)" >&2; return 1; }
+  # @failure-mode: missing-team
+  [[ -n "$team" ]] || { echo "ERROR: --team is required" >&2; return 1; }
+
+  local file
+  file=$(_operator_config_file)
+  # @failure-mode: home-unset
+  [[ -n "$file" ]] || { echo "ERROR: HOME unset; cannot resolve operator-config path" >&2; return 1; }
+
+  # Build the seeded shape, deep-merging into any existing content so that
+  # init is idempotent and preserves user-added keys.
+  local existing='{}'
+  if [[ -f "$file" ]]; then
+    if ! jq empty "$file" 2>/dev/null; then
+      echo "ERROR: $file is not valid JSON; refusing to overwrite" >&2
+      return 1
+    fi
+    existing=$(cat "$file")
+  fi
+  # Seed shape mirrors ccanvil.json exactly — operator-tier values nest under
+  # .integrations so 3-tier merge_config produces semantic results (operator
+  # provides defaults at the same path that hub/node would override). The
+  # default_routes block lives at .integrations.default_routes since it's a
+  # provider-activate input, not a routing target itself.
+  local seed
+  seed=$(jq -n --arg provider "$provider" --arg team "$team" '
+    {
+      integrations: {
+        providers: { ($provider): { team: $team } },
+        default_routes: { spec: $provider, plan: $provider, stasis: $provider, idea: $provider }
+      }
+    }')
+  # Deep-merge: existing tier wins (preserves user customizations); seed
+  # only fills in absent keys. Ensures idempotency when called repeatedly.
+  local merged
+  merged=$(echo "$existing $seed" | jq -s '.[1] * .[0]')
+
+  # @side-effect: writes-operator-json
+  _operator_config_atomic_write "$merged" || return 1
+  echo "operator-config initialized: $file"
+}
+
+# cmd_operator_config_get — Read a dotted-path key from operator.json.
+# @manifest
+# purpose: Read a dotted-path key (e.g. providers.linear.team) from $HOME/.ccanvil/operator.json — returns empty string + exit 0 when key or file is absent so callers can use `[[ -z "$x" ]]` for default-fallback logic without exit-code branching
+# input: positional <dotted.key>
+# input: env HOME
+# output: stdout key value or empty
+# output: exit-codes 0 always (treat as best-effort read)
+# depends-on: jq
+# depends-on: _operator_config_file
+# side-effect: reads-operator-json
+# failure-mode: missing-file | exit=0 | visible=empty-stdout | mitigation=run-operator-config-init
+# failure-mode: missing-key | exit=0 | visible=empty-stdout | mitigation=run-operator-config-set
+# contract: never-errors-on-missing
+# anchor: BTS-316 (operator-config layer)
+cmd_operator_config_get() {
+  local key="${1:-}"
+  if [[ -z "$key" ]]; then
+    echo "Usage: docs-check.sh operator-config get <dotted.key>" >&2
+    return 2
+  fi
+  local file
+  file=$(_operator_config_file)
+  # @failure-mode: missing-file
+  [[ -n "$file" && -f "$file" ]] || { echo ""; return 0; }
+  # @side-effect: reads-operator-json
+  # Convert dotted-path to jq getpath. `getpath(["a","b","c"])` returns null
+  # for missing intermediate keys; we map null→empty for shell-friendly output.
+  jq -r --arg k "$key" '
+    ($k | split(".")) as $path |
+    getpath($path) // empty
+  ' "$file" 2>/dev/null || { echo ""; return 0; }
+}
+
+# cmd_operator_config_set — Write a dotted-path key to operator.json.
+# @manifest
+# purpose: Write a dotted-path key (e.g. providers.linear.team) into $HOME/.ccanvil/operator.json — creates the file and parent directory atomically when absent so callers (skills, scripts) can persist operator-wide settings without hand-editing JSON
+# input: positional <dotted.key>
+# input: positional <value>
+# input: env HOME
+# output: writes $HOME/.ccanvil/operator.json with the updated key
+# output: exit-codes 0 ok, 1 home-unset-or-write-failure, 2 missing-args
+# depends-on: jq
+# depends-on: _operator_config_atomic_write
+# side-effect: writes-operator-json
+# failure-mode: missing-args | exit=2 | visible=stderr-Usage | mitigation=pass-key-and-value
+# failure-mode: home-unset | exit=1 | visible=stderr-error-HOME-unset | mitigation=set-HOME-env
+# failure-mode: invalid-existing-json | exit=1 | visible=stderr-error-not-valid-JSON | mitigation=delete-or-fix-operator-json
+# contract: creates-file-and-parent-dir-when-absent
+# contract: atomic-write-via-temp-mv
+# anchor: BTS-316 (operator-config layer)
+cmd_operator_config_set() {
+  local key="${1:-}"
+  local value="${2:-}"
+  if [[ -z "$key" ]]; then
+    # @failure-mode: missing-args
+    echo "Usage: docs-check.sh operator-config set <dotted.key> <value>" >&2
+    return 2
+  fi
+  local file
+  file=$(_operator_config_file)
+  # @failure-mode: home-unset
+  [[ -n "$file" ]] || { echo "ERROR: HOME unset; cannot resolve operator-config path" >&2; return 1; }
+
+  local existing='{}'
+  if [[ -f "$file" ]]; then
+    # @failure-mode: invalid-existing-json
+    if ! jq empty "$file" 2>/dev/null; then
+      echo "ERROR: $file is not valid JSON; refusing to mutate" >&2
+      return 1
+    fi
+    existing=$(cat "$file")
+  fi
+
+  local updated
+  updated=$(echo "$existing" | jq --arg k "$key" --arg v "$value" '
+    ($k | split(".")) as $path |
+    setpath($path; $v)
+  ')
+
+  # @side-effect: writes-operator-json
+  _operator_config_atomic_write "$updated" || return 1
+}
+
+# cmd_operator_config_show — Pretty-print operator.json content.
+# @manifest
+# purpose: Pretty-print the full operator-config JSON so operators and skills can inspect operator-wide settings — emits {} when the file is absent so callers (e.g. /radar) can render a "no operator config" branch via simple jq tests
+# input: env HOME
+# output: stdout pretty-printed JSON content (or {} when absent)
+# output: exit-codes 0 always (best-effort read)
+# depends-on: jq
+# depends-on: _operator_config_file
+# side-effect: reads-operator-json
+# failure-mode: missing-file | exit=0 | visible=empty-object-stdout | mitigation=run-operator-config-init
+# contract: never-errors-on-missing
+# anchor: BTS-316 (operator-config layer)
+cmd_operator_config_show() {
+  local file
+  file=$(_operator_config_file)
+  # @failure-mode: missing-file
+  if [[ -z "$file" || ! -f "$file" ]]; then
+    echo "{}"
+    return 0
+  fi
+  # @side-effect: reads-operator-json
+  if ! jq empty "$file" 2>/dev/null; then
+    echo "ERROR: $file is not valid JSON" >&2
+    return 1
+  fi
+  jq '.' "$file"
+}
+
+# cmd_operator_config — Subcommand dispatcher for operator-config {init|get|set|show}.
+# @manifest
+# purpose: Dispatch operator-config subcommand routing — single CLI surface that branches to cmd_operator_config_{init,get,set,show} per the first positional arg; mirrors the cmd_idea / cmd_provider_heal sub-dispatcher shape for consistency
+# input: positional <subcommand> ∈ {init, get, set, show}
+# input: positional <subcommand-args...>
+# output: subcommand-specific (delegated)
+# output: exit-codes 0 ok, 2 unknown-subcommand, plus delegated codes
+# depends-on: cmd_operator_config_init
+# depends-on: cmd_operator_config_get
+# depends-on: cmd_operator_config_set
+# depends-on: cmd_operator_config_show
+# side-effect: dispatcher-only
+# failure-mode: unknown-subcommand | exit=2 | visible=stderr-Usage | mitigation=use-init-get-set-show
+# contract: passes-args-verbatim-to-subcommand
+# anchor: BTS-316 (operator-config layer)
+cmd_operator_config() {
+  local sub="${1:-}"
+  if [[ -z "$sub" ]]; then
+    echo "Usage: docs-check.sh operator-config {init|get|set|show} [args...]" >&2
+    return 2
+  fi
+  shift
+  case "$sub" in
+    init) cmd_operator_config_init "$@" ;;
+    get)  cmd_operator_config_get "$@" ;;
+    set)  cmd_operator_config_set "$@" ;;
+    show) cmd_operator_config_show "$@" ;;
+    # @failure-mode: unknown-subcommand
+    *)    echo "Usage: docs-check.sh operator-config {init|get|set|show} [args...]" >&2; return 2 ;;
+  esac
+}
+
+# ---------------------------------------------------------------------------
 # cmd_provider_resolve_ids — Resolve Linear provider IDs (team_id, project_id,
 # state_ids[8], label_ids[idea]) from live API + deep-merge into
 # .claude/ccanvil.local.json. Phase 1 of the provider-heal umbrella surfaced
@@ -4715,16 +4991,199 @@ cmd_provider_heal() {
 }
 
 # ---------------------------------------------------------------------------
+# cmd_provider_activate — Operator-facing switch. Composes provider-heal
+# (auth → drift → resolve) with a route-flip step so a node can opt into a
+# provider end-to-end with one verb. Falls back to operator-config team and
+# default_routes when not supplied via flags. Idempotent: re-running on an
+# already-activated node produces zero diff in .claude/ccanvil.local.json.
+# ---------------------------------------------------------------------------
+# @manifest
+# purpose: One-verb provider activation switch — composes the existing provider-heal umbrella (auth → drift gate → ID resolution) with a route-flip step that writes integrations.routing.<kind>=<provider> into .claude/ccanvil.local.json for each kind the operator names. Falls back to operator-config team + default_routes when --team / --routes are omitted. Idempotent on rerun.
+# input: --provider <name> (only "linear" supported in Phase 1)
+# input: --team <name> (optional; falls back to operator-config providers.<p>.team)
+# input: --project <name> (required, no operator-default; per-node)
+# input: --routes <comma-list> (optional; falls back to operator-config default_routes; hard default spec,plan,stasis,idea)
+# input: --project-dir <path>
+# input: --json (optional, structured envelope output)
+# input: env LINEAR_API_KEY (consumed by provider-heal Phase 3 + Phase 1)
+# input: env LINEAR_QUERY_OVERRIDE (test-injection point)
+# input: env CCANVIL_SYNC_OVERRIDE (test-injection point)
+# input: env HOME (operator-config home directory base)
+# output: stdout PROVIDER-ACTIVATED summary or JSON envelope
+# output: writes-ccanvil-local-json (only when all 3 phases succeed; routing keys + provider IDs)
+# output: exit-codes 0 ok, 1 phase-halt-or-route-flip-failure, 2 unknown-flag-or-missing-required
+# depends-on: jq
+# depends-on: cmd_provider_heal
+# depends-on: cmd_operator_config_get
+# side-effect: writes-ccanvil-local-json-on-success-only
+# failure-mode: missing-team | exit=2 | visible=stderr-error-team-required | mitigation=pass-team-flag-or-run-operator-config-init
+# failure-mode: missing-project | exit=2 | visible=stderr-error-project-required | mitigation=pass-project-flag
+# failure-mode: non-linear-provider | exit=2 | visible=stderr-error-only-linear-supported | mitigation=use-linear
+# failure-mode: auth-failed | exit=1 | visible=provider-heal-stderr | mitigation=fix-LINEAR_API_KEY
+# failure-mode: drift-detected | exit=1 | visible=provider-heal-stderr | mitigation=run-/ccanvil-pull
+# failure-mode: resolve-failed | exit=1 | visible=provider-heal-stderr | mitigation=verify-team-and-project
+# contract: idempotent-on-rerun
+# contract: no-half-flipped-state-on-phase-failure
+# contract: routes-list-defaults-from-operator-config-when-absent
+# anchor: BTS-316 (modular provider connectivity)
+cmd_provider_activate() {
+  local provider="" team="" project="" project_dir="."
+  local routes_arg=""
+  local json_out=0
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --provider)    provider="$2";    shift 2 ;;
+      --team)        team="$2";        shift 2 ;;
+      --project)     project="$2";     shift 2 ;;
+      --routes)      routes_arg="$2";  shift 2 ;;
+      --project-dir) project_dir="${2:-.}"; shift 2 ;;
+      --json)        json_out=1;       shift ;;
+      --) shift; break ;;
+      # @failure-mode: unknown-flag
+      --*) echo "Usage: docs-check.sh provider-activate --provider linear [--team <name>] --project <name> [--routes spec,plan,stasis,idea] [--project-dir <path>] [--json]" >&2; return 2 ;;
+      *) shift ;;
+    esac
+  done
+
+  # Default provider to "linear" if absent (matches operator-config init Phase-1 contract).
+  [[ -z "$provider" ]] && provider="linear"
+  # @failure-mode: non-linear-provider
+  [[ "$provider" == "linear" ]] || { echo "ERROR: --provider must be 'linear' (only linear supported in Phase 1)" >&2; return 2; }
+
+  # Team: explicit flag → operator-config integrations.providers.<p>.team → fail.
+  if [[ -z "$team" ]]; then
+    team=$(cmd_operator_config_get "integrations.providers.$provider.team" 2>/dev/null)
+  fi
+  # @failure-mode: missing-team
+  if [[ -z "$team" ]]; then
+    echo "ERROR: --team is required (no operator-config integrations.providers.$provider.team fallback found; run 'docs-check.sh operator-config init --provider $provider --team <name>' to set a default)" >&2
+    return 2
+  fi
+
+  # @failure-mode: missing-project
+  if [[ -z "$project" ]]; then
+    echo "ERROR: --project is required (no operator-default; project is per-node)" >&2
+    return 2
+  fi
+
+  # Routes: explicit flag → operator-config integrations.default_routes (per-kind dict, scan known kinds) → hard default.
+  local routes=""
+  if [[ -n "$routes_arg" ]]; then
+    routes="$routes_arg"
+  else
+    # Pull each kind from operator-config default_routes; include kinds where value matches our provider.
+    local r_spec r_plan r_stasis r_idea
+    r_spec=$(cmd_operator_config_get "integrations.default_routes.spec" 2>/dev/null)
+    r_plan=$(cmd_operator_config_get "integrations.default_routes.plan" 2>/dev/null)
+    r_stasis=$(cmd_operator_config_get "integrations.default_routes.stasis" 2>/dev/null)
+    r_idea=$(cmd_operator_config_get "integrations.default_routes.idea" 2>/dev/null)
+    local default_kinds=()
+    [[ "$r_spec"   == "$provider" ]] && default_kinds+=("spec")
+    [[ "$r_plan"   == "$provider" ]] && default_kinds+=("plan")
+    [[ "$r_stasis" == "$provider" ]] && default_kinds+=("stasis")
+    [[ "$r_idea"   == "$provider" ]] && default_kinds+=("idea")
+    if (( ${#default_kinds[@]} > 0 )); then
+      # Build comma-list from the array
+      local IFS=','
+      routes="${default_kinds[*]}"
+    else
+      routes="spec,plan,stasis,idea"  # hard default
+    fi
+  fi
+
+  # Validate routes — only known kinds are flippable.
+  local kinds_array=()
+  IFS=',' read -ra kinds_array <<< "$routes"
+  local k
+  for k in "${kinds_array[@]}"; do
+    case "$k" in
+      spec|plan|stasis|idea|backlog) ;;
+      *) echo "ERROR: unknown route kind '$k' (valid: spec, plan, stasis, idea, backlog)" >&2; return 2 ;;
+    esac
+  done
+
+  # Compose provider-heal — auth → drift → resolve. All-or-nothing.
+  local heal_json="" heal_rc=0
+  if (( json_out )); then
+    heal_json=$(cmd_provider_heal --provider "$provider" --team "$team" --project "$project" --project-dir "$project_dir" --json) || heal_rc=$?
+  else
+    cmd_provider_heal --provider "$provider" --team "$team" --project "$project" --project-dir "$project_dir" || heal_rc=$?
+  fi
+  if (( heal_rc != 0 )); then
+    if (( json_out )); then
+      # Forward provider-heal's envelope verbatim — its status field already
+      # carries auth-failed / drift-detected / resolve-failed.
+      printf '%s\n' "$heal_json"
+    fi
+    return 1
+  fi
+
+  # Phase 4: flip routing keys. Atomic write via temp+mv. Use jq -S for stable
+  # key ordering so re-runs produce byte-identical output (idempotency).
+  local cfg="$project_dir/.claude/ccanvil.local.json"
+  mkdir -p "$project_dir/.claude"
+  local existing='{}'
+  [[ -f "$cfg" ]] && existing=$(cat "$cfg")
+  # Build the routing slice from the kinds list.
+  local kinds_json
+  kinds_json=$(printf '%s\n' "${kinds_array[@]}" | jq -R . | jq -s .)
+  local slice
+  slice=$(jq -n --argjson kinds "$kinds_json" --arg provider "$provider" '
+    {integrations: {routing: ($kinds | map({(.): $provider}) | add // {})}}
+  ')
+  local tmp="$cfg.tmp"
+  echo "$existing" | jq --argjson slice "$slice" -S '. * $slice' > "$tmp"
+  # @side-effect: writes-ccanvil-local-json-on-success-only
+  mv "$tmp" "$cfg"
+
+  # Emit summary or --json envelope.
+  if (( json_out )); then
+    # Pull resolved IDs from the freshly-written config.
+    local team_id project_id state_count label_count
+    team_id=$(jq -r --arg p "$provider" '.integrations.providers[$p].team_id // ""' "$cfg")
+    project_id=$(jq -r --arg p "$provider" '.integrations.providers[$p].project_id // ""' "$cfg")
+    state_count=$(jq -r --arg p "$provider" '(.integrations.providers[$p].state_ids // {}) | length' "$cfg")
+    label_count=$(jq -r --arg p "$provider" '(.integrations.providers[$p].label_ids // {}) | length' "$cfg")
+    local viewer_id
+    viewer_id=$(echo "$heal_json" | jq -r '.phases.auth.viewer_id // ""' 2>/dev/null)
+    jq -n \
+      --arg status "ok" \
+      --arg provider "$provider" \
+      --arg team "$team" \
+      --arg project "$project" \
+      --argjson routes "$kinds_json" \
+      --arg team_id "$team_id" \
+      --arg project_id "$project_id" \
+      --argjson state_count "${state_count:-0}" \
+      --argjson label_count "${label_count:-0}" \
+      --arg viewer_id "$viewer_id" \
+      '{
+        status: $status,
+        provider: $provider,
+        team: $team,
+        project: $project,
+        routes: $routes,
+        ids: {team_id: $team_id, project_id: $project_id, state_count: $state_count, label_count: $label_count},
+        viewer_id: $viewer_id
+      }'
+  else
+    echo "PROVIDER-ACTIVATED: provider=$provider team=$team project=$project routes=$routes"
+    echo "  flipped routing.{$routes} → $provider in $cfg"
+  fi
+  return 0
+}
+
+# ---------------------------------------------------------------------------
 # cmd_provider_heal_auth — Phase 3 of provider-heal: read-only auth check.
 # Sources the standard .env chain (shell env → <project>/.env → ~/.env),
 # verifies LINEAR_API_KEY is present, and runs linear-query.sh viewer as
 # a live smoke-test to confirm the key is functional.
 # ---------------------------------------------------------------------------
 # @manifest
-# purpose: Phase 3 of provider-heal — read-only auth check that sources the standard .env chain (shell env → project/.env → ~/.env), verifies LINEAR_API_KEY is set, and runs linear-query.sh viewer as a live smoke-test to confirm the key is functional; pairs with BTS-319 (Phase 1 ID resolution) and BTS-320 (Phase 2 substrate-drift gate) into the future provider-heal umbrella verb
+# purpose: Phase 3 of provider-heal — read-only auth check that walks the 4-tier auth chain (shell env → project/.env → ~/.env → macOS keychain via security find-generic-password), verifies LINEAR_API_KEY resolves, and runs linear-query.sh viewer as a live smoke-test to confirm the key is functional; pairs with BTS-319 (Phase 1 ID resolution) and BTS-320 (Phase 2 substrate-drift gate) into the provider-heal umbrella verb
 # input: --project-dir <path>
 # input: --json (optional, structured envelope output)
-# input: env LINEAR_API_KEY (consumed; shell-env wins over .env files)
+# input: env LINEAR_API_KEY (consumed; shell-env wins over .env files and keychain)
 # input: env LINEAR_QUERY_OVERRIDE (test-injection point for viewer stub)
 # output: stdout AUTH-OK message or JSON envelope
 # output: stderr clear remediation when missing or invalid key
@@ -4732,11 +5191,14 @@ cmd_provider_heal() {
 # depends-on: jq
 # depends-on: linear-query.sh
 # side-effect: read-only
-# failure-mode: missing-key | exit=1 | visible=stderr-ERROR-LINEAR_API_KEY-not-found | mitigation=add-key-to-shell-env-or-.env
+# side-effect: invokes-subprocess-security
+# failure-mode: missing-key | exit=1 | visible=stderr-ERROR-LINEAR_API_KEY-not-found | mitigation=add-key-to-shell-env-.env-or-keychain
 # failure-mode: invalid-key | exit=1 | visible=stderr-ERROR-viewer-smoke-test-failed | mitigation=verify-key-not-revoked-or-expired
 # contract: read-only-no-state-mutation
 # contract: env-isolation-no-leak-to-caller-shell
+# contract: 4-tier-auth-chain-matches-linear-query-sh
 # anchor: BTS-321 (provider-heal Phase 3)
+# anchor: BTS-316 (4-tier auth chain extension)
 cmd_provider_heal_auth() {
   # @side-effect: read-only
   local project_dir="."
@@ -4772,12 +5234,27 @@ cmd_provider_heal_auth() {
     fi
   fi
 
+  # BTS-316: extend the auth chain to include keychain (Tier 4 in linear-query.sh
+  # since BTS-331). Mirrors linear-query.sh's _load_env_if_needed exactly so the
+  # pre-check parity matches the actual call. Without this, operators who store
+  # their key in keychain hit a fast-fail at this check before linear-query.sh's
+  # own chain has a chance to resolve.
+  # @side-effect: invokes-subprocess-security
+  if [[ -z "${LINEAR_API_KEY:-}" ]] && command -v security >/dev/null 2>&1; then
+    local kc_value
+    if kc_value=$(security find-generic-password -a "${USER:-$LOGNAME}" -s linear_api_key -w 2>/dev/null) \
+       && [[ -n "$kc_value" ]]; then
+      export LINEAR_API_KEY="$kc_value"
+      key_source="keychain"
+    fi
+  fi
+
   if [[ -z "${LINEAR_API_KEY:-}" ]]; then
     # @failure-mode: missing-key
     if (( json_out )); then
-      jq -n '{status:"missing-key", key_source:null, viewer_id:null, error:"LINEAR_API_KEY not found in shell env, project .env, or ~/.env"}'
+      jq -n '{status:"missing-key", key_source:null, viewer_id:null, error:"LINEAR_API_KEY not found in shell env, project .env, ~/.env, or macOS keychain (service: linear_api_key)"}'
     else
-      echo "ERROR: LINEAR_API_KEY not found in shell env, $project_dir/.env, or ~/.env. Generate at https://linear.app/settings/api and add to shell env or .env." >&2
+      echo "ERROR: LINEAR_API_KEY not found. Tiers checked: shell env, $project_dir/.env, ~/.env, macOS keychain (service: linear_api_key). Generate at https://linear.app/settings/api and add via 'security add-generic-password -a \$USER -s linear_api_key -w' or .env file." >&2
     fi
     exit 1
   fi
@@ -4886,12 +5363,20 @@ cmd_provider_heal_preflight() {
   fi
 
   local script_dir
-  script_dir="$(dirname "${BASH_SOURCE[0]}")"
+  script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
   local sync="${CCANVIL_SYNC_OVERRIDE:-$script_dir/ccanvil-sync.sh}"
 
+  # BTS-316: ccanvil-sync.sh's LOCKFILE is a cwd-relative path
+  # (".ccanvil/ccanvil.lock"). When provider-heal-preflight is invoked from a
+  # cwd OTHER than the target project_dir (e.g. by provider-activate from the
+  # hub repo against a remote downstream node), pull-plan reads the wrong
+  # cwd's lockfile and errors with "No .ccanvil/ccanvil.lock found." Fix: run
+  # the subshell with cwd=project_dir so pull-plan sees the right lockfile.
+  # script_dir is canonicalized to absolute path above so the cd doesn't
+  # change which ccanvil-sync.sh resolves.
   local plan_stderr plan_stdout plan_rc
   plan_stderr=$(mktemp)
-  if plan_stdout=$(bash "$sync" pull-plan "$hub_path" 2>"$plan_stderr"); then
+  if plan_stdout=$(cd "$project_dir" && bash "$sync" pull-plan "$hub_path" 2>"$plan_stderr"); then
     plan_rc=0
   else
     plan_rc=$?
@@ -6640,12 +7125,15 @@ cmd_ssot_migrate() {
 # decision so skill prose (e.g. /spec) can branch on `linear` vs `local`
 # without reaching into private helpers. BTS-213.
 # Usage:
-#   docs-check.sh route-of <spec|plan|stasis> [--project-dir <dir>]
+#   docs-check.sh route-of <spec|plan|stasis|idea|backlog> [--project-dir <dir>]
 # Outputs "linear" or "local" on stdout. Exit 2 on missing/unknown kind.
+# BTS-316 (BTS-276 finding 4): allowlist extended from spec/plan/stasis to
+# include idea + backlog so provider-activate can canonically query routes
+# for all artifact kinds.
 # @manifest
-# purpose: Resolve which routing target (local|linear) governs a given lifecycle artifact (spec|plan|stasis) per ccanvil.json + ccanvil.local.json — read-only delegate to _lifecycle_route helper, exposed as a CLI surface for skills
+# purpose: Resolve which routing target (local|linear) governs a given lifecycle artifact (spec|plan|stasis|idea|backlog) per ccanvil.json + ccanvil.local.json — read-only delegate to _lifecycle_route helper, exposed as a CLI surface for skills and provider-activate
 # input: --project-dir <path>
-# input: positional <kind> ∈ {spec, plan, stasis}
+# input: positional <kind> ∈ {spec, plan, stasis, idea, backlog}
 # output: stdout routing target string ("local" or "linear")
 # output: exit-codes 0 ok, 2 unknown-flag/missing-kind
 # caller: skill:/spec
@@ -6654,8 +7142,10 @@ cmd_ssot_migrate() {
 # failure-mode: unknown-flag | exit=2 | visible=stderr-Usage
 # failure-mode: missing-kind | exit=2 | visible=stderr-Usage
 # contract: returns-local-by-default-when-unconfigured
+# contract: accepts-idea-and-backlog-kinds
 # anchor: BTS-204 (route-aware lifecycle)
 # anchor: BTS-241 (manifest seed)
+# anchor: BTS-316 (idea + backlog allowlist extension)
 cmd_route_of() {
   local kind="" project_dir="."
   while [[ $# -gt 0 ]]; do
@@ -6663,14 +7153,14 @@ cmd_route_of() {
       --project-dir) project_dir="${2:-.}"; shift 2 ;;
       --) shift; break ;;
       # @failure-mode: unknown-flag
-      --*) echo "Usage: docs-check.sh route-of <spec|plan|stasis> [--project-dir <path>]" >&2; exit 2 ;;
-      spec|plan|stasis) kind="$1"; shift ;;
+      --*) echo "Usage: docs-check.sh route-of <spec|plan|stasis|idea|backlog> [--project-dir <path>]" >&2; exit 2 ;;
+      spec|plan|stasis|idea|backlog) kind="$1"; shift ;;
       *) shift ;;
     esac
   done
   if [[ -z "$kind" ]]; then
     # @failure-mode: missing-kind
-    echo "Usage: docs-check.sh route-of <spec|plan|stasis> [--project-dir <dir>]" >&2
+    echo "Usage: docs-check.sh route-of <spec|plan|stasis|idea|backlog> [--project-dir <dir>]" >&2
     return 2
   fi
   # @side-effect: reads-config-files
@@ -7404,6 +7894,8 @@ case "$cmd" in
   provider-heal-preflight) cmd_provider_heal_preflight "$@" ;;
   provider-heal-auth) cmd_provider_heal_auth "$@" ;;
   provider-heal) cmd_provider_heal "$@" ;;
+  provider-activate) cmd_provider_activate "$@" ;;
+  operator-config) cmd_operator_config "$@" ;;
   idea-upgrade)      cmd_idea_upgrade "$@" ;;
   title-from-body)   cmd_title_from_body "$@" ;;
   legacy-refs-scan)  cmd_legacy_refs_scan "$@" ;;

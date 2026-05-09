@@ -7,6 +7,10 @@ SCRIPT="$BATS_TEST_DIRNAME/../../.ccanvil/scripts/operations.sh"
 
 setup() {
   export TMPDIR="${BATS_TEST_TMPDIR}"
+  # BTS-316: pin operator-config tier to a non-existent path so the real
+  # operator's $HOME/.ccanvil/operator.json doesn't bleed into 2-tier merge
+  # behavior these tests assume.
+  export CCANVIL_OPERATOR_CONFIG_OVERRIDE="${BATS_TEST_TMPDIR}/no-operator-config.json"
   PROJECT=$(mktemp -d)
 }
 

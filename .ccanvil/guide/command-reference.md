@@ -188,6 +188,8 @@ The `/idea` skill routes captures through `operations.sh` based on the node's pr
 
 **Error contract:** exit 0 success, exit 2 invalid args / missing creds, exit 3 GraphQL errors (Linear server response carried `errors[]`).
 
+**Substrate-staleness guard (BTS-419):** when `integrations.providers.linear.project_id` is configured but the resolved command for any project-scoped verb (`backlog.list`, `idea.add`, `idea.list`, `idea.count`, `idea.triage`, `idea.review-icebox`) lacks `--project-id`, `operations.sh resolve` hard-fails with stderr `ERROR: stale substrate — ...` and a `ccanvil-sync.sh pull` recipe. The guard prevents pre-BTS-407-shape substrates from emitting cross-project queries that fall back to team-only filtering. Bypass token: `ALLOW_STALE_SUBSTRATE=1` (operator-typed prefix) — turns the hard-fail into a single `WARN:` line + pass-through, for emergency scenarios where a legacy config is intentional.
+
 ## Radar Scripts
 
 | Command | What it does |

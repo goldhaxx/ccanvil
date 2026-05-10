@@ -459,10 +459,22 @@ linear_assert_project_id_emitted() {
     echo "$cmd_json"
     return 0
   fi
-  # Fire path lands in Step 2. For now, pass through silently — Step 1
-  # only locks the no-fire contract.
-  echo "$cmd_json"
-  return 0
+  # Fire condition reached: project_id is configured but the emitted command
+  # lacks --project-id. Honor the ALLOW_STALE_SUBSTRATE=1 operator bypass
+  # before hard-failing.
+  if [[ "${ALLOW_STALE_SUBSTRATE:-}" == "1" ]]; then
+    echo "WARN: stale-substrate bypass active for resolve(${verb})" >&2
+    echo "$cmd_json"
+    return 0
+  fi
+  # The local substrate is stale relative to the config's expected contract;
+  # refuse to emit the about-to-leak query.
+  cat >&2 <<EOF
+ERROR: stale substrate — project_id=${project_id} is configured but resolve(${verb}) did not emit --project-id.
+This typically means .ccanvil/scripts/operations.sh is out-of-date relative to the hub.
+Run: cd ${PROJECT_DIR:-.} && bash .ccanvil/scripts/ccanvil-sync.sh pull
+EOF
+  return 1
 }
 
 linear_mcp_adapter() {
@@ -527,7 +539,7 @@ linear_mcp_adapter() {
         exit 1
       fi
       output_contract='["id","title","status","priority","createdAt"]'
-      jq -n --arg project_name "$project_name" --arg project_id "$project_id" --arg team "$team" --arg state_id "$backlog_state_id" \
+      linear_assert_project_id_emitted "backlog.list" "$project_id" "$(jq -n --arg project_name "$project_name" --arg project_id "$project_id" --arg team "$team" --arg state_id "$backlog_state_id" \
         --argjson output "$output_contract" \
         '{
           provider: "linear",
@@ -542,7 +554,7 @@ linear_mcp_adapter() {
             auth_env: "LINEAR_API_KEY"
           },
           contract: { output: $output }
-        }'
+        }')"
       ;;
     # BTS-183: backlog.get removed — dead code. Use backlog.list.
     # --- idea operations ---
@@ -556,7 +568,7 @@ linear_mcp_adapter() {
       output_contract='["id","title","status"]'
       local triage_state_id
       triage_state_id=$(linear_state_id "$provider_config" "triage")
-      jq -n --arg project_name "$project_name" --arg project_id "$project_id" --arg team "$team" --arg label "$idea_label" \
+      linear_assert_project_id_emitted "idea.add" "$project_id" "$(jq -n --arg project_name "$project_name" --arg project_id "$project_id" --arg team "$team" --arg label "$idea_label" \
         --arg state_id "$triage_state_id" \
         --argjson output "$output_contract" \
         '{
@@ -572,11 +584,11 @@ linear_mcp_adapter() {
             auth_env: "LINEAR_API_KEY"
           },
           contract: { output: $output }
-        }'
+        }')"
       ;;
     idea.list)
       output_contract='["id","title","status","createdAt"]'
-      jq -n --arg project_name "$project_name" --arg project_id "$project_id" --arg team "$team" --arg label "$idea_label" \
+      linear_assert_project_id_emitted "idea.list" "$project_id" "$(jq -n --arg project_name "$project_name" --arg project_id "$project_id" --arg team "$team" --arg label "$idea_label" \
         --argjson output "$output_contract" \
         '{
           provider: "linear",
@@ -591,7 +603,7 @@ linear_mcp_adapter() {
             auth_env: "LINEAR_API_KEY"
           },
           contract: { output: $output }
-        }'
+        }')"
       ;;
     idea.count)
       # BTS-164: emit mechanism=http with a linear-query.sh invocation. The
@@ -602,7 +614,7 @@ linear_mcp_adapter() {
       # consumers no longer pre-flight against it (the substrate handles
       # the contract end-to-end).
       output_contract='["id","status","statusType"]'
-      jq -n --arg project_name "$project_name" --arg project_id "$project_id" --arg team "$team" --arg label "$idea_label" \
+      linear_assert_project_id_emitted "idea.count" "$project_id" "$(jq -n --arg project_name "$project_name" --arg project_id "$project_id" --arg team "$team" --arg label "$idea_label" \
         --argjson output "$output_contract" \
         '{
           provider: "linear",
@@ -617,7 +629,7 @@ linear_mcp_adapter() {
             auth_env: "LINEAR_API_KEY"
           },
           contract: { output: $output }
-        }'
+        }')"
       ;;
     idea.triage)
       # BTS-166: state-id when configured (disambiguation-proof), else "triage"
@@ -630,7 +642,7 @@ linear_mcp_adapter() {
       else
         triage_state_arg="triage"
       fi
-      jq -n --arg project_name "$project_name" --arg project_id "$project_id" --arg team "$team" --arg label "$idea_label" \
+      linear_assert_project_id_emitted "idea.triage" "$project_id" "$(jq -n --arg project_name "$project_name" --arg project_id "$project_id" --arg team "$team" --arg label "$idea_label" \
         --arg state "$triage_state_arg" \
         --argjson output "$output_contract" \
         '{
@@ -647,7 +659,7 @@ linear_mcp_adapter() {
             auth_env: "LINEAR_API_KEY"
           },
           contract: { output: $output }
-        }'
+        }')"
       ;;
     idea.sync)
       # Sync is orchestration (drain the pending log, retry via MCP per entry).
@@ -677,7 +689,7 @@ linear_mcp_adapter() {
       else
         icebox_state_arg="icebox"
       fi
-      jq -n --arg project_name "$project_name" --arg project_id "$project_id" --arg team "$team" --arg label "$idea_label" \
+      linear_assert_project_id_emitted "idea.review-icebox" "$project_id" "$(jq -n --arg project_name "$project_name" --arg project_id "$project_id" --arg team "$team" --arg label "$idea_label" \
         --arg state "$icebox_state_arg" \
         --argjson output "$output_contract" \
         '{
@@ -694,7 +706,7 @@ linear_mcp_adapter() {
             auth_env: "LINEAR_API_KEY"
           },
           contract: { output: $output }
-        }'
+        }')"
       ;;
     ticket.transition)
       # Provider-neutral ticket state transition. OP_ARGS = ticket id,

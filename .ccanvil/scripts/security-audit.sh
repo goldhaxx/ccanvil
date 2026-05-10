@@ -11,7 +11,7 @@
 #   security-audit.sh [--files-only] [--history-only] [--json]
 
 # @manifest
-# purpose: Deterministic PII + secrets scanner — grep tracked files (and optionally `git log -p`) for hard-coded patterns (GitHub PATs, OpenAI/Anthropic keys, AWS access-key IDs, Slack tokens, Bearer tokens), absolute home paths, real-looking emails, and dangerous file extensions (.env, .pem, *.key, id_rsa, *.credentials). Supports a 2-shape allowlist (file-only legacy + per-finding triple). Used as the deterministic pre-flight in /review and as a CI gate; complements /review's reasoning-based pass.
+# purpose: Deterministic PII + secrets scanner — grep tracked files (and optionally `git log -p`) for hard-coded patterns (GitHub PATs, OpenAI/Anthropic keys, AWS access-key IDs, Slack tokens, Bearer tokens), absolute home paths, real-looking emails, and dangerous file extensions (.env, .pem, *.key, id_rsa, *.credentials — basenames ending in `.example`/`.template`/`.sample` are exempt from the dangerous-file check per BTS-394; secret-content scanning still applies to those files). Supports a 2-shape allowlist (file-only legacy + per-finding triple). Used as the deterministic pre-flight in /review and as a CI gate; complements /review's reasoning-based pass.
 # input: --files-only (skip git history scan; faster pre-commit pre-flight)
 # input: --history-only (skip file scan; full forensic pass over history)
 # input: --json (emit `{findings:[{severity, category, location, detail}], total, pass}`)
@@ -256,6 +256,12 @@ scan_dangerous_files() {
   echo "Scanning for dangerous file types..." >&2
   for pattern in "${DANGEROUS_EXTENSIONS[@]}"; do
     while IFS= read -r file; do
+      # BTS-394: skip canonical template suffixes. Only the broad `\.env\.`
+      # pattern can produce `.example|.template|.sample` matches in the
+      # first place — every other dangerous-extension regex is `$`-anchored.
+      case "$file" in
+        *.example|*.template|*.sample) continue ;;
+      esac
       local detail="Sensitive file type tracked in git"
       if ! is_allowlisted "$file" "dangerous-file" "$detail"; then
         add_finding "CRITICAL" "dangerous-file" "$file" "$detail"

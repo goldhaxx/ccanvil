@@ -4,7 +4,7 @@
 > Work: linear:BTS-384
 > Created: 1778364361
 > Subject: Rule distribution scope + abstraction discipline
-> Status: In Progress
+> Status: Complete
 
 ## Summary
 

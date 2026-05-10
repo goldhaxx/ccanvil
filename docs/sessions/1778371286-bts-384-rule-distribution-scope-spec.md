@@ -30,7 +30,7 @@ Hub `.claude/rules/*.md` distribute unconditionally to every downstream node via
 ## Affected Files
 
 | File | Change |
-|------|--------|
+| -- | -- |
 | `.ccanvil/scripts/ccanvil-sync.sh` | New: scope-filter integration in `is_distributable_path` callers (`cmd_pull_plan`, `cmd_changelog`, `scan_hub_files`). Read node `role` from `ccanvil.json` once at sync entry. |
 | `.ccanvil/scripts/module-manifest.sh` | Modified: extend rule frontmatter parser to extract `scope:`, emit `rule-scope-invalid` (drift) / `rule-scope-missing` (info). Add `rule-vocabulary-leak` scan over `scope: universal` rule bodies. |
 | `.claude/ccanvil.json` | Modified: add `"role": "hub-substrate-developer"` at top level. |
@@ -41,24 +41,24 @@ Hub `.claude/rules/*.md` distribute unconditionally to every downstream node via
 
 ## Dependencies
 
-- **Requires:** BTS-385 (rule frontmatter substrate, SHIPPED) — frontmatter parser already extracts `tier`; this extends to `scope`.
-- **Requires:** BTS-386 (rule-tier-validator extension, SHIPPED) — drift-guard plumbing pattern (warn-shape `info[]`, block-shape `drift[]`) is already in place.
-- **Blocked by:** none.
+* **Requires:** BTS-385 (rule frontmatter substrate, SHIPPED) — frontmatter parser already extracts `tier`; this extends to `scope`.
+* **Requires:** BTS-386 (rule-tier-validator extension, SHIPPED) — drift-guard plumbing pattern (warn-shape `info[]`, block-shape `drift[]`) is already in place.
+* **Blocked by:** none.
 
 ## Out of Scope
 
-- **Profile-based opt-in** (`testing-discipline`, `ai-collab-meta`) — single `role` enum suffices until a third role appears empirically. Capture as follow-up if pattern emerges.
-- **Drift-guard severity escalation** — vocabulary-leak stays advisory (`info[]`) in v1; escalate to blocking (`drift[]` + `--strict`) only after a soak window.
-- **Migration of already-deployed nodes** — handled by next routine `/ccanvil-pull`; one-time correction noise expected. No proactive heal pass.
-- **Stack-aware filtering** — `stack:` field already exists on frontmatter (`stack: any` today). Stack-driven distribution lives in BTS-312 (test-runner indirection); BTS-384 honors `scope:` only.
+* **Profile-based opt-in** (`testing-discipline`, `ai-collab-meta`) — single `role` enum suffices until a third role appears empirically. Capture as follow-up if pattern emerges.
+* **Drift-guard severity escalation** — vocabulary-leak stays advisory (`info[]`) in v1; escalate to blocking (`drift[]` + `--strict`) only after a soak window.
+* **Migration of already-deployed nodes** — handled by next routine `/ccanvil-pull`; one-time correction noise expected. No proactive heal pass.
+* **Stack-aware filtering** — `stack:` field already exists on frontmatter (`stack: any` today). Stack-driven distribution lives in BTS-312 (test-runner indirection); BTS-384 honors `scope:` only.
 
 ## Implementation Notes
 
-- Audit-pass may surface additional rule(s) needing re-tag from `universal` → `substrate` based on the AC-5 vocabulary-leak scan output (e.g., `self-review.md` if it references hub-specific tokens). Re-tag list is determined empirically from the leak scan, not pre-specified.
-- Keep filter integration narrow: read `role` once in `cmd_pull_plan` entry, pass into `is_distributable_path` (or a sibling `is_scope_allowed`). Avoid threading through every helper.
-- `pull-plan` preview output gets a new bucket `skipped (scope-filter: <scope> not allowed for role=<role>)` so operators see the filter at work, not silent omission.
-- Vocabulary-leak token list lives in module-manifest.sh as a constant array. Start narrow (`bats-report.sh`, `module-manifest.sh`, `ccanvil-sync.sh`, `linear-query.sh`, `docs-check.sh`, `BTS-[0-9]+`); expand if leaks slip through.
-- Anchor block convention: `## Anchored on (<hub-id>)` — substrate enforces presence in `scope: substrate` rules (later phase); v1 only checks anchor-membership for the leak-scan exemption.
+* Audit-pass may surface additional rule(s) needing re-tag from `universal` → `substrate` based on the AC-5 vocabulary-leak scan output (e.g., `self-review.md` if it references hub-specific tokens). Re-tag list is determined empirically from the leak scan, not pre-specified.
+* Keep filter integration narrow: read `role` once in `cmd_pull_plan` entry, pass into `is_distributable_path` (or a sibling `is_scope_allowed`). Avoid threading through every helper.
+* `pull-plan` preview output gets a new bucket `skipped (scope-filter: <scope> not allowed for role=<role>)` so operators see the filter at work, not silent omission.
+* Vocabulary-leak token list lives in [module-manifest.sh](<http://module-manifest.sh>) as a constant array. Start narrow (`bats-report.sh`, `module-manifest.sh`, `ccanvil-sync.sh`, `linear-query.sh`, `docs-check.sh`, `BTS-[0-9]+`); expand if leaks slip through.
+* Anchor block convention: `## Anchored on (<hub-id>)` — substrate enforces presence in `scope: substrate` rules (later phase); v1 only checks anchor-membership for the leak-scan exemption.
 
 <!-- NODE-SPECIFIC-START -->
 <!-- Add project-specific content below this line. -->

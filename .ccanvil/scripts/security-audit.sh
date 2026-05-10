@@ -308,7 +308,7 @@ scan_git_history_secrets() {
     case "$entry" in
       file\|*)
         local fpat="${entry#file|}"
-        pathspec_args+=(":(exclude,glob)**${fpat}*")
+        pathspec_args+=(":(exclude,glob)**/${fpat}**")
         ;;
     esac
   done

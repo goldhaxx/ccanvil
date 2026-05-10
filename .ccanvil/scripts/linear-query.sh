@@ -232,6 +232,7 @@ cmd_viewer() {
 # @manifest
 # purpose: Wrap the Linear GraphQL `issues` query with a composable IssueFilter (project/team/state/label/limit) — auto-detects UUID-shaped --state values and filters by state.id.eq vs state.type.eq so callers can use either form symmetrically
 # input: --project <name>
+# input: --project-id <uuid>
 # input: --team <name>
 # input: --state <type-or-uuid>
 # input: --label <name>
@@ -256,14 +257,15 @@ cmd_list_issues() {
   # @side-effect: reads-env-LINEAR_API_KEY
   _require_api_key
 
-  local project="" team="" state="" label="" limit="50"
+  local project_name="" project_id="" team="" state="" label="" limit="50"
   while [[ $# -gt 0 ]]; do
     case "$1" in
-      --project) project="$2"; shift 2 ;;
-      --team)    team="$2";    shift 2 ;;
-      --state)   state="$2";   shift 2 ;;
-      --label)   label="$2";   shift 2 ;;
-      --limit)   limit="$2";   shift 2 ;;
+      --project)    project_name="$2"; shift 2 ;;
+      --project-id) project_id="$2";   shift 2 ;;
+      --team)       team="$2";         shift 2 ;;
+      --state)      state="$2";        shift 2 ;;
+      --label)      label="$2";        shift 2 ;;
+      --limit)      limit="$2";        shift 2 ;;
       # @failure-mode: unknown-flag
       *) _die 2 "list-issues: unknown flag: $1" ;;
     esac
@@ -272,9 +274,14 @@ cmd_list_issues() {
   # Compose the IssueFilter object incrementally so callers only pay for
   # the dimensions they constrain. Linear's filter shape is canonical:
   # field: { type/name/id: { eq: value } }, with labels using `some`.
+  # BTS-407 follow-up: --project-id wins over --project (UUID skips the
+  # id-from-name resolution Linear does server-side, and it's the canonical
+  # form downstream nodes carry in .claude/ccanvil.local.json).
   local filter='{}'
-  if [[ -n "$project" ]]; then
-    filter=$(printf '%s' "$filter" | jq --arg v "$project" '. + {project:{name:{eq:$v}}}')
+  if [[ -n "$project_id" ]]; then
+    filter=$(printf '%s' "$filter" | jq --arg v "$project_id" '. + {project:{id:{eq:$v}}}')
+  elif [[ -n "$project_name" ]]; then
+    filter=$(printf '%s' "$filter" | jq --arg v "$project_name" '. + {project:{name:{eq:$v}}}')
   fi
   if [[ -n "$team" ]]; then
     filter=$(printf '%s' "$filter" | jq --arg v "$team" '. + {team:{name:{eq:$v}}}')

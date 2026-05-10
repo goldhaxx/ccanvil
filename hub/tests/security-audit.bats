@@ -211,6 +211,28 @@ EOF
   [[ "$stderr" != *"ERROR"* ]]
 }
 
+@test "BTS-394 edge: .env.local.example (template-suffix wins) does not flag" {
+  # Plausible downstream filename ("here's an example .env.local"). Matches
+  # `\.env\.` AND ends in `.example` → carve-out fires, no finding.
+  echo "API_KEY=YOUR_KEY_HERE" > .env.local.example
+  git add -A && git commit -q -m "add nested template"
+
+  run bash "$SCRIPT" --files-only
+  [ "$status" -eq 0 ]
+  ! echo "$output" | grep -q "dangerous-file"
+}
+
+@test "BTS-394 edge: .env.example.local (real-suffix wins) still flags CRITICAL" {
+  # Plausible downstream filename (a `.local` override of an `.example`).
+  # Matches `\.env\.` and ends in `.local`, NOT a template suffix → flag.
+  echo "SECRET=real" > .env.example.local
+  git add -A && git commit -q -m "add real env on top of example"
+
+  run bash "$SCRIPT" --files-only
+  [ "$status" -eq 1 ]
+  echo "$output" | grep -qE "dangerous-file[[:space:]]+\.env\.example\.local"
+}
+
 
 # =========================================================================
 # Git history detection

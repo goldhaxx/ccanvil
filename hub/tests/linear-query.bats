@@ -191,6 +191,34 @@ JSON
   _get_body | jq -e '.variables.first == 10'
 }
 
+@test "BTS-407 follow-up: list-issues --project-id filters by project.id.eq (not name.eq)" {
+  set -e
+  _setup_stub
+  cat > "$LINEAR_STUB_RESPONSE" <<'JSON'
+{"data":{"issues":{"nodes":[]}}}
+JSON
+  run bash -c "source '$STUB_FIXTURE' && bash '$LQ' list-issues --project-id PROJ-UUID-1"
+  [ "$status" -eq 0 ]
+  local body
+  body=$(_get_body)
+  echo "$body" | jq -e '.variables.filter.project.id.eq == "PROJ-UUID-1"'
+  ! echo "$body" | jq -e '.variables.filter.project | has("name")'
+}
+
+@test "BTS-407 follow-up: list-issues --project-id wins over --project on collision" {
+  set -e
+  _setup_stub
+  cat > "$LINEAR_STUB_RESPONSE" <<'JSON'
+{"data":{"issues":{"nodes":[]}}}
+JSON
+  run bash -c "source '$STUB_FIXTURE' && bash '$LQ' list-issues --project-id PROJ-UUID-1 --project NameForm"
+  [ "$status" -eq 0 ]
+  local body
+  body=$(_get_body)
+  echo "$body" | jq -e '.variables.filter.project.id.eq == "PROJ-UUID-1"'
+  ! echo "$body" | jq -e '.variables.filter.project | has("name")'
+}
+
 @test "BTS-164 AC-1: list-issues unknown flag exits 2" {
   _setup_stub
   run --separate-stderr bash -c "source '$STUB_FIXTURE' && bash '$LQ' list-issues --bogus x"

@@ -70,8 +70,12 @@ EOF
 }
 
 # ---------------------------------------------------------------------------
-# Argument parsing
+# Argument parsing + dispatch (only when invoked as a script — bats fixtures
+# source this file to unit-test helpers like linear_assert_project_id_emitted
+# without triggering usage()/exit).
 # ---------------------------------------------------------------------------
+
+if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
 
 CMD=""
 OPERATION=""
@@ -109,6 +113,8 @@ done
 
 [[ -z "$CMD" ]] && usage
 [[ "$CMD" == "resolve" && -z "$OPERATION" ]] && usage
+
+fi  # end argv-parse guard
 
 # ---------------------------------------------------------------------------
 # Config reading
@@ -434,6 +440,43 @@ slug_from_work_id() {
     | sed -e 's/[^a-z0-9-]\{1,\}/-/g' -e 's/--*/-/g' -e 's/^-//' -e 's/-$//'
 }
 
+# BTS-419 — substrate-staleness drift-guard. Round-trips the JSON envelope
+# emitted by each project-scoped Linear verb and asserts the contract:
+# "when project_id is configured, the resolved command MUST contain
+# --project-id". Empty project_id or commands that already carry the flag
+# pass through unchanged. Step 1 lands the no-fire contract; subsequent
+# steps add the fire path + ALLOW_STALE_SUBSTRATE=1 bypass + AC-7
+# operator-grade error shape.
+linear_assert_project_id_emitted() {
+  local verb="$1" project_id="$2" cmd_json="$3"
+  if [[ -z "$project_id" ]]; then
+    echo "$cmd_json"
+    return 0
+  fi
+  local cmd
+  cmd=$(echo "$cmd_json" | jq -r '.invocation.command // ""')
+  if [[ "$cmd" == *"--project-id "* ]]; then
+    echo "$cmd_json"
+    return 0
+  fi
+  # Fire condition reached: project_id is configured but the emitted command
+  # lacks --project-id. Honor the ALLOW_STALE_SUBSTRATE=1 operator bypass
+  # before hard-failing.
+  if [[ "${ALLOW_STALE_SUBSTRATE:-}" == "1" ]]; then
+    echo "WARN: stale-substrate bypass active for resolve(${verb})" >&2
+    echo "$cmd_json"
+    return 0
+  fi
+  # The local substrate is stale relative to the config's expected contract;
+  # refuse to emit the about-to-leak query.
+  cat >&2 <<EOF
+ERROR: stale substrate — project_id=${project_id} is configured but resolve(${verb}) did not emit --project-id.
+This typically means .ccanvil/scripts/operations.sh is out-of-date relative to the hub.
+Run: cd ${PROJECT_DIR:-.} && bash .ccanvil/scripts/ccanvil-sync.sh pull
+EOF
+  return 1
+}
+
 linear_mcp_adapter() {
   local op="$1" provider_config="$2" op_args="$3"
   local tool="" output_contract="" field_map=""
@@ -496,7 +539,7 @@ linear_mcp_adapter() {
         exit 1
       fi
       output_contract='["id","title","status","priority","createdAt"]'
-      jq -n --arg project_name "$project_name" --arg project_id "$project_id" --arg team "$team" --arg state_id "$backlog_state_id" \
+      linear_assert_project_id_emitted "backlog.list" "$project_id" "$(jq -n --arg project_name "$project_name" --arg project_id "$project_id" --arg team "$team" --arg state_id "$backlog_state_id" \
         --argjson output "$output_contract" \
         '{
           provider: "linear",
@@ -511,7 +554,7 @@ linear_mcp_adapter() {
             auth_env: "LINEAR_API_KEY"
           },
           contract: { output: $output }
-        }'
+        }')"
       ;;
     # BTS-183: backlog.get removed — dead code. Use backlog.list.
     # --- idea operations ---
@@ -525,7 +568,7 @@ linear_mcp_adapter() {
       output_contract='["id","title","status"]'
       local triage_state_id
       triage_state_id=$(linear_state_id "$provider_config" "triage")
-      jq -n --arg project_name "$project_name" --arg project_id "$project_id" --arg team "$team" --arg label "$idea_label" \
+      linear_assert_project_id_emitted "idea.add" "$project_id" "$(jq -n --arg project_name "$project_name" --arg project_id "$project_id" --arg team "$team" --arg label "$idea_label" \
         --arg state_id "$triage_state_id" \
         --argjson output "$output_contract" \
         '{
@@ -541,11 +584,11 @@ linear_mcp_adapter() {
             auth_env: "LINEAR_API_KEY"
           },
           contract: { output: $output }
-        }'
+        }')"
       ;;
     idea.list)
       output_contract='["id","title","status","createdAt"]'
-      jq -n --arg project_name "$project_name" --arg project_id "$project_id" --arg team "$team" --arg label "$idea_label" \
+      linear_assert_project_id_emitted "idea.list" "$project_id" "$(jq -n --arg project_name "$project_name" --arg project_id "$project_id" --arg team "$team" --arg label "$idea_label" \
         --argjson output "$output_contract" \
         '{
           provider: "linear",
@@ -560,7 +603,7 @@ linear_mcp_adapter() {
             auth_env: "LINEAR_API_KEY"
           },
           contract: { output: $output }
-        }'
+        }')"
       ;;
     idea.count)
       # BTS-164: emit mechanism=http with a linear-query.sh invocation. The
@@ -571,7 +614,7 @@ linear_mcp_adapter() {
       # consumers no longer pre-flight against it (the substrate handles
       # the contract end-to-end).
       output_contract='["id","status","statusType"]'
-      jq -n --arg project_name "$project_name" --arg project_id "$project_id" --arg team "$team" --arg label "$idea_label" \
+      linear_assert_project_id_emitted "idea.count" "$project_id" "$(jq -n --arg project_name "$project_name" --arg project_id "$project_id" --arg team "$team" --arg label "$idea_label" \
         --argjson output "$output_contract" \
         '{
           provider: "linear",
@@ -586,7 +629,7 @@ linear_mcp_adapter() {
             auth_env: "LINEAR_API_KEY"
           },
           contract: { output: $output }
-        }'
+        }')"
       ;;
     idea.triage)
       # BTS-166: state-id when configured (disambiguation-proof), else "triage"
@@ -599,7 +642,7 @@ linear_mcp_adapter() {
       else
         triage_state_arg="triage"
       fi
-      jq -n --arg project_name "$project_name" --arg project_id "$project_id" --arg team "$team" --arg label "$idea_label" \
+      linear_assert_project_id_emitted "idea.triage" "$project_id" "$(jq -n --arg project_name "$project_name" --arg project_id "$project_id" --arg team "$team" --arg label "$idea_label" \
         --arg state "$triage_state_arg" \
         --argjson output "$output_contract" \
         '{
@@ -616,7 +659,7 @@ linear_mcp_adapter() {
             auth_env: "LINEAR_API_KEY"
           },
           contract: { output: $output }
-        }'
+        }')"
       ;;
     idea.sync)
       # Sync is orchestration (drain the pending log, retry via MCP per entry).
@@ -646,7 +689,7 @@ linear_mcp_adapter() {
       else
         icebox_state_arg="icebox"
       fi
-      jq -n --arg project_name "$project_name" --arg project_id "$project_id" --arg team "$team" --arg label "$idea_label" \
+      linear_assert_project_id_emitted "idea.review-icebox" "$project_id" "$(jq -n --arg project_name "$project_name" --arg project_id "$project_id" --arg team "$team" --arg label "$idea_label" \
         --arg state "$icebox_state_arg" \
         --argjson output "$output_contract" \
         '{
@@ -663,7 +706,7 @@ linear_mcp_adapter() {
             auth_env: "LINEAR_API_KEY"
           },
           contract: { output: $output }
-        }'
+        }')"
       ;;
     ticket.transition)
       # Provider-neutral ticket state transition. OP_ARGS = ticket id,
@@ -895,9 +938,12 @@ external_adapter() {
 # side-effect: reads-config-files
 # failure-mode: unknown-operation | exit=1 | visible=stderr-ERROR-unknown-operation | mitigation=use-documented-op-name
 # failure-mode: missing-provider-config | exit=1 | visible=stderr-ERROR-no-entry-in-integrations-providers | mitigation=add-provider-config
+# failure-mode: stale-substrate-emit | exit=1 | visible=stderr-ERROR-stale-substrate-with-pull-recipe | mitigation=run-ccanvil-sync.sh-pull-OR-ALLOW_STALE_SUBSTRATE=1-prefix
 # contract: explicit-prefix-overrides-routing
 # contract: work-ticket-backlog-groups-inherit-idea-routing
+# contract: env-prefix-bypass-via-ALLOW_STALE_SUBSTRATE=1
 # anchor: BTS-246 (manifest seed)
+# anchor: BTS-419 (substrate-staleness drift-guard failure-mode)
 cmd_resolve() {
   # @side-effect: reads-config-files
   local op="$1"
@@ -976,6 +1022,11 @@ cmd_resolve() {
   local mechanism
   mechanism=$(echo "$provider_config" | jq -r '.mechanism // "mcp"')
 
+  # @failure-mode: stale-substrate-emit
+  # BTS-419: external_adapter → linear_mcp_adapter → linear_assert_project_id_emitted
+  # may exit 1 with stderr ERROR when project_id is configured but the resolved
+  # command lacks --project-id. ALLOW_STALE_SUBSTRATE=1 turns the hard-fail into
+  # a single WARN + passthrough.
   external_adapter "$op" "$routed_provider" "$mechanism" "$provider_config" "$OP_ARGS"
 }
 
@@ -1027,9 +1078,13 @@ cmd_exec() {
 # Dispatch
 # ---------------------------------------------------------------------------
 
+if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
+
 case "$CMD" in
   resolve) cmd_resolve "$OPERATION" ;;
   exec) cmd_exec "$OPERATION" ;;
   merge-config) merge_config "$PROJECT_DIR" ;;
   *) usage ;;
 esac
+
+fi  # end dispatch guard

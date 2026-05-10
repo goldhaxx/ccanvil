@@ -128,6 +128,91 @@ teardown() {
 
 
 # =========================================================================
+# BTS-394: template-suffix carve-out (.example / .template / .sample)
+# =========================================================================
+# scan_dangerous_files used to flag canonical templates like .env.example
+# because the broad `\.env\.` pattern matches any path containing `.env.`.
+# Carve-out: skip files whose basename ends in `.example`, `.template`, or
+# `.sample`. Other dangerous patterns are anchored with `$`, so they never
+# match `.example`-suffixed paths in the first place — the carve-out is
+# only ever exercised on the `\.env\.` matcher.
+
+@test "BTS-394 AC-1: .env.example does not flag as dangerous-file" {
+  echo "API_KEY=YOUR_KEY_HERE" > .env.example
+  git add -A && git commit -q -m "add env template"
+
+  run bash "$SCRIPT" --files-only
+  [ "$status" -eq 0 ]
+  ! echo "$output" | grep -q "dangerous-file"
+}
+
+@test "BTS-394 AC-2: .env.template and .env.sample do not flag as dangerous-file" {
+  echo "API_KEY=YOUR_KEY_HERE" > .env.template
+  echo "API_KEY=YOUR_KEY_HERE" > .env.sample
+  git add -A && git commit -q -m "add template + sample"
+
+  run bash "$SCRIPT" --files-only
+  [ "$status" -eq 0 ]
+  ! echo "$output" | grep -q "dangerous-file"
+}
+
+@test "BTS-394 AC-3: real .env / .env.local / .env.production still flag CRITICAL" {
+  echo "SECRET=real" > .env
+  echo "SECRET=real" > .env.local
+  echo "SECRET=real" > .env.production
+  echo "SECRET=real" > .env.development.local
+  git add -A && git commit -q -m "add real env files"
+
+  run bash "$SCRIPT" --files-only
+  [ "$status" -eq 1 ]
+  # Four dangerous-file findings, one per filename.
+  [ "$(echo "$output" | grep -c "dangerous-file")" -eq 4 ]
+  echo "$output" | grep -qE "dangerous-file[[:space:]]+\.env[[:space:]]"
+  echo "$output" | grep -qE "dangerous-file[[:space:]]+\.env\.local"
+  echo "$output" | grep -qE "dangerous-file[[:space:]]+\.env\.production"
+  echo "$output" | grep -qE "dangerous-file[[:space:]]+\.env\.development\.local"
+}
+
+@test "BTS-394 AC-4: other dangerous extensions still flag (.pem, id_rsa, .credentials)" {
+  echo "fake cert" > server.pem
+  echo "fake rsa" > id_rsa
+  echo "fake creds" > app.credentials
+  git add -A && git commit -q -m "add other dangerous files"
+
+  run bash "$SCRIPT" --files-only
+  [ "$status" -eq 1 ]
+  echo "$output" | grep -qE "dangerous-file[[:space:]]+server\.pem"
+  echo "$output" | grep -qE "dangerous-file[[:space:]]+id_rsa"
+  echo "$output" | grep -qE "dangerous-file[[:space:]]+app\.credentials"
+}
+
+@test "BTS-394 AC-5: .env.example with real GitHub PAT still triggers secret CRITICAL" {
+  echo "GITHUB_TOKEN=ghp_ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefgh1234" > .env.example
+  git add -A && git commit -q -m "add template with real PAT"
+
+  run bash "$SCRIPT" --files-only
+  [ "$status" -eq 1 ]
+  echo "$output" | grep -q "secret"
+  # Per AC-5 the dangerous-file category should NOT fire on .env.example —
+  # only the secret-content scan does.
+  ! echo "$output" | grep -q "dangerous-file"
+}
+
+@test "BTS-394 AC-6: legacy .env.example::dangerous-file:: allowlist entry parses without error" {
+  echo "API_KEY=YOUR_KEY_HERE" > .env.example
+  cat > .security-audit-allowlist <<'EOF'
+.env.example::dangerous-file::
+EOF
+  git add -A && git commit -q -m "add template + legacy allowlist"
+
+  run --separate-stderr bash "$SCRIPT" --files-only
+  [ "$status" -eq 0 ]
+  [[ "$stderr" != *"malformed"* ]]
+  [[ "$stderr" != *"ERROR"* ]]
+}
+
+
+# =========================================================================
 # Git history detection
 # =========================================================================
 

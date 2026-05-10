@@ -256,6 +256,12 @@ scan_dangerous_files() {
   echo "Scanning for dangerous file types..." >&2
   for pattern in "${DANGEROUS_EXTENSIONS[@]}"; do
     while IFS= read -r file; do
+      # BTS-394: skip canonical template suffixes. Only the broad `\.env\.`
+      # pattern can produce `.example|.template|.sample` matches in the
+      # first place — every other dangerous-extension regex is `$`-anchored.
+      case "$file" in
+        *.example|*.template|*.sample) continue ;;
+      esac
       local detail="Sensitive file type tracked in git"
       if ! is_allowlisted "$file" "dangerous-file" "$detail"; then
         add_finding "CRITICAL" "dangerous-file" "$file" "$detail"

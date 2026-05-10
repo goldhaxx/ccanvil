@@ -4,7 +4,7 @@
 > Work: linear:BTS-394
 > Created: 1778377368
 > Subject: Carve out template suffixes from dangerous-file scan
-> Status: In Progress
+> Status: Complete
 
 ## Summary
 

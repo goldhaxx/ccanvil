@@ -28,24 +28,24 @@
 ## Affected Files
 
 | File | Change |
-|------|--------|
-| `.ccanvil/scripts/security-audit.sh` (`scan_dangerous_files` ~L255) | Modified — post-filter on basename suffix |
+| -- | -- |
+| `.ccanvil/scripts/security-audit.sh` (`scan_dangerous_files` \~L255) | Modified — post-filter on basename suffix |
 | `hub/tests/security-audit.bats` | Modified — add 4-6 regression tests covering AC-1/2/3/4/5 |
 
 ## Dependencies
 
-- **Requires:** none — self-contained substrate fix.
-- **Blocked by:** none.
+* **Requires:** none — self-contained substrate fix.
+* **Blocked by:** none.
 
 ## Out of Scope
 
-- Other false-positive surfaces in `security-audit.sh` (BTS-395 — email regex on URI strings — handled separately).
-- Generalizing the template-suffix carve-out beyond `.env.*` (e.g., to a global "skip files ending in `.example`/`.template`/`.sample`" filter). Keep the carve-out narrow to the `\.env\.` pattern's documented false-positive surface; broader generalization can be a follow-up if more cases surface.
-- Removing existing downstream `.env.example::dangerous-file::` allowlist entries from individual nodes — out-of-scope coordination work; the entries are harmless after the fix and can be cleaned up at each node's discretion.
+* Other false-positive surfaces in `security-audit.sh` (BTS-395 — email regex on URI strings — handled separately).
+* Generalizing the template-suffix carve-out beyond `.env.*` (e.g., to a global "skip files ending in `.example`/`.template`/`.sample`" filter). Keep the carve-out narrow to the `\.env\.` pattern's documented false-positive surface; broader generalization can be a follow-up if more cases surface.
+* Removing existing downstream `.env.example::dangerous-file::` allowlist entries from individual nodes — out-of-scope coordination work; the entries are harmless after the fix and can be cleaned up at each node's discretion.
 
 ## Implementation Notes
 
-- Implementation pattern: post-filter in `scan_dangerous_files` after the `grep -E "$pattern"` matches arrive. Per the ticket's analysis, `grep -E` does not support negative lookahead, so a regex-only fix isn't viable; the post-filter is simpler and easier to test.
-- Suggested shape: after `grep -E "$pattern"` returns a candidate `$file`, apply `case "$file" in *.example|*.template|*.sample) continue ;; esac` before the `is_allowlisted` / `add_finding` block. Keeps the dangerous-extensions list intact (still authoritative) and adds one cheap basename-suffix check per match.
-- Manifest impact: `scan_dangerous_files` already has a `# @manifest` block at the function level (verify); update its `purpose:` line if the carve-out behavior is documented there. No new entry-point or side-effect to declare.
-- Test design: add fixtures under existing `# Sensitive files` section in `security-audit.bats`. Mirror the shape of "detects tracked .env file" test (line 101) — create the fixture file, `git add && commit`, run audit, assert exit code + grep output. RED-then-GREEN: each test must FAIL on the unmodified script before the carve-out lands.
+* Implementation pattern: post-filter in `scan_dangerous_files` after the `grep -E "$pattern"` matches arrive. Per the ticket's analysis, `grep -E` does not support negative lookahead, so a regex-only fix isn't viable; the post-filter is simpler and easier to test.
+* Suggested shape: after `grep -E "$pattern"` returns a candidate `$file`, apply `case "$file" in *.example|*.template|*.sample) continue ;; esac` before the `is_allowlisted` / `add_finding` block. Keeps the dangerous-extensions list intact (still authoritative) and adds one cheap basename-suffix check per match.
+* Manifest impact: `scan_dangerous_files` already has a `# @manifest` block at the function level (verify); update its `purpose:` line if the carve-out behavior is documented there. No new entry-point or side-effect to declare.
+* Test design: add fixtures under existing `# Sensitive files` section in `security-audit.bats`. Mirror the shape of "detects tracked .env file" test (line 101) — create the fixture file, `git add && commit`, run audit, assert exit code + grep output. RED-then-GREEN: each test must FAIL on the unmodified script before the carve-out lands.

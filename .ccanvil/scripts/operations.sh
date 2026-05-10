@@ -938,9 +938,12 @@ external_adapter() {
 # side-effect: reads-config-files
 # failure-mode: unknown-operation | exit=1 | visible=stderr-ERROR-unknown-operation | mitigation=use-documented-op-name
 # failure-mode: missing-provider-config | exit=1 | visible=stderr-ERROR-no-entry-in-integrations-providers | mitigation=add-provider-config
+# failure-mode: stale-substrate-emit | exit=1 | visible=stderr-ERROR-stale-substrate-with-pull-recipe | mitigation=run-ccanvil-sync.sh-pull-OR-ALLOW_STALE_SUBSTRATE=1-prefix
 # contract: explicit-prefix-overrides-routing
 # contract: work-ticket-backlog-groups-inherit-idea-routing
+# contract: env-prefix-bypass-via-ALLOW_STALE_SUBSTRATE=1
 # anchor: BTS-246 (manifest seed)
+# anchor: BTS-419 (substrate-staleness drift-guard failure-mode)
 cmd_resolve() {
   # @side-effect: reads-config-files
   local op="$1"
@@ -1019,6 +1022,11 @@ cmd_resolve() {
   local mechanism
   mechanism=$(echo "$provider_config" | jq -r '.mechanism // "mcp"')
 
+  # @failure-mode: stale-substrate-emit
+  # BTS-419: external_adapter → linear_mcp_adapter → linear_assert_project_id_emitted
+  # may exit 1 with stderr ERROR when project_id is configured but the resolved
+  # command lacks --project-id. ALLOW_STALE_SUBSTRATE=1 turns the hard-fail into
+  # a single WARN + passthrough.
   external_adapter "$op" "$routed_provider" "$mechanism" "$provider_config" "$OP_ARGS"
 }
 

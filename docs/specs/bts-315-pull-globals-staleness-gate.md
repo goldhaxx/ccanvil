@@ -4,7 +4,7 @@
 > Work: linear:BTS-315
 > Created: 1778516248
 > Subject: pull-globals staleness gate
-> Status: In Progress
+> Status: Complete
 
 ## Summary
 

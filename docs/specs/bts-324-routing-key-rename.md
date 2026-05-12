@@ -4,7 +4,7 @@
 > Work: linear:BTS-324
 > Created: 1778541168
 > Subject: routing-key rename heal
-> Status: In Progress
+> Status: Complete
 
 ## Summary
 

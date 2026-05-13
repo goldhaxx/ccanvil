@@ -61,11 +61,13 @@ _synthetic_hub_without_template() {
 
 @test "AC-1: template carries all 5 placeholders line-leading" {
   local tpl="$HUB_ROOT/.ccanvil/templates/CLAUDE.md.fresh"
-  grep -qx '# \[Project Name\]' "$tpl"
-  grep -qx '\[One-line description.\]' "$tpl"
-  grep -qx '\[Tech Stack TBD\]' "$tpl"
-  grep -qx '\[Commands TBD\]' "$tpl"
-  grep -qx '\[Architecture TBD\]' "$tpl"
+  # Use fixed-string grep (-F) to avoid BRE-dot escape footguns; each line
+  # must exactly match the placeholder literal.
+  grep -qxF '# [Project Name]' "$tpl"
+  grep -qxF '[One-line description.]' "$tpl"
+  grep -qxF '[Tech Stack TBD]' "$tpl"
+  grep -qxF '[Commands TBD]' "$tpl"
+  grep -qxF '[Architecture TBD]' "$tpl"
 }
 
 @test "AC-1: template has exactly one HUB-MANAGED-START delimiter" {

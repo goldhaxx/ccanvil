@@ -32,7 +32,7 @@ Each criterion is independently testable. Binary pass/fail.
 ## Affected Files
 
 | File | Change |
-|------|--------|
+| -- | -- |
 | `.ccanvil/scripts/docs-check.sh` | New `cmd_test_suite_run` function + dispatch case + manifest |
 | `.claude/commands/pr.md` | Step 2 invocation rewritten to dispatcher |
 | `.ccanvil/guide/configuration.md` | New "Hub describes behavior" section |
@@ -41,24 +41,24 @@ Each criterion is independently testable. Binary pass/fail.
 
 ## Dependencies
 
-- **Requires:** existing `bats-report.sh` (BTS-118), `docs-check.sh` umbrella, module-manifest substrate (BTS-239).
-- **Blocked by:** nothing.
+* **Requires:** existing `bats-report.sh` (BTS-118), `docs-check.sh` umbrella, module-manifest substrate (BTS-239).
+* **Blocked by:** nothing.
 
 ## Out of Scope
 
-- Rewriting `.claude/rules/tdd.md` body to remove `bats-report.sh` references (captured as follow-up).
-- Migrating `.claude/skills/stasis/SKILL.md` line 131 (`bash .ccanvil/scripts/bats-report.sh --parallel`) to the dispatcher (captured as follow-up — `/stasis` only reports counts, lower urgency than `/pr`'s gate).
-- Implementing pytest / vitest / jest / go dispatchers — explicit `not-yet-implemented` error is the contract.
-- Expanding `module-manifest.sh`'s `LEAK_LITERALS` rule-vocabulary-leak guard to enforce on more tokens.
-- Mirroring the dispatcher pattern to other tooling axes (linter, formatter, package manager). Test-suite is the highest-leverage first instance; others follow if friction surfaces.
+* Rewriting `.claude/rules/tdd.md` body to remove `bats-report.sh` references (captured as follow-up).
+* Migrating `.claude/skills/stasis/SKILL.md` line 131 (`bash .ccanvil/scripts/bats-report.sh --parallel`) to the dispatcher (captured as follow-up — `/stasis` only reports counts, lower urgency than `/pr`'s gate).
+* Implementing pytest / vitest / jest / go dispatchers — explicit `not-yet-implemented` error is the contract.
+* Expanding `module-manifest.sh`'s `LEAK_LITERALS` rule-vocabulary-leak guard to enforce on more tokens.
+* Mirroring the dispatcher pattern to other tooling axes (linter, formatter, package manager). Test-suite is the highest-leverage first instance; others follow if friction surfaces.
 
 ## Implementation Notes
 
-- Follow the same shape as existing `cmd_*` functions in `docs-check.sh` (e.g., `cmd_lifecycle_state`). Read-flag pattern via the standard `--project-dir` resolver.
-- Provider resolution: prefer explicit `test-provider`. Fall back to `stacks[0]` (e.g., `["bats"]` → bats). Fall back to literal `"bats"` default. This matches the operator's mental model from the BTS-460 ticket *and* respects existing `stacks: ["bats"]` declarations.
-- Use the `LINEAR_QUERY_OVERRIDE`-style env-var pattern (`BATS_REPORT_OVERRIDE`) to make `hub/tests/test-suite-run.bats` testable without actually invoking the bats suite. Stub a fixture script; dispatcher invokes the override when set.
-- Manifest `failure-mode: unimplemented-provider` with matching inline `# @failure-mode: unimplemented-provider` marker at the die-site (BTS-257 Layer 3 deterministic gate).
-- Doc-pattern section in `.ccanvil/guide/configuration.md` should explicitly call out the inventory of leak sites as captured follow-ups (so future contributors know the scope of remaining work without re-discovering it).
+* Follow the same shape as existing `cmd_*` functions in `docs-check.sh` (e.g., `cmd_lifecycle_state`). Read-flag pattern via the standard `--project-dir` resolver.
+* Provider resolution: prefer explicit `test-provider`. Fall back to `stacks[0]` (e.g., `["bats"]` → bats). Fall back to literal `"bats"` default. This matches the operator's mental model from the BTS-460 ticket *and* respects existing `stacks: ["bats"]` declarations.
+* Use the `LINEAR_QUERY_OVERRIDE`-style env-var pattern (`BATS_REPORT_OVERRIDE`) to make `hub/tests/test-suite-run.bats` testable without actually invoking the bats suite. Stub a fixture script; dispatcher invokes the override when set.
+* Manifest `failure-mode: unimplemented-provider` with matching inline `# @failure-mode: unimplemented-provider` marker at the die-site (BTS-257 Layer 3 deterministic gate).
+* Doc-pattern section in `.ccanvil/guide/configuration.md` should explicitly call out the inventory of leak sites as captured follow-ups (so future contributors know the scope of remaining work without re-discovering it).
 
 <!-- NODE-SPECIFIC-START -->
 <!-- Add project-specific content below this line. -->

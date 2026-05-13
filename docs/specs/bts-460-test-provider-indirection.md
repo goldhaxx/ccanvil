@@ -4,7 +4,7 @@
 > Work: linear:BTS-460
 > Created: 1778687980
 > Subject: Test-provider indirection: /pr dispatcher reads node config
-> Status: In Progress
+> Status: Complete
 
 ## Summary
 

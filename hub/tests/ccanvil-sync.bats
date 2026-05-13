@@ -92,6 +92,30 @@ Node identity here.
 Hub methodology here.
 HUBEOF
 
+  # BTS-327: fresh-mode CLAUDE.md template wedge.
+  # cmd_init_preflight requires this file when project_mode == "fresh"; the
+  # production hub ships it, so synthetic test hubs must too.
+  cat > "$HUB/.ccanvil/templates/CLAUDE.md.fresh" <<'HUBEOF'
+# [Project Name]
+
+[One-line description.]
+
+## Tech Stack
+[Tech Stack TBD]
+
+## Commands
+[Commands TBD]
+
+## Architecture
+[Architecture TBD]
+
+<!-- HUB-MANAGED-START -->
+
+## Workflow
+
+Hub methodology here.
+HUBEOF
+
   # Copy the real sync script to the hub (so bootstrap doesn't fire on every test)
   cp "$SCRIPT" "$HUB/.ccanvil/scripts/ccanvil-sync.sh"
 
@@ -1799,10 +1823,18 @@ EOF
   [ "$status" -eq 0 ]
   [ -f "$FRESH/.ccanvil/ccanvil.lock" ]
 
-  # All files should be clean (since they were just copied from hub)
+  # All files should be clean — EXCEPT CLAUDE.md, which BTS-327 sources from
+  # .ccanvil/templates/CLAUDE.md.fresh in fresh-mode and intentionally differs
+  # from the hub root CLAUDE.md (different node section). Subsequent
+  # /ccanvil-pull section-merges the hub-managed half to keep it in sync.
   local modified
-  modified=$(jq '[.files[] | select(.status != "clean")] | length' "$FRESH/.ccanvil/ccanvil.lock")
+  modified=$(jq '[.files | to_entries[] | select(.value.status != "clean" and .key != "CLAUDE.md")] | length' "$FRESH/.ccanvil/ccanvil.lock")
   [ "$modified" -eq 0 ]
+
+  # CLAUDE.md is expected to be "modified" against hub on fresh-mode init.
+  local claude_status
+  claude_status=$(jq -r '.files."CLAUDE.md".status' "$FRESH/.ccanvil/ccanvil.lock")
+  [ "$claude_status" = "modified" ]
 
   # Project should be registered (keyed by UUID)
   local fresh_uuid

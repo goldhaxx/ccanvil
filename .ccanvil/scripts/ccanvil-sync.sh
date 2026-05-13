@@ -673,6 +673,7 @@ detect_project_mode() {
 # input: positional <hub-path>
 # input: --stack <id> (repeatable; also reads stacks[] from .claude/ccanvil.json)
 # output: stdout JSON {project_mode, summary{conflicts, auto, total}, plan[]}
+# output: plan[] entries may carry an optional hub_source field (BTS-327) — relative path the apply step uses to override the default $dist_root/$file source resolution
 # output: exit-codes 0 ok, 1 hub-not-found
 # caller: cmd_retrofit_check
 # caller: global-commands/ccanvil-init.md
@@ -685,9 +686,12 @@ detect_project_mode() {
 # side-effect: pure-no-mutations
 # failure-mode: hub-not-found | exit=1 | visible=stderr-die-Hub-not-found-at | mitigation=pass-correct-hub-path
 # failure-mode: missing-positional-hub | exit=1 | visible=stderr-Usage | mitigation=supply-hub-path
+# failure-mode: fresh-mode-template-missing | exit=1 | visible=stderr-die-fresh-mode-CLAUDE.md-template-not-found | mitigation=restore-.ccanvil/templates/CLAUDE.md.fresh
 # contract: read-only-classification
 # contract: emits-stable-json-shape-on-empty-plan
+# contract: fresh-mode-CLAUDE.md-resolves-via-hub_source-override (BTS-327)
 # anchor: BTS-243 (manifest seed)
+# anchor: BTS-327 (hub_source field + fresh-mode CLAUDE.md template)
 cmd_init_preflight() {
   # @failure-mode: missing-positional-hub
   # @side-effect: pure-no-mutations
@@ -737,6 +741,25 @@ cmd_init_preflight() {
   classify_file() {
     local hub_file="$1"
     local local_file="$2"
+
+    # BTS-327: fresh-mode CLAUDE.md uses a dedicated placeholder template
+    # (.ccanvil/templates/CLAUDE.md.fresh) instead of the hub's actual
+    # CLAUDE.md, whose pre-delimiter content is hub-specific operator prose.
+    # Guard: when the template is missing from the hub, fail fast so the
+    # broken pre-fix behavior (hub identity prose becoming new-project node
+    # content) can't silently regress.
+    if [[ "$project_mode" == "fresh" && "$local_file" == "CLAUDE.md" ]]; then
+      local fresh_tpl="$dist_root/.ccanvil/templates/CLAUDE.md.fresh"
+      # @failure-mode: fresh-mode-template-missing
+      [[ -f "$fresh_tpl" ]] || die "fresh-mode CLAUDE.md template not found at $fresh_tpl"
+      # Emit a plan entry that overrides the hub source to the template.
+      # cmd_init_apply consumes the hub_source field to resolve the cp source
+      # without changing the copy action.
+      plan=$(echo "$plan" | jq --arg f "$local_file" --arg hs ".ccanvil/templates/CLAUDE.md.fresh" \
+        '. + [{"file": $f, "source": "hub-only", "recommended_action": "copy", "hub_source": $hs, "reason": "Fresh-mode CLAUDE.md uses placeholder template"}]')
+      seen_files+=("$local_file")
+      return
+    fi
 
     if [[ ! -f "$local_file" ]]; then
       # Hub-only: no local file exists
@@ -917,7 +940,9 @@ cmd_init_preflight() {
 # contract: applies-recommended-action-verbatim
 # contract: continues-past-per-entry-errors
 # contract: emits-summary-on-completion
+# contract: hub_source-field-on-plan-entry-overrides-default-source-resolution (BTS-327)
 # anchor: BTS-243 (manifest seed)
+# anchor: BTS-327 (hub_source field consumption for fresh-mode CLAUDE.md template)
 cmd_init_apply() {
   # @failure-mode: hub-source-missing-per-entry
   # @failure-mode: section-merge-failure-per-entry
@@ -951,16 +976,24 @@ cmd_init_apply() {
 
   local i=0
   while [[ $i -lt $entry_count ]]; do
-    local file action source
+    local file action source hub_source_field
     file=$(jq -r "$plan_expr | .[$i].file" "$plan_file")
     action=$(jq -r "$plan_expr | .[$i].recommended_action" "$plan_file")
     source=$(jq -r "$plan_expr | .[$i].source // empty" "$plan_file")
+    # BTS-327: plan entries may carry an explicit hub_source override
+    # (e.g., fresh-mode CLAUDE.md → .ccanvil/templates/CLAUDE.md.fresh).
+    hub_source_field=$(jq -r "$plan_expr | .[$i].hub_source // empty" "$plan_file")
 
     # Resolve hub source file path
     local hub_file=""
 
+    # hub_source override wins over every other resolution (BTS-327).
+    if [[ -n "$hub_source_field" ]]; then
+      hub_file="$dist_root/$hub_source_field"
+    fi
+
     # Check stack source first (AC-6)
-    if [[ "$source" == stack:* ]]; then
+    if [[ -z "$hub_file" && "$source" == stack:* ]]; then
       local stack_id="${source#stack:}"
       local stack_manifest="$dist_root/hub/stacks/$stack_id/manifest.json"
       if [[ -f "$stack_manifest" ]]; then

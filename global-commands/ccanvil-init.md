@@ -113,6 +113,8 @@ Replace `[Project Name]` and `[One-line description.]` placeholders in:
 - CONTRIBUTING.md (title).
 Also replace `[owner]/[repo]` in README.md with the project directory name.
 
+In `fresh` mode the placeholders are guaranteed to be present — `init-apply` resolves `CLAUDE.md` via `.ccanvil/templates/CLAUDE.md.fresh` (BTS-327), which carries `[Project Name]`, `[One-line description.]`, `[Tech Stack TBD]`, `[Commands TBD]`, and `[Architecture TBD]` line-leading. In `mature-repo` / `partial-ccanvil` modes the file is section-merged with existing node content; if those placeholders aren't present, the sed pass is a no-op (existing node content is preserved as authored).
+
 ## Step 9 — Guide generation
 
 Generate the node-specific section of `.ccanvil/guide/index.md`:

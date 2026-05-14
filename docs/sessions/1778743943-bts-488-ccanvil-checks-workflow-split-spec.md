@@ -21,7 +21,7 @@ Phase A.5 of the CI fire-drill. BTS-482 fixed the lifecycle-docs CI design bug o
 - [ ] **AC-1:** New file `.ccanvil/templates/github/workflows/ccanvil-checks.yml` exists with structure: `name: ccanvil-checks`, `on:` declares `pull_request: { branches: [main], types: [opened, synchronize, reopened, ready_for_review] }`, jobs include `lifecycle-docs:` (with BTS-482 `if: github.event_name == 'pull_request' && github.event.pull_request.draft == false`) and `security:`.
 - [ ] **AC-2:** Hub's existing `.ccanvil/templates/github/workflows/ci.yml` is reduced to ONLY the `test:` job (placeholder `echo TODO`). Strings `lifecycle-docs:` and `security:` no longer appear in this file.
 - [ ] **AC-3:** `INIT_GITHUB_TEMPLATES` array in `.ccanvil/scripts/ccanvil-sync.sh` includes the new mapping `workflows/ccanvil-checks.yml:.github/workflows/ccanvil-checks.yml`.
-- [ ] **AC-4:** New substrate verb `cmd_heal_ci_workflows` in `ccanvil-sync.sh` accepts `--dry-run` flag, iterates registered nodes in `.ccanvil/registry.json`, skips entries whose path doesn't exist (the same predicate `cmd_broadcast` uses today). For each reachable node it: copies hub's `ccanvil-checks.yml` to node's `.github/workflows/ccanvil-checks.yml` (creating directories as needed), upserts a lockfile entry with `origin: "hub", hub_hash: <sha256>, local_hash: <sha256>, status: "clean", sync: "tracked"`, strips `lifecycle-docs:` and `security:` job blocks from node's existing `.github/workflows/ci.yml` (preserving the `test:` job and any other node-added jobs), and commits via `git -C <path> commit -m "chore(ccanvil-checks): split hub-managed CI gates"` (no push — operator pushes manually after review).
+- [ ] **AC-4:** New substrate verb `cmd_heal_ci_workflows` in `ccanvil-sync.sh` accepts `--dry-run` flag, iterates registered nodes in `.ccanvil/registry.json`, skips entries whose path doesn't exist (the same predicate `cmd_broadcast` uses today). For each reachable node it: copies hub's `ccanvil-checks.yml` to node's `.github/workflows/ccanvil-checks.yml` (creating directories as needed), upserts a lockfile entry with `origin: "hub", hub_hash: <sha256>, local_hash: <sha256>, status: "clean", sync: "tracked"`, strips `lifecycle-docs:` and `security:` job blocks from node's existing `.github/workflows/ci.yml` (preserving the `test:` job and any other node-added jobs), and commits via `git -C <path> commit -m "chore(ccanvil-checks): split hub-managed CI gates (BTS-488)"` (no push — operator pushes manually after review).
 - [ ] **AC-5 (idempotency):** Re-running `heal-ci-workflows` on an already-healed node is a no-op — no file write (because hashes match), no lockfile mutation, no commit (because git status is clean). Verified in bats by running the verb twice on a fixture node and asserting `git rev-parse HEAD` is unchanged between runs.
 - [ ] **AC-6 (preservation):** When the node's existing `ci.yml` contains a customized `test:` job (e.g. additional steps beyond the hub placeholder), the heal preserves the `test:` job verbatim and ONLY strips `lifecycle-docs:` + `security:` blocks. Verified in bats by seeding a fixture with `test:` containing `Install bats` + `bats tests/` steps and asserting they survive heal.
 - [ ] **AC-7 (graceful no-ci.yml):** When a node's `.github/workflows/ci.yml` doesn't exist, heal writes `ccanvil-checks.yml` cleanly and skips the strip phase. No error.
@@ -32,26 +32,26 @@ Phase A.5 of the CI fire-drill. BTS-482 fixed the lifecycle-docs CI design bug o
 ## Affected Files
 
 | File | Change |
-|------|--------|
+| -- | -- |
 | `.ccanvil/templates/github/workflows/ccanvil-checks.yml` | New — hub-managed gate workflow with draft-guard + security |
 | `.ccanvil/templates/github/workflows/ci.yml` | Modified — reduced to `test:` job placeholder only |
-| `.ccanvil/scripts/ccanvil-sync.sh` | Modified — adds `cmd_heal_ci_workflows` (~100 lines), updates `INIT_GITHUB_TEMPLATES`, registers main dispatch |
+| `.ccanvil/scripts/ccanvil-sync.sh` | Modified — adds `cmd_heal_ci_workflows` (\~100 lines), updates `INIT_GITHUB_TEMPLATES`, registers main dispatch |
 | `hub/tests/ccanvil-checks-workflow.bats` | New — yaml structure assertions on new + reduced templates |
 | `hub/tests/heal-ci-workflows.bats` | New — substrate-verb behavior + idempotency + preservation + error-path tests |
 | `.ccanvil/manifest-allowlist.txt` | Modified — register `cmd_heal_ci_workflows` |
 
 ## Dependencies
 
-- **Requires:** existing `cmd_broadcast`'s node-iteration pattern (path-exists predicate, registry walk)
-- **Requires:** existing lockfile shape (`origin`, `hub_hash`, `local_hash`, `status`, `sync`) — same shape as every other tracked file entry
-- **Blocked by:** nothing
+* **Requires:** existing `cmd_broadcast`'s node-iteration pattern (path-exists predicate, registry walk)
+* **Requires:** existing lockfile shape (`origin`, `hub_hash`, `local_hash`, `status`, `sync`) — same shape as every other tracked file entry
+* **Blocked by:** nothing
 
 ## Out of Scope
 
-- Fix init-time lockfile registration bug (BTS-489, separate ticket). This spec heals existing nodes; init-time fix is upstream.
-- Hub-level `.gitignore` distribution for credential-file patterns (BTS-490, separate ticket).
-- Section-merge style yaml editing for the test job (we strip whole job blocks; we never merge). Yaml-aware editing is out of scope — heal uses anchored sed/awk patterns.
-- Auto-push from heal. Heal commits but operator runs `git -C <path> push` (or aggregate via a follow-up substrate) to keep the operator in the loop.
+* Fix init-time lockfile registration bug (BTS-489, separate ticket). This spec heals existing nodes; init-time fix is upstream.
+* Hub-level `.gitignore` distribution for credential-file patterns (BTS-490, separate ticket).
+* Section-merge style yaml editing for the test job (we strip whole job blocks; we never merge). Yaml-aware editing is out of scope — heal uses anchored sed/awk patterns.
+* Auto-push from heal. Heal commits but operator runs `git -C <path> push` (or aggregate via a follow-up substrate) to keep the operator in the loop.
 
 ## Implementation Notes
 
@@ -134,13 +134,13 @@ This preserves the `test:` job (and any other custom job) since we only skip whi
 
 **Test patterns to follow:**
 
-- `hub/tests/ci-template-lifecycle-docs.bats` (BTS-482) for yaml grep-assertions
-- `hub/tests/broadcast-resolve-auto.bats` for fixture-node iteration patterns
-- `hub/tests/test-suite-run.bats` (BTS-460) for manifest registration pattern
+* `hub/tests/ci-template-lifecycle-docs.bats` (BTS-482) for yaml grep-assertions
+* `hub/tests/broadcast-resolve-auto.bats` for fixture-node iteration patterns
+* `hub/tests/test-suite-run.bats` (BTS-460) for manifest registration pattern
 
 **Manifest discipline:**
 
-- `cmd_heal_ci_workflows` needs a `# @manifest` block per `.ccanvil/templates/manifest.md`. Registration in `.ccanvil/manifest-allowlist.txt` required.
+* `cmd_heal_ci_workflows` needs a `# @manifest` block per `.ccanvil/templates/manifest.md`. Registration in `.ccanvil/manifest-allowlist.txt` required.
 
 <!-- NODE-SPECIFIC-START -->
 <!-- Add project-specific content below this line. -->

@@ -4,7 +4,7 @@
 > Work: linear:BTS-488
 > Created: 1778728052
 > Subject: Split hub-managed CI checks into own workflow + heal across nodes
-> Status: In Progress
+> Status: Complete
 
 ## Summary
 

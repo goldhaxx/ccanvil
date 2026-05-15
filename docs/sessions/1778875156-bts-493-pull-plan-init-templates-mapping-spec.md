@@ -32,26 +32,27 @@
 ## Affected Files
 
 | File | Change |
-|------|--------|
-| `.ccanvil/scripts/ccanvil-sync.sh` | Modified: new helper + three call-site rewrites at lines ~1998, ~2011, ~2157, ~2253 |
+| -- | -- |
+| `.ccanvil/scripts/ccanvil-sync.sh` | Modified: new helper + three call-site rewrites at lines \~1998, \~2011, \~2157, \~2253 |
 | `.ccanvil/manifest-allowlist.txt` | Modified: add `_resolve_hub_relpath_for_lockfile_key` entry |
 | `hub/tests/pull-plan-init-templates-mapping.bats` | New: fixture + 8 tests covering AC-2..AC-8 |
 
 ## Dependencies
 
-- **Requires:** `INIT_GITHUB_TEMPLATES` array (ccanvil-sync.sh:62-68, present today) and `cmd_heal_ci_workflows` (BTS-488, shipped) — both prerequisites are in main.
-- **Blocked by:** Nothing.
+* **Requires:** `INIT_GITHUB_TEMPLATES` array (ccanvil-sync.sh:62-68, present today) and `cmd_heal_ci_workflows` (BTS-488, shipped) — both prerequisites are in main.
+* **Blocked by:** Nothing.
 
 ## Out of Scope
 
-- BTS-489 (init-time lockfile registration gap for github templates) — orthogonal upstream bug; BTS-488's heal currently papers over it for `ccanvil-checks.yml` only. Whether to extend lockfile registration to all INIT_GITHUB_TEMPLATES entries at init time is BTS-489's concern, not this one.
-- BTS-490 (hub-level credential `.gitignore` defaults) — unrelated.
-- Forward fleet heal — every node already has the correct lockfile entry from BTS-488; this fix is forward-compat. No re-broadcast required after merge.
-- `cmd_init`'s classify-file walk for INIT_GITHUB_TEMPLATES (lines 839-846) — uses `classify_file "$hub_file" "$dst"` with explicit hub_file from `github_tpl_root`; not affected by this bug.
+* BTS-489 (init-time lockfile registration gap for github templates) — orthogonal upstream bug; BTS-488's heal currently papers over it for `ccanvil-checks.yml` only. Whether to extend lockfile registration to all INIT_GITHUB_TEMPLATES entries at init time is BTS-489's concern, not this one.
+* BTS-490 (hub-level credential `.gitignore` defaults) — unrelated.
+* Forward fleet heal — every node already has the correct lockfile entry from BTS-488; this fix is forward-compat. No re-broadcast required after merge.
+* `cmd_init`'s classify-file walk for INIT_GITHUB_TEMPLATES (lines 839-846) — uses `classify_file "$hub_file" "$dst"` with explicit hub_file from `github_tpl_root`; not affected by this bug.
 
 ## Implementation Notes
 
-- **Helper shape (bash 3.2 safe):**
+* **Helper shape (bash 3.2 safe):**
+
   ```bash
   _resolve_hub_relpath_for_lockfile_key() {
     local key="$1"
@@ -65,10 +66,10 @@
     echo "$key"
   }
   ```
-- **Call-site refactor pattern:** replace `local hub_file="$hub_source/$file"` with `local hub_file="$hub_source/$(_resolve_hub_relpath_for_lockfile_key "$file")"` at the three identified sites (cmd_pull_plan:1998, cmd_pull_auto:2157, cmd_pull_apply:2253). The line-2011 `file_hash "$hub_file"` already consumes the resolved variable — no change needed there.
-- **Test fixture:** mimic the unifi-toolbox shape — tmpdir hub with `.ccanvil/templates/github/workflows/ccanvil-checks.yml` populated, tmpdir node with `.ccanvil/ccanvil.lock` containing the entry `.github/workflows/ccanvil-checks.yml` mapped to `origin:hub, hub_hash:<H>, local_hash:<H>, status:clean`. Run pull-plan; assert empty plan (clean). Mutate hub template content; re-run; assert single `auto-update` entry.
-- **Bash 3.2 verification:** the project already runs CI on bash 3.2.57(1) (per `bash --version` on this host). No new assertion needed; the existing CI surface covers it.
-- **Live-API risk:** none — pure filesystem and lockfile mutations.
+* **Call-site refactor pattern:** replace `local hub_file="$hub_source/$file"` with `local hub_file="$hub_source/$(_resolve_hub_relpath_for_lockfile_key "$file")"` at the three identified sites (cmd_pull_plan:1998, cmd_pull_auto:2157, cmd_pull_apply:2253). The line-2011 `file_hash "$hub_file"` already consumes the resolved variable — no change needed there.
+* **Test fixture:** mimic the unifi-toolbox shape — tmpdir hub with `.ccanvil/templates/github/workflows/ccanvil-checks.yml` populated, tmpdir node with `.ccanvil/ccanvil.lock` containing the entry `.github/workflows/ccanvil-checks.yml` mapped to `origin:hub, hub_hash:<H>, local_hash:<H>, status:clean`. Run pull-plan; assert empty plan (clean). Mutate hub template content; re-run; assert single `auto-update` entry.
+* **Bash 3.2 verification:** the project already runs CI on bash 3.2.57(1) (per `bash --version` on this host). No new assertion needed; the existing CI surface covers it.
+* **Live-API risk:** none — pure filesystem and lockfile mutations.
 
 <!-- NODE-SPECIFIC-START -->
 <!-- Add project-specific content below this line. -->

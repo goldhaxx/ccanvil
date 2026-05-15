@@ -4,7 +4,7 @@
 > Work: linear:BTS-493
 > Created: 1778871058
 > Subject: pull-plan / pull-auto / pull-apply resolve INIT_GITHUB_TEMPLATES path
-> Status: In Progress
+> Status: Complete
 
 ## Summary
 

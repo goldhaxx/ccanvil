@@ -4,7 +4,7 @@
 > Work: linear:BTS-494
 > Created: 1778884585
 > Subject: Extend INIT_GITHUB_TEMPLATES helper to cmd_diff + cmd_push_candidates
-> Status: In Progress
+> Status: Complete
 
 ## Summary
 

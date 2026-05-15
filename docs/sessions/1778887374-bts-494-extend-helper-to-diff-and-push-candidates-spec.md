@@ -30,26 +30,26 @@ BTS-493 shipped a bash-3.2-safe helper (`_resolve_hub_relpath_for_lockfile_key`)
 ## Affected Files
 
 | File | Change |
-|------|--------|
-| `.ccanvil/scripts/ccanvil-sync.sh` | Modified: 4 call sites in cmd_diff (lines ~1445/1460/1471/1473) + 1 call site in cmd_push_candidates (line ~2611); 2 @manifest depends-on additions |
+| -- | -- |
+| `.ccanvil/scripts/ccanvil-sync.sh` | Modified: 4 call sites in cmd_diff (lines \~1445/1460/1471/1473) + 1 call site in cmd_push_candidates (line \~2611); 2 @manifest depends-on additions |
 | `hub/tests/diff-push-init-templates-mapping.bats` | New: fixtures + 6 tests covering AC-1 through AC-6 |
 
 ## Dependencies
 
-- **Requires:** `_resolve_hub_relpath_for_lockfile_key` helper (BTS-493, shipped on main as `8fa19dd`). Helper interface is stable and bash-3.2-safe.
-- **Blocked by:** Nothing.
+* **Requires:** `_resolve_hub_relpath_for_lockfile_key` helper (BTS-493, shipped on main as `8fa19dd`). Helper interface is stable and bash-3.2-safe.
+* **Blocked by:** Nothing.
 
 ## Out of Scope
 
-- BTS-489 (init-time lockfile registration gap for github templates) — orthogonal upstream bug; today only `ccanvil-checks.yml` reaches the lockfile via BTS-488's heal.
-- Push direction (`cmd_push_apply` lines 2685/2689) — push targets that ARE `INIT_GITHUB_TEMPLATES` entries don't exist by construction (template entries are hub-owned, not node-promoted); routing those sites through the helper would be incorrect.
-- `scan_hub_files` and the `new files in hub` block of `cmd_pull_plan` (line 2114/2123) — these walk the hub tree directly and emit hub-relative paths, not lockfile-key paths; no helper consultation needed.
+* BTS-489 (init-time lockfile registration gap for github templates) — orthogonal upstream bug; today only `ccanvil-checks.yml` reaches the lockfile via BTS-488's heal.
+* Push direction (`cmd_push_apply` lines 2685/2689) — push targets that ARE `INIT_GITHUB_TEMPLATES` entries don't exist by construction (template entries are hub-owned, not node-promoted); routing those sites through the helper would be incorrect.
+* `scan_hub_files` and the `new files in hub` block of `cmd_pull_plan` (line 2114/2123) — these walk the hub tree directly and emit hub-relative paths, not lockfile-key paths; no helper consultation needed.
 
 ## Implementation Notes
 
-- **Refactor pattern:** at each of the 5 affected lines, replace `"$hub_source/$file"` (or `"$hub_source/$f"`) with `"$hub_source/$(_resolve_hub_relpath_for_lockfile_key "$file")"`. For `cmd_diff`'s specific-file branch, introduce `local hub_file="$hub_source/$(_resolve_hub_relpath_for_lockfile_key "$file")"` once and reuse for the `[[ ! -f ]]` check AND the `diff --unified` invocation (DRY — line 1460 currently re-expands `$hub_source/$file` instead of using `$hub_file`).
-- **Bats fixture pattern:** mirror BTS-493's `hub/tests/pull-plan-init-templates-mapping.bats` setup helpers (`setup_hub_with_template` / `setup_node_with_template_entry` / strict-mode teardown). Use `run --separate-stderr` to isolate stdout for JSON parsing (BTS-493 lesson — `scan_hub_files` empty-array unbound-variable warning to stderr would corrupt JSON-mixed stdout).
-- **Live-API risk:** None — pure filesystem + lockfile mutations.
+* **Refactor pattern:** at each of the 5 affected lines, replace `"$hub_source/$file"` (or `"$hub_source/$f"`) with `"$hub_source/$(_resolve_hub_relpath_for_lockfile_key "$file")"`. For `cmd_diff`'s specific-file branch, introduce `local hub_file="$hub_source/$(_resolve_hub_relpath_for_lockfile_key "$file")"` once and reuse for the `[[ ! -f ]]` check AND the `diff --unified` invocation (DRY — line 1460 currently re-expands `$hub_source/$file` instead of using `$hub_file`).
+* **Bats fixture pattern:** mirror BTS-493's `hub/tests/pull-plan-init-templates-mapping.bats` setup helpers (`setup_hub_with_template` / `setup_node_with_template_entry` / strict-mode teardown). Use `run --separate-stderr` to isolate stdout for JSON parsing (BTS-493 lesson — `scan_hub_files` empty-array unbound-variable warning to stderr would corrupt JSON-mixed stdout).
+* **Live-API risk:** None — pure filesystem + lockfile mutations.
 
 <!-- NODE-SPECIFIC-START -->
 <!-- Add project-specific content below this line. -->

@@ -28,6 +28,11 @@
 # (e.g. "ci.yml template: greps docs/stasis.md (not docs/checkpoint.md)").
 # Not shipping code; gitignored.
 ^\.ccanvil/state/bats-runs\.jsonl:
+# BTS-497 timings snapshot artifact — bats test NAMES include the legacy
+# vocabulary literal because they reference migrate-stasis-artifact tests.
+# Gitignored runtime state, not shipped code.
+^\.ccanvil/state/bts-497-timings-snapshot-[0-9]+\.json:
+^\.ccanvil/state/test-runs\.jsonl:
 
 # --- Tests that exercise the legacy vocabulary ---
 # The scanner, migration, and allowlist tests contain the strings by design.

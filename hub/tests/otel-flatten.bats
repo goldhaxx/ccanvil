@@ -107,6 +107,53 @@ setup() {
   [ "$n2" -eq 5 ]
 }
 
+# =========================================================================
+# Fail-closed + sentinel exit 78 (AC-12c)
+# =========================================================================
+
+@test "AC-12c: missing argument → exit 78 + usage on stderr" {
+  run bash "$FLATTEN"
+  [ "$status" -eq 78 ]
+  echo "$output" | grep -qE "Usage: otel-flatten"
+}
+
+@test "AC-12c: empty argument → exit 78" {
+  run bash "$FLATTEN" ""
+  [ "$status" -eq 78 ]
+}
+
+@test "AC-12c: missing raw-traces.jsonl → exit 78 + actionable stderr" {
+  export OTEL_FLATTEN_INPUT="$BATS_TEST_TMPDIR/nonexistent.jsonl"
+  run bash "$FLATTEN" run-abc
+  [ "$status" -eq 78 ]
+  echo "$output" | grep -qE "ERROR.*raw-traces.*not found.*${BATS_TEST_TMPDIR}/nonexistent.jsonl"
+}
+
+@test "AC-12c: empty raw-traces.jsonl for the given run_id → exit 78" {
+  # Fixture exists and parses, but has no spans for this run_id.
+  run bash "$FLATTEN" run-nonexistent
+  [ "$status" -eq 78 ]
+  echo "$output" | grep -qE "ERROR.*no spans.*run.id.*run-nonexistent"
+}
+
+@test "AC-12c: malformed JSON envelope → exit 78 + actionable stderr" {
+  local bad_input="$BATS_TEST_TMPDIR/bad.jsonl"
+  echo "not valid json {{{" > "$bad_input"
+  export OTEL_FLATTEN_INPUT="$bad_input"
+  run bash "$FLATTEN" run-abc
+  [ "$status" -eq 78 ]
+  echo "$output" | grep -qE "ERROR.*malformed|ERROR.*parse"
+}
+
+@test "AC-12c: empty file at INPUT path → exit 78 (treat as no spans)" {
+  local empty_input="$BATS_TEST_TMPDIR/empty.jsonl"
+  : > "$empty_input"
+  export OTEL_FLATTEN_INPUT="$empty_input"
+  run bash "$FLATTEN" run-abc
+  [ "$status" -eq 78 ]
+  echo "$output" | grep -qE "ERROR.*no spans|ERROR.*empty"
+}
+
 @test "AC-10: schema_version field value is v1.0.0 on every record" {
   bash "$FLATTEN" run-abc
   local bad

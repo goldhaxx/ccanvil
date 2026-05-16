@@ -30,6 +30,51 @@ RUN_ID="$1"
 INPUT="${OTEL_FLATTEN_INPUT:-.ccanvil/observability/raw-traces.jsonl}"
 OUTPUT="${OTEL_FLATTEN_OUTPUT:-.ccanvil/state/test-runs.jsonl}"
 
+# AC-12c: fail-closed pre-flight checks. Each exits 78 (sysexits EX_CONFIG)
+# with an actionable stderr message — observability-layer failures are
+# distinct from test failures and must surface, never silently degrade.
+
+# (1) INPUT must exist.
+if [[ ! -f "$INPUT" ]]; then
+  echo "ERROR: raw-traces.jsonl not found at $INPUT" >&2
+  echo "Hint: start the OTel Collector via .ccanvil/observability/docker-compose.yml" >&2
+  exit 78
+fi
+
+# (2) INPUT must be parseable JSONL. Validate + count matches in one shot.
+matched=$(jq -s --arg RUN_ID "$RUN_ID" '
+  [
+    .[]
+    | .resourceSpans[]?.scopeSpans[]?.spans[]?
+    | select(
+        (
+          (.attributes // [])
+          | map({(.key): (.value.stringValue // .value.intValue // .value.doubleValue // .value.boolValue)})
+          | add // {}
+        )["run.id"] == $RUN_ID
+      )
+  ] | length
+' "$INPUT" 2>&1) || {
+  echo "ERROR: malformed JSON envelope in $INPUT — could not parse" >&2
+  echo "jq stderr: $matched" >&2
+  exit 78
+}
+
+# (3) Empty file (after parse — JSONL with zero lines is technically valid
+# but carries no spans). Treat as no-spans case.
+if [[ ! -s "$INPUT" ]]; then
+  echo "ERROR: empty raw-traces.jsonl at $INPUT — no spans for run.id=$RUN_ID" >&2
+  exit 78
+fi
+
+# (4) No spans matching the requested run_id.
+if [[ "${matched:-0}" -eq 0 ]]; then
+  echo "ERROR: no spans for run.id=$RUN_ID in $INPUT" >&2
+  echo "Hint: confirm the bats helper emitted spans for this run, and that" >&2
+  echo "      the Collector flushed before this flatten step ran." >&2
+  exit 78
+fi
+
 mkdir -p "$(dirname "$OUTPUT")"
 # Ensure OUTPUT exists so --slurpfile binds to [] rather than erroring.
 touch "$OUTPUT"

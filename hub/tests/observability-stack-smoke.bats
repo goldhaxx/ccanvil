@@ -71,7 +71,7 @@ setup() {
   done
 }
 
-@test "AC-8: otel-collector publishes healthcheckv2 port 13133" {
+@test "AC-8: otel-collector publishes health_check port 13133" {
   local cfg
   cfg=$(docker compose -f "$COMPOSE" config --format=json)
   echo "$cfg" | jq -e '

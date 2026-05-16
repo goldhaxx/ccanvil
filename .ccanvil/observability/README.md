@@ -10,6 +10,11 @@ Schema is runner-neutral (per `SCHEMA.md`) so the same pipeline extends to pytes
 # One-time: install otel-cli (the bats helper invokes it per test).
 brew install equinix-labs/otel-cli/otel-cli
 
+# One-time: pre-create the bind-mount target as a FILE. If absent, Docker
+# auto-creates it as a DIRECTORY, which makes the Collector's fileexporter
+# fail silently and confuses the failure mode at suite-end with exit 78.
+touch .ccanvil/observability/raw-traces.jsonl
+
 # Start the stack (Collector + Tempo + Grafana, all on 127.0.0.1).
 docker compose -f .ccanvil/observability/docker-compose.yml up -d
 
@@ -91,6 +96,8 @@ Useful when iterating on substrate that itself touches the helper, when running 
 **Exit code 78 from bats-report.sh.** Per AC-12d, exit 78 (sysexits.h `EX_CONFIG`) means the post-run `otel-flatten.sh` failed — almost always either (a) the Collector is down so no spans were emitted, or (b) `raw-traces.jsonl` is missing/malformed. Check the stderr line above the exit; usually points at the recovery action.
 
 **Some tests don't appear in Tempo / test-runs.jsonl.** Common causes: commas in test names (the helper sanitizes them to semicolons; if you see commas back, the sanitization broke); test never wired the helper into its setup_file (only the 10-file Phase D sample is instrumented as of BTS-497 — full rollout in BTS-504).
+
+**Healthcheck returns 200 but no spans land in `raw-traces.jsonl`.** Almost certainly the bind-mount footgun: Docker auto-created `raw-traces.jsonl` as a DIRECTORY when the host path was absent at `docker compose up` time. Diagnose with `file .ccanvil/observability/raw-traces.jsonl` — if it says "directory" rather than "empty"/"ASCII text," that's the bug. Fix: `docker compose down`, `rm -rf .ccanvil/observability/raw-traces.jsonl`, `touch .ccanvil/observability/raw-traces.jsonl`, `docker compose up -d`.
 
 **Tempo says `/ready` returns 503.** Normal for ~25s after fresh start. Wait. If persistent, check `docker compose logs tempo` for ingester errors.
 

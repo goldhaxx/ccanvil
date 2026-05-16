@@ -154,8 +154,16 @@ telemetry_teardown() {
     duration_ms=0
   fi
 
+  # KNOWN GAP — bats 1.13.0 does not expose a structured fail-message env
+  # var to teardown(). BATS_TEST_ERROR_EXCERPT was an aspirational name
+  # not defined by the test runner. As shipped, error_excerpt is always
+  # empty on failed spans, which violates the "iff fail" half of AC-10.
+  # Tracked as a follow-up to BTS-497 — proper capture wraps the test
+  # body with stderr redirection, requires per-file wiring beyond what
+  # the Phase D template covers. Pass empty literal explicitly so future
+  # readers don't grep for a non-existent variable.
   local attrs
-  attrs=$(_telemetry_compose_attrs "$outcome" "$duration_ms" "${BATS_TEST_ERROR_EXCERPT:-}")
+  attrs=$(_telemetry_compose_attrs "$outcome" "$duration_ms" "")
 
   # Emit via direct OTLP HTTP. ~5-15 ms per call; well inside AC-7 budget.
   # Failures are non-fatal — never break a test because telemetry hiccupped.

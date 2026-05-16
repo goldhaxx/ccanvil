@@ -21,6 +21,7 @@
 # depends-on: jq
 # side-effect: writes-test-runs-jsonl
 # failure-mode: missing-input | exit=78 | visible=stderr-error | mitigation=start-otel-collector-via-docker-compose
+# failure-mode: input-is-directory | exit=78 | visible=stderr-error | mitigation=down-stack-rm-dir-touch-file-up-stack
 # failure-mode: malformed-input | exit=78 | visible=stderr-error | mitigation=inspect-jq-stderr-and-clear-raw-traces
 # failure-mode: empty-input | exit=78 | visible=stderr-error | mitigation=run-suite-first-then-flatten
 # failure-mode: no-matching-spans | exit=78 | visible=stderr-error | mitigation=confirm-bats-helper-emitted-spans-and-collector-flushed
@@ -55,6 +56,22 @@ OUTPUT="${OTEL_FLATTEN_OUTPUT:-.ccanvil/state/test-runs.jsonl}"
 # AC-12c: fail-closed pre-flight checks. Each exits 78 (sysexits EX_CONFIG)
 # with an actionable stderr message — observability-layer failures are
 # distinct from test failures and must surface, never silently degrade.
+
+# (1a) INPUT path must NOT be a directory. Common footgun: Docker's
+# bind-mount creates the source as a DIRECTORY when the host path is
+# absent at `docker compose up` time. The Collector's fileexporter then
+# fails silently (healthcheck still 200), but no spans ever land here.
+# Diagnose explicitly so the failure self-explains.
+# @failure-mode: input-is-directory
+if [[ -d "$INPUT" ]]; then
+  echo "ERROR: $INPUT exists as a DIRECTORY, not a file" >&2
+  echo "Cause: Docker bind-mount auto-created it because the host path was absent at compose-up time." >&2
+  echo "Fix:   docker compose -f .ccanvil/observability/docker-compose.yml down" >&2
+  echo "       rm -rf $INPUT" >&2
+  echo "       touch $INPUT" >&2
+  echo "       docker compose -f .ccanvil/observability/docker-compose.yml up -d" >&2
+  exit 78
+fi
 
 # (1) INPUT must exist.
 # @failure-mode: missing-input

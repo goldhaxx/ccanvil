@@ -51,7 +51,7 @@ No API, container, or running Collector is required at read time.
 | `runner_kind` | enum (string) | required | `runner.kind` | |
 | `git_sha` | string | required | `git.sha` | |
 | `started_at_unix_nano` | integer | required | OTel span `startTimeUnixNano` | Nanosecond-resolution start; used to order spans within a run. |
-| `duration_ms` | number | required | `test.duration_ms` | Required in the flat schema (always populated on emission at end-of-test); absent only if the upstream span lacked it, in which case the flatten step errors. |
+| `duration_ms` | number | optional | `test.duration_ms` | Bats helper always populates this in practice, but the flatten step drops null/absent fields via `with_entries(select(.value != null))` — so a span emitted without `test.duration_ms` produces a flat record without `duration_ms`, no error. Consumers should defensive-check `if .duration_ms then ...`. Future runners under BTS-499 that emit ungauged spans (e.g., custom test frameworks) will simply omit the field rather than fail the pipeline. |
 | `error_excerpt` | string | optional | `test.error_excerpt` | Present iff `test_outcome=fail`; absent on pass/skip. |
 | `schema_version` | string | required | n/a | Required on every record. Value: `"v1.0.0"`. Consumers fail-fast on version mismatch — older readers must reject newer records they don't understand, rather than silently drop fields. |
 

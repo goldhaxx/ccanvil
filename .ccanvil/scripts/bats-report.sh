@@ -18,6 +18,10 @@
 # input: env BATS_REPORT_HAS_PARALLEL (=0 forces no-parallel branch even when parallel is installed; testability hook)
 # input: env BATS_REPORT_PERF_CORES (override the perf-core count probed via sysctl; testability + cross-host pinning)
 # input: env BATS_REPORT_STATE_DIR (override the directory where bats-runs.jsonl is appended; defaults to .ccanvil/state)
+# input: --no-telemetry (BTS-497: opt out of OTel observability — disables the bats helper's per-test span emission AND skips the post-run otel-flatten.sh invocation; exports CCANVIL_TELEMETRY_DISABLED=1 to the bats subprocess)
+# input: env BTS_RUN_ID (BTS-497: override the suite-run identifier shared across the bats helper's span emissions and the post-run otel-flatten.sh filter; defaults to <epoch>-<pid>)
+# input: env OTEL_FLATTEN_INPUT (BTS-497: override the raw-traces.jsonl path otel-flatten.sh reads; testability hook)
+# input: env OTEL_FLATTEN_OUTPUT (BTS-497: override the test-runs.jsonl path otel-flatten.sh writes; testability hook)
 # input: positional bats-args (target paths or filters like `-f 'pattern'`); defaults to `hub/tests/` when no path arg present
 # output: stdout (default): bats raw output + `---` separator + `PASS: <N> / FAIL: <M> / TOTAL: <T>`; with --timings, second `---` + `Timings (slowest first):` table
 # output: stdout (--json): JSON envelope `{ok, not_ok, total, tail, raw_exit, timings:[{test, ms}], failures:[{test_name, file, line_number, error_excerpt}], wall_ms, jobs, cpus}`
@@ -34,18 +38,22 @@
 # side-effect: writes-temp-file
 # side-effect: writes-stderr-warn-on-missing-parallel
 # side-effect: writes-bats-runs-jsonl
+# side-effect: invokes-otel-flatten
 # failure-mode: invalid-slow-top | exit=2 | visible=stderr-error | mitigation=pass-non-negative-integer
 # failure-mode: bats-suite-failed | exit=passthrough | visible=stdout-not-ok-lines | mitigation=fix-failing-test
 # failure-mode: jsonl-append-failed | exit=passthrough | visible=stderr-warn | mitigation=ensure-state-dir-writable
+# failure-mode: flatten-failed | exit=78 | visible=stderr-error | mitigation=start-otel-collector-or-pass-no-telemetry
 # contract: single-bats-invocation
 # contract: silent-fallback-warn-on-missing-parallel
 # contract: counts-derived-from-single-capture
 # contract: metrics-envelope-includes-wall_ms-jobs-cpus
+# contract: exit-78-on-flatten-failure-supersedes-bats-exit
 # anchor: BTS-118 (origin)
 # anchor: BTS-137 (--timings / --slow-top)
 # anchor: BTS-251 (manifest seed)
 # anchor: BTS-277 (perf-core default + metrics envelope + bats-runs.jsonl)
 # anchor: BTS-383 (--progress per-file orchestration + heartbeat + per-failure detail)
+# anchor: BTS-497 (post-run otel-flatten + exit-78 precedence + --no-telemetry escape hatch)
 #
 # Usage:
 #   bats-report.sh [--parallel] [--json] [--timings] [--slow-top N] [--] [<bats-args>...]

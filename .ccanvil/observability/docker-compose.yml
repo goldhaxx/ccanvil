@@ -56,9 +56,15 @@ services:
       - GF_SECURITY_ADMIN_USER=admin
       - GF_SECURITY_ADMIN_PASSWORD=admin
     volumes:
+      - type: bind
+        source: ./grafana/provisioning
+        target: /etc/grafana/provisioning
+        read_only: true
       - grafana-data:/var/lib/grafana
     ports:
       - "127.0.0.1:3001:3000"   # host :3001 → container default :3000
+    depends_on:
+      - tempo
 
 volumes:
   tempo-data:

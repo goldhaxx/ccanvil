@@ -1,0 +1,22 @@
+# BTS-497 Step 10 — Grafana datasource provisioning.
+# Auto-registers the Tempo backend so the Test Runs Overview dashboard
+# resolves trace queries via Grafana's TraceQL on container start.
+
+apiVersion: 1
+
+datasources:
+  - name: Tempo
+    type: tempo
+    uid: tempo-bts-497
+    access: proxy
+    url: http://tempo:3200
+    isDefault: true
+    editable: true
+    jsonData:
+      httpMethod: GET
+      tracesToLogsV2:
+        # Trace→logs correlation lands with BTS-501 (Loki layer).
+        # Placeholder so the UI shows the affordance.
+        datasourceUid: ""
+      serviceMap:
+        datasourceUid: ""

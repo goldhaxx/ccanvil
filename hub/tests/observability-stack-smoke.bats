@@ -171,3 +171,58 @@ COLLECTOR_CFG="$BATS_TEST_DIRNAME/../../.ccanvil/observability/otel-collector-co
   grep -qE 'endpoint: 0\.0\.0\.0:13133' "$COLLECTOR_CFG"
   grep -qE '^  extensions: \[health_check\]' "$COLLECTOR_CFG"
 }
+
+# =========================================================================
+# Step 10 — Grafana datasource + dashboard provisioning (AC-3, AC-4)
+# =========================================================================
+
+DS_TEMPO="$BATS_TEST_DIRNAME/../../.ccanvil/observability/grafana/provisioning/datasources/tempo.yaml"
+DASH_PROVIDER="$BATS_TEST_DIRNAME/../../.ccanvil/observability/grafana/provisioning/dashboards/test-runs.yaml"
+DASH_JSON="$BATS_TEST_DIRNAME/../../.ccanvil/observability/grafana/provisioning/dashboards/test-runs-overview.json"
+
+@test "AC-4: tempo datasource provisioning declares http://tempo:3200" {
+  [ -f "$DS_TEMPO" ] || skip "datasource provisioning not yet created"
+  grep -qE 'type: tempo' "$DS_TEMPO"
+  grep -qE 'url: http://tempo:3200' "$DS_TEMPO"
+  grep -qE 'uid: tempo-bts-497' "$DS_TEMPO"
+}
+
+@test "AC-4: dashboard provider points at /etc/grafana/provisioning/dashboards" {
+  [ -f "$DASH_PROVIDER" ] || skip "dashboard provider not yet created"
+  grep -qE 'path: /etc/grafana/provisioning/dashboards' "$DASH_PROVIDER"
+  grep -qE 'type: file' "$DASH_PROVIDER"
+}
+
+@test "AC-4: Test Runs Overview dashboard JSON is valid + UID stable" {
+  [ -f "$DASH_JSON" ] || skip "dashboard JSON not yet created"
+  jq -e '.title == "Test Runs Overview"' "$DASH_JSON" >/dev/null
+  jq -e '.uid == "test-runs-overview"' "$DASH_JSON" >/dev/null
+}
+
+@test "AC-4: dashboard declares 4 panels per spec (wall-time, count, outcome, slowest)" {
+  [ -f "$DASH_JSON" ] || skip "dashboard JSON not yet created"
+  local count
+  count=$(jq '.panels | length' "$DASH_JSON")
+  [ "$count" -ge 4 ]
+  # Title-based assertions: the four AC-4 panels exist by name.
+  jq -e '[.panels[].title] | any(. == "Per-run wall time")' "$DASH_JSON" >/dev/null
+  jq -e '[.panels[].title] | any(. == "Test count per run")' "$DASH_JSON" >/dev/null
+  jq -e '[.panels[].title] | any(. == "Outcome summary")' "$DASH_JSON" >/dev/null
+  jq -e '[.panels[].title] | any(. == "Slowest tests across last 7d")' "$DASH_JSON" >/dev/null
+}
+
+@test "AC-4: every panel references the Tempo datasource UID (tempo-bts-497)" {
+  [ -f "$DASH_JSON" ] || skip "dashboard JSON not yet created"
+  local bad
+  bad=$(jq '[.panels[].datasource.uid // ""] | map(select(. != "tempo-bts-497")) | length' "$DASH_JSON")
+  [ "$bad" -eq 0 ]
+}
+
+@test "AC-8: grafana service bind-mounts provisioning dir read-only" {
+  local cfg
+  cfg=$(docker compose -f "$COMPOSE" config --format=json)
+  echo "$cfg" | jq -e '
+    .services.grafana.volumes[]?
+    | select(.type == "bind" and (.source | test("grafana/provisioning$")) and .target == "/etc/grafana/provisioning")
+  ' >/dev/null
+}

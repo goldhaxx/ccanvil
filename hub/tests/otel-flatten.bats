@@ -38,16 +38,73 @@ setup() {
   [ "$mismatched" -eq 0 ]
 }
 
-@test "AC-10: every record has the 10 required snake_cased fields" {
+@test "AC-10: every record has the 11 required snake_cased fields" {
   bash "$FLATTEN" run-abc
-  local required=(run_id test_name test_file test_outcome worker_id runner_kind \
-                  git_sha started_at_unix_nano duration_ms schema_version)
+  local required=(run_id span_id test_name test_file test_outcome worker_id \
+                  runner_kind git_sha started_at_unix_nano duration_ms \
+                  schema_version)
   while IFS= read -r line; do
     for field in "${required[@]}"; do
       echo "$line" | jq -e "has(\"$field\")" >/dev/null \
         || { echo "MISSING field '$field' in: $line" >&2; return 1; }
     done
   done < "$OTEL_FLATTEN_OUTPUT"
+}
+
+@test "AC-12: span_id values are 16-hex-char per OTel spec" {
+  bash "$FLATTEN" run-abc
+  local malformed
+  malformed=$(jq -r '.span_id' "$OTEL_FLATTEN_OUTPUT" \
+              | grep -vE '^[0-9a-fA-F]{16}$' | wc -l | tr -d ' ')
+  [ "$malformed" -eq 0 ]
+}
+
+# =========================================================================
+# Idempotency (AC-12b) — key is (run_id, span_id), not byte-identity
+# =========================================================================
+
+@test "AC-12b: second invocation on same input is a no-op (file size byte-stable)" {
+  bash "$FLATTEN" run-abc
+  local size1
+  size1=$(wc -c < "$OTEL_FLATTEN_OUTPUT" | tr -d ' ')
+  bash "$FLATTEN" run-abc
+  local size2
+  size2=$(wc -c < "$OTEL_FLATTEN_OUTPUT" | tr -d ' ')
+  [ "$size1" -eq "$size2" ]
+}
+
+@test "AC-12b: second invocation appends zero new records (wc -l unchanged)" {
+  bash "$FLATTEN" run-abc
+  local n1
+  n1=$(wc -l < "$OTEL_FLATTEN_OUTPUT" | tr -d ' ')
+  bash "$FLATTEN" run-abc
+  local n2
+  n2=$(wc -l < "$OTEL_FLATTEN_OUTPUT" | tr -d ' ')
+  [ "$n1" -eq 3 ]
+  [ "$n2" -eq 3 ]
+}
+
+@test "AC-12b: three consecutive invocations remain stable" {
+  bash "$FLATTEN" run-abc
+  bash "$FLATTEN" run-abc
+  bash "$FLATTEN" run-abc
+  local n
+  n=$(wc -l < "$OTEL_FLATTEN_OUTPUT" | tr -d ' ')
+  [ "$n" -eq 3 ]
+}
+
+@test "AC-12b: cross-run dedup — flatten run-abc then run-xyz accumulates correctly" {
+  bash "$FLATTEN" run-abc
+  bash "$FLATTEN" run-xyz
+  local n
+  n=$(wc -l < "$OTEL_FLATTEN_OUTPUT" | tr -d ' ')
+  [ "$n" -eq 5 ]  # 3 from run-abc + 2 from run-xyz, no overlap
+  # Now re-run both — must remain 5
+  bash "$FLATTEN" run-abc
+  bash "$FLATTEN" run-xyz
+  local n2
+  n2=$(wc -l < "$OTEL_FLATTEN_OUTPUT" | tr -d ' ')
+  [ "$n2" -eq 5 ]
 }
 
 @test "AC-10: schema_version field value is v1.0.0 on every record" {

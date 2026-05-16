@@ -31,14 +31,20 @@ INPUT="${OTEL_FLATTEN_INPUT:-.ccanvil/observability/raw-traces.jsonl}"
 OUTPUT="${OTEL_FLATTEN_OUTPUT:-.ccanvil/state/test-runs.jsonl}"
 
 mkdir -p "$(dirname "$OUTPUT")"
+# Ensure OUTPUT exists so --slurpfile binds to [] rather than erroring.
+touch "$OUTPUT"
 
 # Flatten + filter via jq. Two passes:
 #   1) Extract spans, unwrap OTLP attribute arrays into a flat key:value
 #      map, filter by run.id, project to the AC-10 schema, drop null
-#      optional fields via with_entries.
+#      optional fields via with_entries. AC-12b idempotency: build hash-set
+#      of existing (run_id, span_id) pairs from the sidecar via
+#      --slurpfile; filter candidates whose pair is already present.
+#      Object-as-set provides O(1) membership lookup — total cost O(N+M).
 #   2) Canonicalize via `jq -c -S` (compact, sorted keys) — produces
 #      reviewable, byte-stable output per the AC-12 Implementation Note.
-jq -c --arg RUN_ID "$RUN_ID" '
+jq -c --arg RUN_ID "$RUN_ID" --slurpfile existing "$OUTPUT" '
+  ([$existing[] | {("\(.run_id):\(.span_id)"): true}] | add // {}) as $seen |
   [.resourceSpans[]?.scopeSpans[]?.spans[]?] | .[] |
   . as $span |
   (
@@ -49,6 +55,7 @@ jq -c --arg RUN_ID "$RUN_ID" '
   select($attrs["run.id"] == $RUN_ID) |
   {
     run_id: $attrs["run.id"],
+    span_id: $span.spanId,
     test_name: $attrs["test.name"],
     test_file: $attrs["test.file"],
     test_outcome: $attrs["test.outcome"],
@@ -60,5 +67,6 @@ jq -c --arg RUN_ID "$RUN_ID" '
     error_excerpt: $attrs["test.error_excerpt"],
     schema_version: "v1.0.0"
   } |
-  with_entries(select(.value != null))
+  with_entries(select(.value != null)) |
+  select($seen["\(.run_id):\(.span_id)"] | not)
 ' "$INPUT" | jq -c -S '.' >> "$OUTPUT"

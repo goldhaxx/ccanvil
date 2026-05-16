@@ -70,11 +70,14 @@ GITIGNORE="$BATS_TEST_DIRNAME/../../.ccanvil/observability/.gitignore"
 # Flat JSONL record schema (AC-10 / AC-12)
 # =========================================================================
 
-@test "AC-10: flat record schema declares all 10 required fields snake_cased" {
-  # run_id, test_name, test_file, test_outcome, worker_id, runner_kind,
-  # git_sha, started_at_unix_nano, duration_ms, schema_version.
-  local fields=(run_id test_name test_file test_outcome worker_id runner_kind \
-                git_sha started_at_unix_nano duration_ms schema_version)
+@test "AC-10: flat record schema declares all 11 required fields snake_cased" {
+  # run_id, span_id, test_name, test_file, test_outcome, worker_id,
+  # runner_kind, git_sha, started_at_unix_nano, duration_ms, schema_version.
+  # span_id is required for the AC-12 idempotency pair (run_id, span_id) to
+  # be computable from the sidecar without re-reading raw-traces.jsonl.
+  local fields=(run_id span_id test_name test_file test_outcome worker_id \
+                runner_kind git_sha started_at_unix_nano duration_ms \
+                schema_version)
   for field in "${fields[@]}"; do
     grep -qE "^[|\`-].*\b${field}\b" "$SCHEMA" \
       || { echo "MISSING flat schema field: $field" >&2; return 1; }

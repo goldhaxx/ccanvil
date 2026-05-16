@@ -43,6 +43,7 @@ No API, container, or running Collector is required at read time.
 | Field | Type | Required | Mirrors span attribute | Notes |
 |---|---|---|---|---|
 | `run_id` | string | required | `run.id` | Same format `<epoch>-<pid>`. |
+| `span_id` | string | required | OTel span `spanId` | 16-hex-char unique-per-span identifier per the OTel spec. Provided by the OTel SDK / `otel-cli`, NOT a user attribute. Required in the flat schema because `(run_id, span_id)` is the idempotency pair `otel-flatten.sh` uses for set-difference dedup; the pair must be reconstructible from the sidecar alone. |
 | `test_name` | string | required | `test.name` | |
 | `test_file` | string | required | `test.file` | |
 | `test_outcome` | enum | required | `test.outcome` | One of `{pass, fail, skip}`. |
@@ -56,7 +57,7 @@ No API, container, or running Collector is required at read time.
 
 ### Idempotency key
 
-The flatten step (AC-12) uses `(run_id, span_id)` — span_id from the OTel envelope, not exposed as a flat record field but used internally during the flatten's set-difference computation. Byte-equality of JSON lines is NOT the idempotency key (the OTel Collector may reorder spans across batches, producing semantically-equivalent but byte-different lines for the same span).
+The flatten step (AC-12) uses `(run_id, span_id)` as the unique identity. On each invocation, `otel-flatten.sh` builds a hash-set of existing `(run_id, span_id)` pairs from the sidecar via O(1) jq object lookup, then filters new candidates against that set — only previously-unseen pairs are appended. Byte-equality of JSON lines is NOT the idempotency key (the OTel Collector may reorder spans across batches, producing semantically-equivalent but byte-different lines for the same span).
 
 ## Schema evolution
 

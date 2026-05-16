@@ -390,6 +390,14 @@ if (( json_mode )); then
 else
   cat "$tmp"
   echo "---"
+  # BTS-497 AC-11: surface parallelization config in human stdout. JSON mode
+  # already carries jobs/cpus/wall_ms; this closes the long-standing visibility
+  # gap (operator-flagged 2026-05-16) where the config was buried in
+  # bats-runs.jsonl alone.
+  if (( parallel_mode == 1 )); then
+    wall_s=$(awk "BEGIN { printf \"%.1f\", $wall_ms / 1000.0 }")
+    echo "parallel: jobs=$jobs_used cpus=$cpus_total wall=${wall_s}s"
+  fi
   echo "PASS: $ok / FAIL: $not_ok / TOTAL: $total"
   if (( timings_mode )) && [[ -n "$timings_tsv" ]]; then
     echo "---"

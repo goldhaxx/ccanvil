@@ -6,15 +6,22 @@
 
 bats_require_minimum_version 1.5.0
 
+# BTS-497 telemetry hooks.
+source "$BATS_TEST_DIRNAME/_helpers/telemetry.bash"
+setup_file()    { telemetry_setup_file; }
+teardown_file() { telemetry_teardown_file; }
+
 REPO_ROOT="$BATS_TEST_DIRNAME/../.."
 SCRIPT="$REPO_ROOT/.ccanvil/scripts/docs-check.sh"
 GRAPH="$REPO_ROOT/.ccanvil/templates/lifecycle-graph.json"
 
 setup() {
   TMPDIR_BATS=$(mktemp -d)
+  telemetry_setup  # BTS-497
 }
 
 teardown() {
+  telemetry_teardown  # BTS-497
   [[ -n "${TMPDIR_BATS:-}" ]] && rm -rf "$TMPDIR_BATS"
 }
 

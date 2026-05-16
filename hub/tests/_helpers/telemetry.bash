@@ -73,14 +73,31 @@ _telemetry_cache_invariants() {
 # Compose the otel-cli --attrs value from cached invariants + per-test args.
 # Args: <outcome> <duration_ms> [<error_excerpt>]
 # Echoes a comma-separated key=value string to stdout.
+#
+# IMPORTANT: otel-cli's --attrs flag is comma-delimited with no escape
+# mechanism, so EVERY string-valued attribute must have its commas
+# replaced (we use ';' as the canonical substitute). Real-world bats
+# test names frequently include commas — e.g.,
+# `AC-1: every state has {id, description}` — and unsanitized commas
+# fragment the attribute parse, causing otel-cli to silently drop the
+# span (failure suppressed by `|| true` in telemetry_teardown).
+_telemetry_sanitize() {
+  # Replace commas with semicolons in the input string. Pragmatic
+  # round-tripping is preserved enough for human reading + agent queries.
+  local s="$1"
+  printf '%s' "${s//,/;}"
+}
+
 _telemetry_compose_attrs() {
   local outcome="$1" duration_ms="$2" error_excerpt="${3:-}"
   local file_rel="${BATS_TEST_FILENAME:-unknown}"
   # Strip leading $PWD/ so attribute matches repo-relative path used in the
   # flat JSONL schema (test_file field).
   [[ -n "${PWD:-}" ]] && file_rel="${file_rel#$PWD/}"
-  local out="test.name=${BATS_TEST_DESCRIPTION:-unknown}"
-  out+=",test.file=${file_rel}"
+  local name_safe; name_safe=$(_telemetry_sanitize "${BATS_TEST_DESCRIPTION:-unknown}")
+  local file_safe; file_safe=$(_telemetry_sanitize "$file_rel")
+  local out="test.name=${name_safe}"
+  out+=",test.file=${file_safe}"
   out+=",test.outcome=${outcome}"
   out+=",worker.id=${BTS_TELEMETRY_WORKER_ID:-0}"
   out+=",runner.kind=bats"
@@ -88,10 +105,8 @@ _telemetry_compose_attrs() {
   out+=",git.sha=${BTS_TELEMETRY_GIT_SHA:-unknown}"
   out+=",test.duration_ms=${duration_ms}"
   if [[ -n "$error_excerpt" ]]; then
-    # Truncate to ~200 chars per SCHEMA.md guidance.
-    local truncated="${error_excerpt:0:200}"
-    # Strip commas (otel-cli --attrs comma-delimited) — pragmatic.
-    truncated="${truncated//,/;}"
+    # Truncate to ~200 chars per SCHEMA.md guidance, then sanitize.
+    local truncated; truncated=$(_telemetry_sanitize "${error_excerpt:0:200}")
     out+=",test.error_excerpt=${truncated}"
   fi
   printf '%s' "$out"

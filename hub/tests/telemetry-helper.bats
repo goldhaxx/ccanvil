@@ -157,3 +157,23 @@ setup() {
   attrs=$(_telemetry_compose_attrs "skip" "5" "")
   echo "$attrs" | grep -qE 'test\.outcome=skip'
 }
+
+@test "AC-1: comma-in-test-name sanitized to semicolon (otel-cli --attrs delimiter)" {
+  # Real bats test names frequently include commas — e.g.,
+  # `AC-1: every state has {id, description}`. Without sanitization,
+  # otel-cli treats the comma as an attribute separator and the span
+  # drops silently.
+  source "$HELPER"
+  _telemetry_cache_invariants
+  export BATS_TEST_DESCRIPTION="AC-1: legal_next_actions entries have {action, command, reason}"
+  export BATS_TEST_FILENAME="$PWD/hub/tests/example.bats"
+  local attrs
+  attrs=$(_telemetry_compose_attrs "pass" "10" "")
+  # The test.name must contain semicolons, not commas.
+  echo "$attrs" | grep -qE 'test\.name=AC-1: legal_next_actions entries have \{action; command; reason\}'
+  # And the only commas should be the inter-attribute separators (8 fixed
+  # attrs + 0 optional = 7 separators).
+  local comma_count
+  comma_count=$(echo "$attrs" | tr -cd ',' | wc -c | tr -d ' ')
+  [ "$comma_count" -eq 7 ]
+}

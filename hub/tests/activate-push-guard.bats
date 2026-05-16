@@ -9,12 +9,19 @@ SCRIPT="$BATS_TEST_DIRNAME/../../.ccanvil/scripts/docs-check.sh"
 
 load helpers/seed-repo
 
+# BTS-497 telemetry hooks.
+source "$BATS_TEST_DIRNAME/_helpers/telemetry.bash"
+setup_file()    { telemetry_setup_file; }
+teardown_file() { telemetry_teardown_file; }
+
 setup() {
   export TMPDIR="${BATS_TEST_TMPDIR}"
   seed_repo_with_origin --docs-specs
+  telemetry_setup  # BTS-497
 }
 
 teardown() {
+  telemetry_teardown  # BTS-497
   rm -rf "$REPO" "$BARE"
 }
 

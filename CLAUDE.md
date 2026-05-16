@@ -6,11 +6,14 @@ Configuration preset hub for Claude Code — spec-driven development, determinis
 - Runtime: Bash (preset automation scripts)
 - Testing: bats-core 1.13.0
 - Package Manager: Homebrew (brew install bats-core)
+- Observability (BTS-497): `otel-cli` (`brew install equinix-labs/otel-cli/otel-cli`) + Docker stack at `.ccanvil/observability/` (OTel Collector + Tempo + Grafana on 127.0.0.1). See `.ccanvil/observability/README.md`.
 
 ## Commands
 ```bash
-bash .ccanvil/scripts/bats-report.sh --parallel           # Run full suite (parallel, ~75% faster)
+bash .ccanvil/scripts/bats-report.sh --parallel           # Run full suite (parallel, ~75% faster) — emits OTel spans per test (BTS-497)
+bash .ccanvil/scripts/bats-report.sh --parallel --no-telemetry  # Run without the OTel stack (substrate self-tests, offline)
 bats hub/tests/                                           # Run all tests (serial)
+docker compose -f .ccanvil/observability/docker-compose.yml up -d  # Bring up the test-observability stack (BTS-497)
 bash .ccanvil/scripts/docs-check.sh activate <id>         # Activate spec → branch + draft PR
 bash .ccanvil/scripts/docs-check.sh complete <id>         # Complete spec → cleanup + PR ready
 bash .ccanvil/scripts/docs-check.sh land                  # Return to main after merge

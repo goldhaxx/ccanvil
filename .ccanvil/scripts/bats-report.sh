@@ -80,6 +80,7 @@ parallel_mode=0
 json_mode=0
 timings_mode=0
 progress_mode=0
+no_telemetry=0
 slow_top=-1
 passthrough=()
 
@@ -89,6 +90,17 @@ while [[ $# -gt 0 ]]; do
     --json)     json_mode=1 ;;
     --timings)  timings_mode=1 ;;
     --progress) progress_mode=1 ;;
+    --no-telemetry)
+      # BTS-497 Step 14: opt out of BTS-497 test-observability entirely.
+      # (a) disables the bats telemetry helper's per-test span emission so
+      #     the suite runs without needing the OTel Collector,
+      # (b) skips the post-run otel-flatten.sh invocation so a missing
+      #     raw-traces.jsonl does not propagate exit 78.
+      # Used by substrate self-tests and any caller that wants the suite
+      # to be observability-independent.
+      no_telemetry=1
+      export CCANVIL_TELEMETRY_DISABLED=1
+      ;;
     --slow-top)
       timings_mode=1
       shift
@@ -449,13 +461,12 @@ fi
 # regardless of which code is propagated, so JSON consumers can still
 # distinguish test-failure runs even when 78 is the exit code.
 final_exit="$bats_exit"
-if (( parallel_mode == 1 )); then
+if (( parallel_mode == 1 )) && (( no_telemetry == 0 )); then
   # @side-effect: invokes-otel-flatten
-  # Step 14 adds the --no-telemetry flag to gate this; for now flatten runs
-  # unconditionally in parallel mode. CCANVIL_TELEMETRY_DISABLED is reserved
-  # for the bats HELPER (per-test emission); it does NOT gate the post-run
-  # flatten because the flatten step reads OTEL_FLATTEN_INPUT directly and
-  # may operate on data emitted by an earlier run / external system.
+  # CCANVIL_TELEMETRY_DISABLED gates only the bats HELPER's per-test
+  # emission, NOT the post-run flatten (which reads OTEL_FLATTEN_INPUT
+  # directly and may operate on data from external sources). The
+  # --no-telemetry flag (Step 14) is the proper opt-out for both layers.
   flatten_script=".ccanvil/observability/otel-flatten.sh"
   if [[ -x "$flatten_script" ]]; then
     if ! bash "$flatten_script" "$BTS_RUN_ID" >&2; then

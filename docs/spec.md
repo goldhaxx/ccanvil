@@ -8,7 +8,7 @@
 
 ## Summary
 
-`bats-report.sh` runs a ~7-min `module-manifest.sh validate` pre-warm whenever `BTS_MANIFEST_VALIDATE_CACHE` is unset. Any bats test that invokes `bash bats-report.sh ...` in a subshell pays that toll per invocation. Today, 6 test files duplicate an ad-hoc `BTS_MANIFEST_VALIDATE_CACHE=…` bypass — 4 with valid JSON content, 2 with bare paths — and the trap silently re-appears in any new test that forgets the pattern (cost the BTS-497 session ~28 min before catch). This ship codifies the bypass as a shared helper `hub/tests/_helpers/bats-report-stub.bash` and adds a mechanical drift-guard so no future test re-enters the trap.
+`bats-report.sh` runs a ~7-min `module-manifest.sh validate` pre-warm whenever `BTS_MANIFEST_VALIDATE_CACHE` is unset. Any bats test that invokes `bats-report.sh` in a subshell — directly (`bash .ccanvil/scripts/bats-report.sh`), via variable indirection (`REPORT=".../bats-report.sh"; bash "$REPORT"`), or via the `docs-check.sh test-suite-run` dispatcher — pays that toll per invocation. Today ~11 test files invoke it: 6 set an ad-hoc `BTS_MANIFEST_VALIDATE_CACHE=…` bypass inline (4 with valid JSON content, 2 with bare paths); ~5 invoke without any bypass and silently pay the toll on isolated runs. The trap re-appears in any new test that forgets the pattern (cost the BTS-497 session ~28 min before catch). This ship codifies the bypass as a shared helper `hub/tests/_helpers/bats-report-stub.bash` and adds a mechanical drift-guard so no future test re-enters the trap.
 
 ## Job To Be Done
 
@@ -20,8 +20,8 @@
 
 - [ ] **AC-1:** A new helper at `hub/tests/_helpers/bats-report-stub.bash` exports a function `stub_bats_report_prewarm` that writes a canonical zero-coverage manifest envelope (`{"coverage":{"covered":0,"total":0},"drift":[],"status":"ok"}`) to a path under `$BATS_FILE_TMPDIR` and exports `BTS_MANIFEST_VALIDATE_CACHE` pointing at it.
 - [ ] **AC-2:** The helper is idempotent at file scope — calling `stub_bats_report_prewarm` twice within the same bats file does not error and yields the same exported path.
-- [ ] **AC-3:** After helper land, the 6 existing call-sites (`bats-report-no-telemetry.bats`, `bats-report-stdout-config-line.bats`, `bats-report-otel-flatten.bats`, `docs-check-test-suite-run-healthcheck.bats`, `bats-report-failures-preserved.bats`, `bats-report-progress.bats`) are refactored to `load _helpers/bats-report-stub` + call `stub_bats_report_prewarm`. Their inline `BTS_MANIFEST_VALIDATE_CACHE=…` lines are removed.
-- [ ] **AC-4:** A new drift-guard test `hub/tests/bats-report-stub-drift-guard.bats` scans every `.bats` file matching the glob `hub/tests/*.bats` (one level, non-recursive) for the pattern `bash[^\n]*bats-report\.sh` and asserts each matching file ALSO contains the literal token `load _helpers/bats-report-stub` OR an exemption marker `# bats-report-stub: exempt` on a comment line.
+- [ ] **AC-3:** After helper land, every `.bats` file matching the AC-4 detection rule is refactored to `load _helpers/bats-report-stub` + call `stub_bats_report_prewarm`. Inline `BTS_MANIFEST_VALIDATE_CACHE=…` lines (where present) are removed. Today this set is ~11 files including the 6 inline-bypass call-sites and ~5 silent toll-payers — the AC-4 scan enumerates the exact list at implementation time.
+- [ ] **AC-4:** A new drift-guard test `hub/tests/bats-report-stub-drift-guard.bats` scans every `.bats` file matching the glob `hub/tests/*.bats` (one level, non-recursive) for any non-comment line containing the literal substring `bats-report.sh` (catches direct invocation, variable-assignment indirection, and dispatcher-forwarded invocation) and asserts each matching file ALSO contains a non-comment line with `load _helpers/bats-report-stub` OR an exemption marker `# bats-report-stub: exempt` on a comment line.
 - [ ] **AC-5:** Error: Given a `.bats` file matching the AC-4 glob that invokes `bats-report.sh`, When neither the helper-load token nor the exemption marker is present, Then the drift-guard test fails with output naming the offending file path.
 - [ ] **AC-6:** Edge: files under `hub/tests/fixtures/` are unreachable by the AC-4 glob and therefore implicitly out of scope — no special-casing required in the scan.
 - [ ] **AC-7:** The full bats suite (`bash .ccanvil/scripts/bats-report.sh --parallel`) passes after the refactor, including the new drift-guard.
@@ -38,6 +38,12 @@
 | `hub/tests/docs-check-test-suite-run-healthcheck.bats` | Refactor to use helper |
 | `hub/tests/bats-report-failures-preserved.bats` | Refactor to use helper |
 | `hub/tests/bats-report-progress.bats` | Refactor to use helper |
+| `hub/tests/bats-report.bats` | Refactor to use helper (silent toll-payer) |
+| `hub/tests/bats-report-jsonl-write-failure.bats` | Refactor to use helper (silent toll-payer) |
+| `hub/tests/bats-report-perf-core-default.bats` | Refactor to use helper (silent toll-payer) |
+| `hub/tests/bats-report-metrics-envelope.bats` | Refactor to use helper (silent toll-payer) |
+| `hub/tests/rule-vocabulary-leak.bats` | Add exempt marker (mentions string literal, doesn't invoke) |
+| `hub/tests/test-suite-run.bats` | Add exempt marker (uses local stub, doesn't invoke real script) |
 
 ## Dependencies
 

@@ -11,9 +11,12 @@
 
 bats_require_minimum_version 1.5.0
 
-# Scan <dir>/*.bats (one level, non-recursive). For each file matching
-# `bash[^\n]*bats-report\.sh`, emit a violation line `VIOLATION: <path>`
-# unless the file ALSO contains the helper-load token OR the exempt marker.
+# Scan <dir>/*.bats (one level, non-recursive). For each file with a
+# non-comment line containing the literal substring `bats-report.sh` (catches
+# direct invocation, variable-assignment indirection, and dispatcher-forwarded
+# invocation), emit a violation line `VIOLATION: <path>` unless the file ALSO
+# contains a non-comment line with `load _helpers/bats-report-stub` OR carries
+# the literal exempt marker `# bats-report-stub: exempt` on a comment line.
 # Returns 0 with empty stdout when no violations; returns 1 with violations
 # on stdout otherwise.
 _scan_dir() {
@@ -22,7 +25,7 @@ _scan_dir() {
   local f
   shopt -s nullglob
   for f in "$dir"/*.bats; do
-    if grep -qE 'bash.*bats-report\.sh' "$f" 2>/dev/null; then
+    if grep -qE '^[[:space:]]*[^[:space:]#].*bats-report\.sh' "$f" 2>/dev/null; then
       if grep -qF 'load _helpers/bats-report-stub' "$f" 2>/dev/null; then
         continue
       fi
@@ -80,6 +83,16 @@ setup() { stub_bats_report_prewarm; }
   _make_fixture "$BATS_TEST_TMPDIR/sub/nested.bats" '#!/usr/bin/env bats
 @test "n" { run bash .ccanvil/scripts/bats-report.sh fixture.bats; }'
   run _scan_dir "$BATS_TEST_TMPDIR"
+  [ "$status" -eq 0 ]
+  [ -z "$output" ]
+}
+
+@test "AC-4: production scan — all hub/tests/*.bats compliant" {
+  run _scan_dir "$BATS_TEST_DIRNAME"
+  if [ "$status" -ne 0 ]; then
+    echo "Drift-guard violations:" >&2
+    echo "$output" >&2
+  fi
   [ "$status" -eq 0 ]
   [ -z "$output" ]
 }

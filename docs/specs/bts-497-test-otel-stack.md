@@ -4,7 +4,7 @@
 > Work: linear:BTS-497
 > Created: 1778911599
 > Subject: Test Observability — OTel Stack (Foundation)
-> Status: In Progress
+> Status: Complete
 
 ## Summary
 

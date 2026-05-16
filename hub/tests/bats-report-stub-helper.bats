@@ -23,3 +23,15 @@ load _helpers/bats-report-stub
     *) echo "expected path under \$BATS_FILE_TMPDIR ($BATS_FILE_TMPDIR), got: $BTS_MANIFEST_VALIDATE_CACHE" >&2; return 1 ;;
   esac
 }
+
+@test "AC-2: idempotent at file scope — two calls yield the same path, no error" {
+  set -e
+  stub_bats_report_prewarm
+  local first="$BTS_MANIFEST_VALIDATE_CACHE"
+
+  stub_bats_report_prewarm
+  local second="$BTS_MANIFEST_VALIDATE_CACHE"
+
+  [ "$first" = "$second" ]
+  [ -s "$second" ]
+}

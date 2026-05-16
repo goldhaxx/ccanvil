@@ -3,7 +3,13 @@
 
 load _helpers/manifest-validate-cache
 
+# BTS-497 telemetry hooks.
+source "$BATS_TEST_DIRNAME/_helpers/telemetry.bash"
+teardown_file() { telemetry_teardown_file; }
+teardown()      { telemetry_teardown; }
+
 setup_file() {
+  telemetry_setup_file  # BTS-497 — healthcheck first; if collector down, abort before expensive validate cache
   manifest_validate_cache_setup_file
 }
 
@@ -12,6 +18,7 @@ setup() {
   SCRIPT="$REPO_ROOT/.ccanvil/scripts/module-manifest.sh"
   TARGET="$REPO_ROOT/.ccanvil/scripts/docs-check.sh"
   manifest_validate_cache_setup
+  telemetry_setup  # BTS-497
 }
 
 @test "seed/cmd_artifact_write: extract emits a manifest with required fields" {

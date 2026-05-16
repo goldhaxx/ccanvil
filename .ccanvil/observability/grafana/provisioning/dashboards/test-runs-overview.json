@@ -1,0 +1,90 @@
+{
+  "annotations": { "list": [] },
+  "editable": true,
+  "fiscalYearStartMonth": 0,
+  "graphTooltip": 0,
+  "id": null,
+  "links": [],
+  "liveNow": false,
+  "panels": [
+    {
+      "datasource": { "type": "tempo", "uid": "tempo-bts-497" },
+      "fieldConfig": { "defaults": { "unit": "ms" }, "overrides": [] },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 0 },
+      "id": 1,
+      "title": "Per-run wall time",
+      "type": "timeseries",
+      "description": "Per-run wall_ms over time. Full data fidelity arrives with the metrics-generator backend (BTS-500).",
+      "targets": [
+        {
+          "datasource": { "type": "tempo", "uid": "tempo-bts-497" },
+          "queryType": "traceql",
+          "query": "{ resource.service.name=\"ccanvil-test\" } | by(span:run.id)",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "datasource": { "type": "tempo", "uid": "tempo-bts-497" },
+      "fieldConfig": { "defaults": { "unit": "short" }, "overrides": [] },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 0 },
+      "id": 2,
+      "title": "Test count per run",
+      "type": "timeseries",
+      "description": "Test count per run.id. Provisional shape; full aggregation lands with BTS-500.",
+      "targets": [
+        {
+          "datasource": { "type": "tempo", "uid": "tempo-bts-497" },
+          "queryType": "traceql",
+          "query": "{ resource.service.name=\"ccanvil-test\" }",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "datasource": { "type": "tempo", "uid": "tempo-bts-497" },
+      "fieldConfig": { "defaults": {}, "overrides": [] },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 8 },
+      "id": 3,
+      "title": "Outcome summary",
+      "type": "stat",
+      "description": "Outcome distribution (pass/fail/skip) across the active time range.",
+      "targets": [
+        {
+          "datasource": { "type": "tempo", "uid": "tempo-bts-497" },
+          "queryType": "traceql",
+          "query": "{ span.test.outcome=\"fail\" }",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "datasource": { "type": "tempo", "uid": "tempo-bts-497" },
+      "fieldConfig": { "defaults": { "unit": "ms" }, "overrides": [] },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 8 },
+      "id": 4,
+      "title": "Slowest tests across last 7d",
+      "type": "table",
+      "description": "Top-N slowest tests across the 7-day window. TraceQL sorts by span duration.",
+      "targets": [
+        {
+          "datasource": { "type": "tempo", "uid": "tempo-bts-497" },
+          "queryType": "traceql",
+          "query": "{ resource.service.name=\"ccanvil-test\" } | select(span.test.name, span.test.file, span.test.duration_ms)",
+          "refId": "A"
+        }
+      ]
+    }
+  ],
+  "refresh": "30s",
+  "schemaVersion": 39,
+  "tags": ["ccanvil", "bts-497", "test-observability"],
+  "templating": { "list": [] },
+  "time": { "from": "now-7d", "to": "now" },
+  "timepicker": {},
+  "timezone": "",
+  "title": "Test Runs Overview",
+  "uid": "test-runs-overview",
+  "version": 1,
+  "weekStart": ""
+}

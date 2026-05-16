@@ -7,15 +7,22 @@
 
 bats_require_minimum_version 1.5.0
 
+# BTS-497 telemetry hooks.
+source "$BATS_TEST_DIRNAME/_helpers/telemetry.bash"
+setup_file()    { telemetry_setup_file; }
+teardown_file() { telemetry_teardown_file; }
+
 SCRIPT="$BATS_TEST_DIRNAME/../../.ccanvil/scripts/docs-check.sh"
 
 setup() {
   export TMPDIR="${BATS_TEST_TMPDIR}"
   PROJECT=$(mktemp -d)
   mkdir -p "$PROJECT/docs" "$PROJECT/docs/specs" "$PROJECT/stub-bin"
+  telemetry_setup  # BTS-497
 }
 
 teardown() {
+  telemetry_teardown  # BTS-497 — first so bats state vars are still pristine
   rm -rf "$PROJECT"
 }
 

@@ -12,6 +12,12 @@
 
 bats_require_minimum_version 1.5.0
 
+# BTS-497 telemetry hooks (setup_file + teardown_file extended below;
+# this file has no per-test setup/teardown so the helper provides both).
+source "$BATS_TEST_DIRNAME/_helpers/telemetry.bash"
+setup()    { telemetry_setup; }
+teardown() { telemetry_teardown; }
+
 SYNC="$BATS_TEST_DIRNAME/../../.ccanvil/scripts/ccanvil-sync.sh"
 
 # ----- Helper matrix (lightweight) -------------------------------------------
@@ -114,6 +120,7 @@ EOF
 # ----- Integration test -------------------------------------------------------
 
 setup_file() {
+  telemetry_setup_file  # BTS-497 — healthcheck before any other init
   TMPDIR_BATS=$(mktemp -d)
   export TMPDIR_BATS
   HUB_DIR="$TMPDIR_BATS/hub"
@@ -182,6 +189,7 @@ EOF
 
 teardown_file() {
   [[ -n "${TMPDIR_BATS:-}" ]] && rm -rf "$TMPDIR_BATS"
+  telemetry_teardown_file  # BTS-497
 }
 
 @test "BTS-384 Step 4 integration: substrate rule emits scope-skipped for consumer node" {

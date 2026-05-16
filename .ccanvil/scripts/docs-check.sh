@@ -8176,7 +8176,7 @@ PY
 # id: cmd_test_suite_run
 # purpose: Provider-aware test-suite dispatcher. Reads `.test-provider` (or `.stacks[0]` fallback, default `bats`) from `<project-dir>/.claude/ccanvil.json` and exec's the matching runner. First concrete instance of the BTS-460 "hub describes behavior, node describes implementation" pattern — lets `/pr` invoke a generic verb instead of hardcoding `bats-report.sh`, so the same skill works on bats/pytest/vitest nodes once each provider's dispatcher lands.
 # input: --project-dir <path> (optional, defaults to .)
-# input: --parallel | --json | --timings | --progress | --slow-top N | --help | -h (forwarded to the active runner; bats-only flags today)
+# input: --parallel | --json | --timings | --progress | --no-telemetry | --slow-top N | --help | -h (forwarded to the active runner; bats-only flags today)
 # input: -- <bats-args>... (passthrough boundary)
 # input: env BATS_REPORT_OVERRIDE (test-injection point; mirrors LINEAR_QUERY_OVERRIDE — BTS-203 pattern)
 # output: stdout: runner's stdout (e.g. bats-report.sh's pass/fail tail)
@@ -8190,6 +8190,7 @@ PY
 # failure-mode: unknown-flag | exit=2 | visible=stderr-Usage | mitigation=use-double-dash-separator-for-arbitrary-passthrough
 # failure-mode: missing-slow-top-arg | exit=2 | visible=stderr-Usage | mitigation=pass-non-negative-integer-after-slow-top
 # failure-mode: no-args | exit=2 | visible=stderr-Usage | mitigation=pass-at-least-one-forwarding-flag-or-target-also-prevents-silent-full-suite-recursion-and-applies-to-future-pytest-vitest-dispatchers
+# failure-mode: collector-unreachable | exit=1 | visible=stderr-error | mitigation=start-the-docker-compose-stack-or-pass-no-telemetry-bypass-flag
 # contract: provider-resolution-order-test-provider-then-stacks-zero-then-bats-default
 # contract: bats-path-execs-bats-report-sh-via-BATS_REPORT_OVERRIDE-or-script-dir-resolution
 # anchor: BTS-460
@@ -8199,7 +8200,7 @@ cmd_test_suite_run() {
   while [[ $# -gt 0 ]]; do
     case "$1" in
       --project-dir) project_dir="${2:-.}"; shift 2 ;;
-      --parallel|--json|--timings|--progress|--help|-h) forward_args+=("$1"); shift ;;
+      --parallel|--json|--timings|--progress|--no-telemetry|--help|-h) forward_args+=("$1"); shift ;;
       --slow-top)
         # @failure-mode: missing-slow-top-arg
         if [[ -z "${2:-}" ]]; then
@@ -8221,13 +8222,32 @@ cmd_test_suite_run() {
     [[ -z "$provider" || "$provider" == "null" ]] && provider="bats"
   fi
 
+  # BTS-497 AC-2: healthcheck precondition. Gate the bats fork on the OTel
+  # Collector being reachable so the suite fails fast at the dispatcher
+  # layer rather than per-file in every setup_file. --no-telemetry skips
+  # the gate (substrate self-tests, offline runs).
+  local has_no_telemetry=0
+  for __arg in "${forward_args[@]+"${forward_args[@]}"}"; do
+    [[ "$__arg" == "--no-telemetry" ]] && { has_no_telemetry=1; break; }
+  done
+  if (( has_no_telemetry == 0 )); then
+    local hc_url="${CCANVIL_TELEMETRY_URL:-http://127.0.0.1:13133}"
+    # @failure-mode: collector-unreachable
+    if ! curl -fsS --max-time 2 "$hc_url" >/dev/null 2>&1; then
+      echo "ERROR: OTel Collector healthcheck unreachable at $hc_url" >&2
+      echo "Start: docker compose -f .ccanvil/observability/docker-compose.yml up -d" >&2
+      echo "Or bypass: docs-check.sh test-suite-run --no-telemetry ..." >&2
+      return 1
+    fi
+  fi
+
   case "$provider" in
     bats)
       # @failure-mode: no-args
       # Require at least one forwarded arg (flag or target) to avoid silent
       # full-suite invocation. /pr always passes --parallel --progress.
       if [[ "${#forward_args[@]:-0}" -eq 0 ]]; then
-        echo "Usage: docs-check.sh test-suite-run [--project-dir <path>] [--parallel|--json|--timings|--progress|--slow-top N|--help] [-- <bats-args>...]" >&2
+        echo "Usage: docs-check.sh test-suite-run [--project-dir <path>] [--parallel|--json|--timings|--progress|--no-telemetry|--slow-top N|--help] [-- <bats-args>...]" >&2
         return 2
       fi
       local script_dir

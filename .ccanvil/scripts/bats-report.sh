@@ -18,6 +18,10 @@
 # input: env BATS_REPORT_HAS_PARALLEL (=0 forces no-parallel branch even when parallel is installed; testability hook)
 # input: env BATS_REPORT_PERF_CORES (override the perf-core count probed via sysctl; testability + cross-host pinning)
 # input: env BATS_REPORT_STATE_DIR (override the directory where bats-runs.jsonl is appended; defaults to .ccanvil/state)
+# input: --no-telemetry (BTS-497: opt out of OTel observability — disables the bats helper's per-test span emission AND skips the post-run otel-flatten.sh invocation; exports CCANVIL_TELEMETRY_DISABLED=1 to the bats subprocess)
+# input: env BTS_RUN_ID (BTS-497: override the suite-run identifier shared across the bats helper's span emissions and the post-run otel-flatten.sh filter; defaults to <epoch>-<pid>)
+# input: env OTEL_FLATTEN_INPUT (BTS-497: override the raw-traces.jsonl path otel-flatten.sh reads; testability hook)
+# input: env OTEL_FLATTEN_OUTPUT (BTS-497: override the test-runs.jsonl path otel-flatten.sh writes; testability hook)
 # input: positional bats-args (target paths or filters like `-f 'pattern'`); defaults to `hub/tests/` when no path arg present
 # output: stdout (default): bats raw output + `---` separator + `PASS: <N> / FAIL: <M> / TOTAL: <T>`; with --timings, second `---` + `Timings (slowest first):` table
 # output: stdout (--json): JSON envelope `{ok, not_ok, total, tail, raw_exit, timings:[{test, ms}], failures:[{test_name, file, line_number, error_excerpt}], wall_ms, jobs, cpus}`
@@ -34,18 +38,22 @@
 # side-effect: writes-temp-file
 # side-effect: writes-stderr-warn-on-missing-parallel
 # side-effect: writes-bats-runs-jsonl
+# side-effect: invokes-otel-flatten
 # failure-mode: invalid-slow-top | exit=2 | visible=stderr-error | mitigation=pass-non-negative-integer
 # failure-mode: bats-suite-failed | exit=passthrough | visible=stdout-not-ok-lines | mitigation=fix-failing-test
 # failure-mode: jsonl-append-failed | exit=passthrough | visible=stderr-warn | mitigation=ensure-state-dir-writable
+# failure-mode: flatten-failed | exit=78 | visible=stderr-error | mitigation=start-otel-collector-or-pass-no-telemetry
 # contract: single-bats-invocation
 # contract: silent-fallback-warn-on-missing-parallel
 # contract: counts-derived-from-single-capture
 # contract: metrics-envelope-includes-wall_ms-jobs-cpus
+# contract: exit-78-on-flatten-failure-supersedes-bats-exit
 # anchor: BTS-118 (origin)
 # anchor: BTS-137 (--timings / --slow-top)
 # anchor: BTS-251 (manifest seed)
 # anchor: BTS-277 (perf-core default + metrics envelope + bats-runs.jsonl)
 # anchor: BTS-383 (--progress per-file orchestration + heartbeat + per-failure detail)
+# anchor: BTS-497 (post-run otel-flatten + exit-78 precedence + --no-telemetry escape hatch)
 #
 # Usage:
 #   bats-report.sh [--parallel] [--json] [--timings] [--slow-top N] [--] [<bats-args>...]
@@ -80,6 +88,7 @@ parallel_mode=0
 json_mode=0
 timings_mode=0
 progress_mode=0
+no_telemetry=0
 slow_top=-1
 passthrough=()
 
@@ -89,6 +98,17 @@ while [[ $# -gt 0 ]]; do
     --json)     json_mode=1 ;;
     --timings)  timings_mode=1 ;;
     --progress) progress_mode=1 ;;
+    --no-telemetry)
+      # BTS-497 Step 14: opt out of BTS-497 test-observability entirely.
+      # (a) disables the bats telemetry helper's per-test span emission so
+      #     the suite runs without needing the OTel Collector,
+      # (b) skips the post-run otel-flatten.sh invocation so a missing
+      #     raw-traces.jsonl does not propagate exit 78.
+      # Used by substrate self-tests and any caller that wants the suite
+      # to be observability-independent.
+      no_telemetry=1
+      export CCANVIL_TELEMETRY_DISABLED=1
+      ;;
     --slow-top)
       timings_mode=1
       shift
@@ -159,6 +179,13 @@ if (( parallel_mode )); then
   fi
 fi
 bats_cmd+=("${passthrough[@]+"${passthrough[@]}"}")
+
+# BTS-497: anchor a stable BTS_RUN_ID for the suite run. The telemetry helper
+# (hub/tests/_helpers/telemetry.bash) reads this to tag every span; the
+# AC-12d flatten step below passes the same value to otel-flatten.sh so it
+# filters to spans from THIS run. Honors an externally-set value (CI may
+# want a deterministic id).
+export BTS_RUN_ID="${BTS_RUN_ID:-$(date +%s)-$$}"
 
 # BTS-281: pre-warm module-manifest validate JSON ONCE before the suite runs,
 # expose via env var. The 4 bats files that need this read the cached path
@@ -390,6 +417,14 @@ if (( json_mode )); then
 else
   cat "$tmp"
   echo "---"
+  # BTS-497 AC-11: surface parallelization config in human stdout. JSON mode
+  # already carries jobs/cpus/wall_ms; this closes the long-standing visibility
+  # gap (operator-flagged 2026-05-16) where the config was buried in
+  # bats-runs.jsonl alone.
+  if (( parallel_mode == 1 )); then
+    wall_s=$(awk "BEGIN { printf \"%.1f\", $wall_ms / 1000.0 }")
+    echo "parallel: jobs=$jobs_used cpus=$cpus_total wall=${wall_s}s"
+  fi
   echo "PASS: $ok / FAIL: $not_ok / TOTAL: $total"
   if (( timings_mode )) && [[ -n "$timings_tsv" ]]; then
     echo "---"
@@ -425,4 +460,30 @@ else
   echo "WARN: bats-runs.jsonl append skipped — could not write $jsonl_path" >&2
 fi
 
-exit "$bats_exit"
+# BTS-497 AC-12d: invoke otel-flatten.sh after every --parallel run.
+# Exit-code precedence rule: when flatten fails, propagate 78 regardless
+# of bats_exit (flatten failure is the "running blind" signal that AC-2
+# guards against and must always surface). When flatten succeeds, exit
+# with bats_exit so test failures propagate normally for CI consumers.
+# The bats_exit is preserved in bats-runs.jsonl's raw_exit field
+# regardless of which code is propagated, so JSON consumers can still
+# distinguish test-failure runs even when 78 is the exit code.
+final_exit="$bats_exit"
+if (( parallel_mode == 1 )) && (( no_telemetry == 0 )); then
+  # @side-effect: invokes-otel-flatten
+  # CCANVIL_TELEMETRY_DISABLED gates only the bats HELPER's per-test
+  # emission, NOT the post-run flatten (which reads OTEL_FLATTEN_INPUT
+  # directly and may operate on data from external sources). The
+  # --no-telemetry flag (Step 14) is the proper opt-out for both layers.
+  flatten_script=".ccanvil/observability/otel-flatten.sh"
+  if [[ -x "$flatten_script" ]]; then
+    if ! bash "$flatten_script" "$BTS_RUN_ID" >&2; then
+      # @failure-mode: flatten-failed
+      final_exit=78
+    fi
+  else
+    echo "WARN: $flatten_script missing — flatten step skipped" >&2
+  fi
+fi
+
+exit "$final_exit"

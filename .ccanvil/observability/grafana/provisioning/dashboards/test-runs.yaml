@@ -1,0 +1,17 @@
+# BTS-497 Step 10 — Grafana dashboard provider provisioning.
+# Points Grafana at the dashboards directory; dashboards in that dir are
+# auto-imported on container start.
+
+apiVersion: 1
+
+providers:
+  - name: ccanvil-test-observability
+    orgId: 1
+    folder: ccanvil
+    type: file
+    disableDeletion: false
+    updateIntervalSeconds: 30
+    allowUiUpdates: true
+    options:
+      path: /etc/grafana/provisioning/dashboards
+      foldersFromFilesStructure: false

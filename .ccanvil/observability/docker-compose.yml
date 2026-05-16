@@ -1,0 +1,71 @@
+# BTS-497 — local test-observability stack.
+#
+# Three services:
+#   otel-collector — receives OTLP from the bats helper, ships to Tempo,
+#                    writes a raw OTLP-JSON sidecar at raw-traces.jsonl
+#                    for otel-flatten.sh to normalize.
+#   tempo          — trace storage + Grafana datasource backend.
+#   grafana        — dashboards (port 3001 — operator's existing :3000
+#                    instance is unaffected per BTS-497 spec decision).
+#
+# All host-side ports bind to 127.0.0.1 only (loopback) — the stack is
+# local-only by design.
+#
+# Bring up:   docker compose -f .ccanvil/observability/docker-compose.yml up -d
+# Healthcheck:
+#   curl -fsS http://127.0.0.1:13133            # collector
+#   curl -fsS http://127.0.0.1:3200/ready       # tempo
+#   curl -fsS http://127.0.0.1:3001/api/health  # grafana
+
+services:
+  otel-collector:
+    image: otel/opentelemetry-collector-contrib:0.117.0
+    command: ["--config=/etc/otel-collector-config.yaml"]
+    volumes:
+      - type: bind
+        source: ./otel-collector-config.yaml
+        target: /etc/otel-collector-config.yaml
+        read_only: true
+      - type: bind
+        source: ./raw-traces.jsonl
+        target: /var/lib/otel/raw-traces.jsonl
+    ports:
+      - "127.0.0.1:4317:4317"   # OTLP gRPC
+      - "127.0.0.1:4318:4318"   # OTLP HTTP
+      - "127.0.0.1:13133:13133" # healthcheckv2
+    depends_on:
+      - tempo
+
+  tempo:
+    image: grafana/tempo:2.7.0
+    command: ["-config.file=/etc/tempo.yaml"]
+    volumes:
+      - type: bind
+        source: ./tempo.yaml
+        target: /etc/tempo.yaml
+        read_only: true
+      - tempo-data:/var/tempo
+    ports:
+      - "127.0.0.1:3200:3200"   # tempo HTTP API
+
+  grafana:
+    image: grafana/grafana:11.4.0
+    environment:
+      - GF_AUTH_ANONYMOUS_ENABLED=true
+      - GF_AUTH_ANONYMOUS_ORG_ROLE=Admin
+      - GF_SECURITY_ADMIN_USER=admin
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+    volumes:
+      - type: bind
+        source: ./grafana/provisioning
+        target: /etc/grafana/provisioning
+        read_only: true
+      - grafana-data:/var/lib/grafana
+    ports:
+      - "127.0.0.1:3001:3000"   # host :3001 → container default :3000
+    depends_on:
+      - tempo
+
+volumes:
+  tempo-data:
+  grafana-data:

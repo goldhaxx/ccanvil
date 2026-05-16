@@ -3,10 +3,17 @@
 
 bats_require_minimum_version 1.5.0
 
+# BTS-497 telemetry hooks.
+source "$BATS_TEST_DIRNAME/_helpers/telemetry.bash"
+setup_file()    { telemetry_setup_file; }
+teardown_file() { telemetry_teardown_file; }
+teardown()      { telemetry_teardown; }
+
 SCRIPT="$BATS_TEST_DIRNAME/../../.ccanvil/scripts/docs-check.sh"
 
 setup() {
   export TMPDIR="${BATS_TEST_TMPDIR}"
+  telemetry_setup  # BTS-497 — must run last so test-start timer is closest to @test body
 }
 
 _init_repo() {

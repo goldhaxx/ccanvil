@@ -20,6 +20,7 @@ A visual, browsable guide to the preset system: how it works, when to use each f
 | Hooks System | [hooks.md](hooks.md) | How hooks work, adding new hooks, deterministic-first principle |
 | Decision Guide | [decision-guide.md](decision-guide.md) | When to use which command, when to /stasis vs /clear |
 | Parallel Sessions | [parallel-sessions.md](parallel-sessions.md) | Running multiple agents via git worktrees |
+| Test Observability | [`../observability/README.md`](../observability/README.md) | OTel-based per-test telemetry + Grafana dashboards (BTS-497) |
 | Research Foundation | [foundations.md](foundations.md) | Foundational research — transformer attention, TDD evidence, context management (read-only) |
 
 ---

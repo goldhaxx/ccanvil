@@ -5,12 +5,19 @@
 
 bats_require_minimum_version 1.5.0
 
+# BTS-497 telemetry hooks.
+source "$BATS_TEST_DIRNAME/_helpers/telemetry.bash"
+setup_file()    { telemetry_setup_file; }
+teardown_file() { telemetry_teardown_file; }
+teardown()      { telemetry_teardown; }
+
 DOCS_CHECK="$BATS_TEST_DIRNAME/../../.ccanvil/scripts/docs-check.sh"
 
 setup() {
   export TMPDIR="${BATS_TEST_TMPDIR}"
   PROJECT_DIR="$TMPDIR/project"
   mkdir -p "$PROJECT_DIR/.claude" "$PROJECT_DIR/docs" "$PROJECT_DIR/docs/sessions"
+  telemetry_setup  # BTS-497
 }
 
 _setup_linear_routed() {

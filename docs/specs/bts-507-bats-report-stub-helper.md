@@ -4,7 +4,7 @@
 > Work: linear:BTS-507
 > Created: 1778973343
 > Subject: Bats-Report Pre-Warm Stub Helper
-> Status: In Progress
+> Status: Complete
 
 ## Summary
 

@@ -8254,6 +8254,12 @@ cmd_test_suite_run() {
       script_dir="$(dirname "${BASH_SOURCE[0]}")"
       local runner="${BATS_REPORT_OVERRIDE:-$script_dir/bats-report.sh}"
       # @side-effect: spawns-test-runner
+      # BTS-508: test-suite-run is the canonical entry point for the
+      # full-suite pre-merge gate. Export BATS_REPORT_FULL_SUITE so the
+      # downstream bats-report.sh writes test-state on exit-0. Caller-side
+      # invocations of bats-report.sh directly (BTS-507 helper-stub tests,
+      # TDD inner loops) leave this unset and skip the writer.
+      export BATS_REPORT_FULL_SUITE=1
       exec bash "$runner" "${forward_args[@]}"
       ;;
     *)

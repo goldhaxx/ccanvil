@@ -8277,7 +8277,7 @@ cmd_test_suite_run() {
 # output: exit-codes 0 always (empty envelope on missing/malformed), 2 unknown-flag
 # caller: .claude/commands/review.md
 # caller: hub/tests/test-state.bats
-# caller: .ccanvil/scripts/docs-check.sh:cmd_check_skip_validate
+# caller: cmd_check_skip_validate
 # depends-on: jq
 # side-effect: reads-test-state-file
 # failure-mode: missing-state-file | exit=0 | visible=empty-envelope | mitigation=consumer-runs-verification

@@ -8,6 +8,10 @@
 #
 # Step 1 covers AC-1 (audit catalog). Steps 2/6 extend with redundancy /
 # framework / rule assertions.
+#
+# bats-report-stub: exempt — this file only mentions bats-report.sh as a
+# string token inside drift-guard assertions; it does not invoke the
+# substrate, so the BTS-507 pre-warm stub is not required.
 
 bats_require_minimum_version 1.5.0
 

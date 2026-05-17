@@ -49,7 +49,7 @@ PROJECT_TREE_SUBCOMMANDS=(
   artifact-read artifact-write route-of ssot-migrate
   session-info assert-pr-title remote-presence
   stasis-carry-forward ship-finalize validate-spec rule-resolve
-  test-suite-run
+  test-suite-run test-state check-skip-validate
 )
 
 # ---------------------------------------------------------------------------

@@ -123,7 +123,13 @@ BATS
   _commit init
 
   mkdir -p .ccanvil/state
-  BATS_REPORT_STATE_DIR=".ccanvil/state" \
+  # Explicitly unset BATS_REPORT_FULL_SUITE — when /pr → test-suite-run is
+  # the outer process, the env var leaks down into the bats workers running
+  # this @test. We're exercising the bare bats-report.sh path where the
+  # gate var is NOT set, which is the BTS-507 helper-stub / TDD-inner-loop
+  # invocation shape.
+  env -u BATS_REPORT_FULL_SUITE \
+    BATS_REPORT_STATE_DIR=".ccanvil/state" \
     bash "$REPORT" --no-telemetry "$BATS_TEST_TMPDIR/pass.bats" >/dev/null 2>&1
 
   # No state file written (or file exists from prior tests but the key absent).

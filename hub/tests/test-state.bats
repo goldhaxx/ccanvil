@@ -1,14 +1,20 @@
 #!/usr/bin/env bats
 #
 # BTS-508 — test-state verb in docs-check.sh.
-# Covers AC-6 (envelope shape + intersection logic) and AC-9 (fail-safe on
-# missing/malformed state file). Step 4 extends with state-writer integration.
+# Covers AC-6 (envelope shape + intersection logic), AC-9 (fail-safe on
+# missing/malformed state file), and AC-7 (state writers in bats-report.sh +
+# module-manifest.sh validate).
 
 bats_require_minimum_version 1.5.0
 
+load _helpers/bats-report-stub
+
 DC="$BATS_TEST_DIRNAME/../../.ccanvil/scripts/docs-check.sh"
+REPORT="$BATS_TEST_DIRNAME/../../.ccanvil/scripts/bats-report.sh"
+MANIFEST="$BATS_TEST_DIRNAME/../../.ccanvil/scripts/module-manifest.sh"
 
 setup() {
+  stub_bats_report_prewarm
   cd "$BATS_TEST_TMPDIR"
   git init -q
   git config user.email "a@b.example"
@@ -83,4 +89,83 @@ _commit() {
   [ "$status" -eq 0 ]
   echo "$output" | jq -e '.files_changed_since_last_manifest_validate == 2'
   echo "$output" | jq -e '.manifest_tracked_files_changed_since_last_validate == 1'
+}
+
+# ----------------------------------------------------------------------------
+# AC-7: state writers in bats-report.sh + module-manifest.sh validate
+# ----------------------------------------------------------------------------
+
+@test "AC-7: bats-report.sh writes last_full_suite_* on exit-0 with BATS_REPORT_FULL_SUITE=1" {
+  set -e
+  cat > "$BATS_TEST_TMPDIR/pass.bats" <<'BATS'
+@test "t" { [ 1 -eq 1 ]; }
+BATS
+  echo content > file.txt
+  _commit init
+  sha=$(git rev-parse HEAD)
+
+  mkdir -p .ccanvil/state
+  BATS_REPORT_STATE_DIR=".ccanvil/state" \
+    BATS_REPORT_FULL_SUITE=1 \
+    bash "$REPORT" --no-telemetry "$BATS_TEST_TMPDIR/pass.bats" >/dev/null 2>&1
+
+  [ -f .ccanvil/state/test-state.json ]
+  jq -e --arg sha "$sha" '.last_full_suite_commit == $sha' < .ccanvil/state/test-state.json
+  jq -e '.last_full_suite_at | type == "number"' < .ccanvil/state/test-state.json
+}
+
+@test "AC-7: bats-report.sh skips state-write when BATS_REPORT_FULL_SUITE unset (BTS-507 helper-stub coexistence)" {
+  set -e
+  cat > "$BATS_TEST_TMPDIR/pass.bats" <<'BATS'
+@test "t" { [ 1 -eq 1 ]; }
+BATS
+  echo content > file.txt
+  _commit init
+
+  mkdir -p .ccanvil/state
+  BATS_REPORT_STATE_DIR=".ccanvil/state" \
+    bash "$REPORT" --no-telemetry "$BATS_TEST_TMPDIR/pass.bats" >/dev/null 2>&1
+
+  # No state file written (or file exists from prior tests but the key absent).
+  if [[ -f .ccanvil/state/test-state.json ]]; then
+    jq -e '.last_full_suite_commit == null or .last_full_suite_commit == ""' \
+      < .ccanvil/state/test-state.json
+  fi
+}
+
+@test "AC-7: module-manifest.sh validate writes last_manifest_validate_* on exit-0" {
+  set -e
+  echo content > file.txt
+  _commit init
+  sha=$(git rev-parse HEAD)
+
+  mkdir -p .ccanvil .ccanvil/state
+  : > .ccanvil/manifest-allowlist.txt
+
+  BATS_REPORT_STATE_DIR=".ccanvil/state" bash "$MANIFEST" validate --json >/dev/null 2>&1
+
+  [ -f .ccanvil/state/test-state.json ]
+  jq -e --arg sha "$sha" '.last_manifest_validate_commit == $sha' < .ccanvil/state/test-state.json
+  jq -e '.last_manifest_validate_at | type == "number"' < .ccanvil/state/test-state.json
+}
+
+@test "AC-7: writers preserve each other's fields (atomic-by-replace)" {
+  set -e
+  cat > "$BATS_TEST_TMPDIR/pass.bats" <<'BATS'
+@test "t" { [ 1 -eq 1 ]; }
+BATS
+  echo content > file.txt
+  _commit init
+  sha=$(git rev-parse HEAD)
+
+  mkdir -p .ccanvil .ccanvil/state
+  : > .ccanvil/manifest-allowlist.txt
+
+  BATS_REPORT_STATE_DIR=".ccanvil/state" bash "$MANIFEST" validate --json >/dev/null 2>&1
+  BATS_REPORT_STATE_DIR=".ccanvil/state" BATS_REPORT_FULL_SUITE=1 \
+    bash "$REPORT" --no-telemetry "$BATS_TEST_TMPDIR/pass.bats" >/dev/null 2>&1
+
+  # Both pairs of fields must be present after both writes.
+  jq -e --arg sha "$sha" '.last_manifest_validate_commit == $sha' < .ccanvil/state/test-state.json
+  jq -e --arg sha "$sha" '.last_full_suite_commit == $sha' < .ccanvil/state/test-state.json
 }

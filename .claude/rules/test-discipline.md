@@ -18,8 +18,7 @@ manifest:
     - .claude/skills/stasis/SKILL.md
     - .claude/rules/tdd.md
   depends-on:
-    - docs-check.sh test-state
-    - docs-check.sh check-skip-validate
+    - test-state
   side-effect:
     - "shapes-verification-flow (no file mutation; behavioral influence on Claude)"
   failure-mode:

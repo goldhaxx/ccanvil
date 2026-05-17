@@ -8265,15 +8265,19 @@ cmd_test_suite_run() {
 }
 
 # @manifest
-# id: cmd_test_state
-# caller:
-#   - .claude/commands/review.md
-#   - hub/tests/test-state.bats
-# side-effect: none (read-only state probe)
-# depends-on:
-#   - .ccanvil/state/test-state.json
-#   - .ccanvil/manifest-allowlist.txt
-# failure-mode: empty-envelope-on-missing-or-malformed-state
+# purpose: Read .ccanvil/state/test-state.json and emit the 7-field envelope describing when each long-running test substrate last ran (full-suite, manifest validate) and what's changed since; fail-safe empty envelope when state missing or malformed
+# input: --project-dir <path>
+# output: stdout JSON {last_full_suite_commit, last_full_suite_at, last_manifest_validate_commit, last_manifest_validate_at, files_changed_since_last_full_suite, files_changed_since_last_manifest_validate, manifest_tracked_files_changed_since_last_validate}
+# output: exit-codes 0 always (empty envelope on missing/malformed), 2 unknown-flag
+# caller: .claude/commands/review.md
+# caller: hub/tests/test-state.bats
+# depends-on: jq
+# side-effect: reads-test-state-file
+# failure-mode: missing-state-file | exit=0 | visible=empty-envelope | mitigation=consumer-runs-verification
+# failure-mode: malformed-json | exit=0 | visible=empty-envelope | mitigation=consumer-runs-verification
+# failure-mode: unknown-flag | exit=2 | visible=stderr-Usage
+# contract: never-aborts-fail-safe-empty-on-uncertain-state
+# anchor: BTS-508 (origin)
 # BTS-508 — read-only test-state probe. Returns the 7-field envelope describing
 # when each long-running test substrate last ran successfully and what's
 # changed since. Empty envelope `{}` is the fail-safe (AC-9): consumers default
@@ -8287,6 +8291,7 @@ cmd_test_state() {
         echo "Usage: docs-check.sh test-state [--project-dir <path>]" >&2
         return 0
         ;;
+      # @failure-mode: unknown-flag
       *) echo "Usage: docs-check.sh test-state [--project-dir <path>]" >&2; return 2 ;;
     esac
   done
@@ -8294,12 +8299,15 @@ cmd_test_state() {
   local state_file="$project_dir/.ccanvil/state/test-state.json"
   local allowlist="$project_dir/.ccanvil/manifest-allowlist.txt"
 
+  # @side-effect: reads-test-state-file
+  # @failure-mode: missing-state-file
   if [[ ! -f "$state_file" ]]; then
     echo "{}"
     return 0
   fi
   local raw
   raw=$(cat "$state_file" 2>/dev/null) || { echo "{}"; return 0; }
+  # @failure-mode: malformed-json
   if ! printf '%s' "$raw" | jq -e . >/dev/null 2>&1; then
     echo "{}"
     return 0
@@ -8354,14 +8362,21 @@ cmd_test_state() {
 }
 
 # @manifest
-# id: cmd_check_skip_validate
-# caller:
-#   - .claude/commands/review.md
-#   - hub/tests/review-skip-validate.bats
-# side-effect: none (read-only decision)
-# depends-on:
-#   - cmd_test_state
-# failure-mode: fail-safe-no-skip-on-empty-state
+# purpose: Emit the /review manifest-validate skip decision envelope by consulting cmd_test_state; skip fires iff last_manifest_validate_commit matches HEAD AND zero allowlisted files have changed since the cached validate
+# input: --project-dir <path>
+# output: stdout JSON {skip:bool, reason:string, sha?:string}
+# output: exit-codes 0 always (decision encoded in JSON), 2 unknown-flag
+# caller: .claude/commands/review.md
+# caller: hub/tests/review-skip-validate.bats
+# depends-on: jq
+# depends-on: cmd_test_state
+# side-effect: reads-test-state-file
+# failure-mode: empty-state | exit=0 | visible=json-reason-no-prior-validate | mitigation=consumer-runs-validate
+# failure-mode: commit-mismatch | exit=0 | visible=json-reason-commit-mismatch | mitigation=consumer-runs-validate
+# failure-mode: files-changed | exit=0 | visible=json-reason-files-changed | mitigation=consumer-runs-validate
+# failure-mode: unknown-flag | exit=2 | visible=stderr-Usage
+# contract: fail-safe-no-skip-on-uncertain-state
+# anchor: BTS-508 (origin)
 # BTS-508 — emits the /review skip decision envelope based on cmd_test_state's
 # output. Shape: `{skip: bool, reason: string, sha?: string}`. Skip fires iff
 # state has a last_manifest_validate_commit matching HEAD AND zero allowlisted
@@ -8376,10 +8391,12 @@ cmd_check_skip_validate() {
         echo "Usage: docs-check.sh check-skip-validate [--project-dir <path>]" >&2
         return 0
         ;;
+      # @failure-mode: unknown-flag
       *) echo "Usage: docs-check.sh check-skip-validate [--project-dir <path>]" >&2; return 2 ;;
     esac
   done
 
+  # @side-effect: reads-test-state-file
   local state
   state=$(cmd_test_state --project-dir "$project_dir")
 
@@ -8388,11 +8405,13 @@ cmd_check_skip_validate() {
   changed=$(printf '%s' "$state" | jq -r '.manifest_tracked_files_changed_since_last_validate // 0')
   head_sha=$(cd "$project_dir" && git rev-parse HEAD 2>/dev/null || echo "")
 
+  # @failure-mode: empty-state
   if [[ -z "$last_sha" || -z "$head_sha" ]]; then
     jq -n '{skip: false, reason: "no-prior-validate"}'
     return 0
   fi
 
+  # @failure-mode: commit-mismatch
   if [[ "$last_sha" != "$head_sha" ]]; then
     jq -n '{skip: false, reason: "commit-mismatch"}'
     return 0
@@ -8401,6 +8420,7 @@ cmd_check_skip_validate() {
   if [[ "$changed" == "0" ]]; then
     jq -n --arg sha "$last_sha" '{skip: true, reason: "no-manifest-tracked-changes", sha: $sha}'
   else
+    # @failure-mode: files-changed
     jq -n --argjson n "$changed" '{skip: false, reason: ("files-changed:" + ($n | tostring))}'
   fi
 }

@@ -7,6 +7,17 @@
 # exempt — it doesn't invoke bats-report.sh, it tests OTHER files'
 # compliance with the rule.
 #
+# COVERAGE GAP: the literal-substring detection catches direct invocation
+# and variable-assignment indirection (`SCRIPT=".../bats-report.sh"`). It
+# does NOT catch dispatcher-forwarded paths where `bats-report.sh` never
+# appears as a literal in the calling file — e.g., a test that invokes
+# `docs-check.sh test-suite-run` which internally exec's bats-report.sh.
+# Those cases require manual classification: the file author must KNOW the
+# transitive dependency and add `load _helpers/bats-report-stub` directly.
+# The drift-guard does not structurally enforce them. An abstract call-graph
+# check would close the gap but is out of scope here (BTS-507 chose Path 1:
+# grep-based detection with exempt markers, per the source ticket).
+#
 # bats-report-stub: exempt
 
 bats_require_minimum_version 1.5.0

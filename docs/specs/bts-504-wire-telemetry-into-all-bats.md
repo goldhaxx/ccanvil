@@ -4,7 +4,7 @@
 > Work: linear:BTS-504
 > Created: 1779220275
 > Subject: Wire telemetry helper into all hub/tests/*.bats
-> Status: In Progress
+> Status: Complete
 
 ## Summary
 

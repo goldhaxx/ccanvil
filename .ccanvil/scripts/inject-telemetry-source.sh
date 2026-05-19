@@ -36,11 +36,21 @@ set -euo pipefail
 # ---------------------------------------------------------------------------
 # Skip-list — files the injector intentionally leaves unwired.
 # ---------------------------------------------------------------------------
-# Each entry MUST carry a one-line rationale (AC-5).
-SKIP_LIST=(
-  # Tests the telemetry helper itself; double-sourcing would create recursion.
-  "telemetry-helper.bats"
-)
+# Each entry MUST carry a one-line rationale (AC-5). Currently empty —
+# 100% coverage. The earlier `telemetry-helper.bats` entry's stated
+# rationale ("double-sourcing creates recursion") was incorrect: bash
+# function re-definition is idempotent, and the file's tests subshell the
+# helper with overridden env, so the outer wiring does not interfere with
+# the test behavior under --no-telemetry mode (which CCANVIL_TELEMETRY_DISABLED=1
+# disables the outer hooks). Left as a structural extension point for any
+# future legitimate skip case.
+SKIP_LIST=()
+# Test override: CCANVIL_INJECT_SKIP_LIST_OVERRIDE (colon-separated basenames)
+# replaces the in-script SKIP_LIST. Allows the SKIP path to remain unit-tested
+# even when production SKIP_LIST is empty.
+if [[ -n "${CCANVIL_INJECT_SKIP_LIST_OVERRIDE:-}" ]]; then
+  IFS=':' read -r -a SKIP_LIST <<< "$CCANVIL_INJECT_SKIP_LIST_OVERRIDE"
+fi
 
 # ---------------------------------------------------------------------------
 # Subcommand dispatch (BTS-504 Step 1 — skeleton; per-cat wiring + classify
@@ -63,7 +73,8 @@ USAGE
 
 cmd_print_skip_list() {
   local f
-  for f in "${SKIP_LIST[@]}"; do
+  # Empty-array guard (bash 3.2 + set -u).
+  for f in "${SKIP_LIST[@]+"${SKIP_LIST[@]}"}"; do
     printf '%s\n' "$f"
   done
 }
@@ -79,7 +90,8 @@ cmd_print_skip_list() {
 
 _is_skip_listed() {
   local base="$1" entry
-  for entry in "${SKIP_LIST[@]}"; do
+  # Empty-array guard for bash 3.2 + set -u (macOS default).
+  for entry in "${SKIP_LIST[@]+"${SKIP_LIST[@]}"}"; do
     if [[ "$base" == "$entry" ]]; then
       return 0
     fi

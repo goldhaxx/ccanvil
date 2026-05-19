@@ -1,4 +1,10 @@
 #!/usr/bin/env bats
+
+# BTS-497 telemetry hooks.
+source "$BATS_TEST_DIRNAME/_helpers/telemetry.bash"
+setup_file()    { telemetry_setup_file; }
+teardown_file() { telemetry_teardown_file; }
+teardown()      { telemetry_teardown; }
 # BTS-497 Step 11 — bats telemetry helper foundation.
 #
 # Helper file: hub/tests/_helpers/telemetry.bash
@@ -17,6 +23,7 @@ setup() {
   # gets its own; here we use a fresh dir per test.
   export BATS_FILE_TMPDIR="$BATS_TEST_TMPDIR/file"
   mkdir -p "$BATS_FILE_TMPDIR"
+  telemetry_setup
 }
 
 # =========================================================================
@@ -36,10 +43,16 @@ setup() {
 # =========================================================================
 
 @test "AC-5: missing otel-cli → setup_file exits non-zero + names install command" {
+  # The helper short-circuits when CCANVIL_TELEMETRY_DISABLED is set
+  # (its --no-telemetry escape hatch), bypassing the otel-cli check this
+  # test asserts. Skip when running under --no-telemetry / DISABLED so the
+  # test stays meaningful in the mode where the assertion can fire.
+  [ -n "${CCANVIL_TELEMETRY_DISABLED:-}" ] && skip "incompatible with --no-telemetry (helper short-circuits before otel-cli check)"
   # PATH inside the bash subshell is shadowed so `command -v otel-cli`
   # fails. /bin/bash via absolute path so the subshell is reachable
-  # regardless of outer PATH state.
-  run /bin/bash -c "PATH=/nonexistent; source '$HELPER' && telemetry_setup_file"
+  # regardless of outer PATH state. Unset DISABLED in the subshell since
+  # the production behavior we're testing is the active-mode error path.
+  run /bin/bash -c "unset CCANVIL_TELEMETRY_DISABLED; PATH=/nonexistent; source '$HELPER' && telemetry_setup_file"
   [ "$status" -ne 0 ]
   echo "$output" | grep -qE 'otel-cli'
   echo "$output" | grep -qE 'brew install.*otel-cli'
@@ -50,8 +63,10 @@ setup() {
 # =========================================================================
 
 @test "AC-2: unreachable Collector → setup_file exits non-zero + names start command" {
-  # Point at a port that's certainly closed.
-  CCANVIL_TELEMETRY_URL="http://127.0.0.1:1" run bash -c "source '$HELPER' && telemetry_setup_file"
+  # Same rationale as AC-5: helper short-circuits under DISABLED.
+  [ -n "${CCANVIL_TELEMETRY_DISABLED:-}" ] && skip "incompatible with --no-telemetry (helper short-circuits before Collector check)"
+  # Point at a port that's certainly closed. Unset DISABLED in subshell.
+  run bash -c "unset CCANVIL_TELEMETRY_DISABLED; CCANVIL_TELEMETRY_URL=http://127.0.0.1:1; source '$HELPER' && telemetry_setup_file"
   [ "$status" -ne 0 ]
   echo "$output" | grep -qE 'Collector|healthcheck'
   echo "$output" | grep -qE 'docker compose'

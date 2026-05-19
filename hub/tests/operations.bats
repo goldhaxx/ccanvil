@@ -1,4 +1,9 @@
 #!/usr/bin/env bats
+
+# BTS-497 telemetry hooks.
+source "$BATS_TEST_DIRNAME/_helpers/telemetry.bash"
+setup_file()    { telemetry_setup_file; }
+teardown_file() { telemetry_teardown_file; }
 # Tests for scripts/operations.sh
 #
 # Each test creates an isolated project directory with fixture configs.
@@ -12,9 +17,11 @@ setup() {
   # behavior these tests assume.
   export CCANVIL_OPERATOR_CONFIG_OVERRIDE="${BATS_TEST_TMPDIR}/no-operator-config.json"
   PROJECT=$(mktemp -d)
+  telemetry_setup
 }
 
 teardown() {
+  telemetry_teardown
   rm -rf "$PROJECT"
 }
 

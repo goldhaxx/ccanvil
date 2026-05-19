@@ -6,6 +6,11 @@
 
 bats_require_minimum_version 1.5.0
 
+# BTS-497 telemetry hooks.
+source "$BATS_TEST_DIRNAME/_helpers/telemetry.bash"
+setup_file()    { telemetry_setup_file; }
+teardown_file() { telemetry_teardown_file; }
+
 DC="$BATS_TEST_DIRNAME/../../.ccanvil/scripts/docs-check.sh"
 
 setup() {
@@ -14,9 +19,11 @@ setup() {
   cd "$REPO"
   git init -q -b main
   git -c user.email=x@x -c user.name=x commit -q --allow-empty -m initial
+  telemetry_setup
 }
 
 teardown() {
+  telemetry_teardown
   cd /
   rm -rf "$REPO"
   if [[ -n "$NOTREPO" ]]; then

@@ -1,4 +1,9 @@
 #!/usr/bin/env bats
+
+# BTS-497 telemetry hooks.
+source "$BATS_TEST_DIRNAME/_helpers/telemetry.bash"
+setup_file()    { telemetry_setup_file; }
+teardown_file() { telemetry_teardown_file; }
 # End-to-end tests for /ccanvil-init retrofit onto mature / partial-ccanvil
 # projects. Covers AC-4/AC-5 mode-aware classify_file defaults, AC-6/AC-7/AC-25
 # section-merge-create-delimiters action, and AC-14/AC-15 retrofit-check.
@@ -12,9 +17,11 @@ setup() {
   mkdir -p "$NODE/.ccanvil/scripts"
   cp "$SCRIPT" "$NODE/.ccanvil/scripts/ccanvil-sync.sh"
   cd "$NODE"
+  telemetry_setup
 }
 
 teardown() {
+  telemetry_teardown
   rm -rf "$NODE"
 }
 

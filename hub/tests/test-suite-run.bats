@@ -12,6 +12,12 @@
 
 bats_require_minimum_version 1.5.0
 
+# BTS-497 telemetry hooks.
+source "$BATS_TEST_DIRNAME/_helpers/telemetry.bash"
+setup_file()    { telemetry_setup_file; }
+teardown_file() { telemetry_teardown_file; }
+teardown()      { telemetry_teardown; }
+
 DC="$BATS_TEST_DIRNAME/../../.ccanvil/scripts/docs-check.sh"
 
 setup() {
@@ -29,6 +35,7 @@ exit 0
 STUB_EOF
   chmod +x "$STUB"
   export BATS_REPORT_OVERRIDE="$STUB"
+  telemetry_setup
 }
 
 # ---------------------------------------------------------------------------

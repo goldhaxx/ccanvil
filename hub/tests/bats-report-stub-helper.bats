@@ -1,4 +1,11 @@
 #!/usr/bin/env bats
+
+# BTS-497 telemetry hooks.
+source "$BATS_TEST_DIRNAME/_helpers/telemetry.bash"
+setup_file()    { telemetry_setup_file; }
+teardown_file() { telemetry_teardown_file; }
+setup()         { telemetry_setup; }
+teardown()      { telemetry_teardown; }
 #
 # BTS-507 — shared helper that bypasses bats-report.sh's BTS-281 module-manifest
 # pre-warm. Tests in this file exercise the helper directly (not via a

@@ -1,4 +1,10 @@
 #!/usr/bin/env bats
+
+# BTS-497 telemetry hooks.
+source "$BATS_TEST_DIRNAME/_helpers/telemetry.bash"
+setup_file()    { telemetry_setup_file; }
+teardown_file() { telemetry_teardown_file; }
+teardown()      { telemetry_teardown; }
 # BTS-497 Step 13 — bats-report.sh invokes otel-flatten.sh post-run with
 # AC-12d exit-code precedence:
 #
@@ -36,6 +42,7 @@ EOF
   export CCANVIL_TELEMETRY_DISABLED=1
   export BATS_REPORT_STATE_DIR="$BATS_TEST_TMPDIR/state"
   export OTEL_FLATTEN_OUTPUT="$BATS_TEST_TMPDIR/test-runs.jsonl"
+  telemetry_setup
 }
 
 # =========================================================================

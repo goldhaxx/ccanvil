@@ -1,10 +1,17 @@
 #!/usr/bin/env bats
+
+# BTS-497 telemetry hooks.
+source "$BATS_TEST_DIRNAME/_helpers/telemetry.bash"
+setup_file()    { telemetry_setup_file; }
+teardown_file() { telemetry_teardown_file; }
+teardown()      { telemetry_teardown; }
 # BTS-265: cmd_validate_spec — Layer 1 spec structural validation.
 
 setup() {
   REPO_ROOT="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"
   SCRIPT="$REPO_ROOT/.ccanvil/scripts/docs-check.sh"
   FIXTURE_DIR="$REPO_ROOT/hub/tests/fixtures/specs"
+  telemetry_setup
 }
 
 # AC-7: unknown feature → exit 2 with stderr error.

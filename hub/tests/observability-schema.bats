@@ -1,4 +1,11 @@
 #!/usr/bin/env bats
+
+# BTS-497 telemetry hooks.
+source "$BATS_TEST_DIRNAME/_helpers/telemetry.bash"
+setup_file()    { telemetry_setup_file; }
+teardown_file() { telemetry_teardown_file; }
+setup()         { telemetry_setup; }
+teardown()      { telemetry_teardown; }
 # BTS-497 Step 1 — drift-guard for the runner-neutral observability schema.
 #
 # AC-9: span schema documented as a runner-neutral contract in

@@ -1,4 +1,9 @@
 #!/usr/bin/env bats
+
+# BTS-497 telemetry hooks.
+source "$BATS_TEST_DIRNAME/_helpers/telemetry.bash"
+setup_file()    { telemetry_setup_file; }
+teardown_file() { telemetry_teardown_file; }
 # Tests for the ideas-to-linear feature.
 # Covers the provider-routing layer for idea.* operations (Step 1 of the plan).
 # Later steps extend this file with coverage for docs-check.sh rewiring,
@@ -15,9 +20,11 @@ setup() {
   export CCANVIL_OPERATOR_CONFIG_OVERRIDE="${BATS_TEST_TMPDIR}/no-operator-config.json"
   PROJECT=$(mktemp -d)
   mkdir -p "$PROJECT/.ccanvil"
+  telemetry_setup
 }
 
 teardown() {
+  telemetry_teardown
   rm -rf "$PROJECT"
 }
 

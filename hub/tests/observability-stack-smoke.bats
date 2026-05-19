@@ -1,4 +1,10 @@
 #!/usr/bin/env bats
+
+# BTS-497 telemetry hooks.
+source "$BATS_TEST_DIRNAME/_helpers/telemetry.bash"
+setup_file()    { telemetry_setup_file; }
+teardown_file() { telemetry_teardown_file; }
+teardown()      { telemetry_teardown; }
 # BTS-497 Step 8 — AC-8: docker-compose stack scaffold smoke tests.
 #
 # Validates the static structure of .ccanvil/observability/docker-compose.yml
@@ -15,6 +21,7 @@ COMPOSE="$BATS_TEST_DIRNAME/../../.ccanvil/observability/docker-compose.yml"
 setup() {
   command -v docker >/dev/null 2>&1 || skip "docker cli not on PATH"
   [ -f "$COMPOSE" ] || skip "docker-compose.yml not yet created"
+  telemetry_setup
 }
 
 # =========================================================================

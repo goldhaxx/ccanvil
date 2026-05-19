@@ -1,4 +1,11 @@
 #!/usr/bin/env bets
+
+# BTS-497 telemetry hooks.
+source "$BATS_TEST_DIRNAME/_helpers/telemetry.bash"
+setup_file()    { telemetry_setup_file; }
+teardown_file() { telemetry_teardown_file; }
+setup()         { telemetry_setup; }
+teardown()      { telemetry_teardown; }
 # Grep-assertion tests for global-commands/ccanvil-init.md.
 #
 # The skill is Claude-executed documentation, not a runnable script — so

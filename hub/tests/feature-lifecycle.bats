@@ -1,4 +1,9 @@
 #!/usr/bin/env bats
+
+# BTS-497 telemetry hooks.
+source "$BATS_TEST_DIRNAME/_helpers/telemetry.bash"
+setup_file()    { telemetry_setup_file; }
+teardown_file() { telemetry_teardown_file; }
 # Tests for branch-based feature lifecycle
 #
 # Covers: ccanvil config, list-specs, activate, complete, validate/recommend
@@ -37,9 +42,11 @@ setup() {
   REMOTE=$(mktemp -d)
   git -C "$REMOTE" init -q --bare
   git -C "$PROJECT" remote add origin "$REMOTE"
+  telemetry_setup
 }
 
 teardown() {
+  telemetry_teardown
   rm -rf "$PROJECT" "$REMOTE"
 }
 

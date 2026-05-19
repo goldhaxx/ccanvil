@@ -1,4 +1,9 @@
 #!/usr/bin/env bats
+
+# BTS-497 telemetry hooks.
+source "$BATS_TEST_DIRNAME/_helpers/telemetry.bash"
+teardown_file() { telemetry_teardown_file; }
+teardown()      { telemetry_teardown; }
 # BTS-239 Step 9: self-application — manifests for module-manifest.sh's verbs.
 # BTS-267: cmd_seed_allowlist added — 4 → 5 verbs.
 # BTS-268: cmd_diff_vs_manifest added — 5 → 6 verbs.
@@ -7,6 +12,7 @@
 load _helpers/manifest-validate-cache
 
 setup_file() {
+  telemetry_setup_file
   manifest_validate_cache_setup_file
 }
 
@@ -14,6 +20,7 @@ setup() {
   REPO_ROOT="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"
   SCRIPT="$REPO_ROOT/.ccanvil/scripts/module-manifest.sh"
   manifest_validate_cache_setup
+  telemetry_setup
 }
 
 @test "self-app: extract emits manifests for all 7 verbs (cmd_extract, cmd_validate, cmd_query, cmd_index, cmd_seed_allowlist, cmd_diff_vs_manifest, cmd_graph)" {

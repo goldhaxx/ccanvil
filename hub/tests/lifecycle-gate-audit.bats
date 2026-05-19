@@ -10,6 +10,11 @@
 
 bats_require_minimum_version 1.5.0
 
+# BTS-497 telemetry hooks.
+source "$BATS_TEST_DIRNAME/_helpers/telemetry.bash"
+setup_file()    { telemetry_setup_file; }
+teardown_file() { telemetry_teardown_file; }
+
 DOCS="$BATS_TEST_DIRNAME/../../.ccanvil/scripts/docs-check.sh"
 
 load helpers/seed-repo
@@ -17,9 +22,11 @@ load helpers/seed-repo
 setup() {
   export TMPDIR="${BATS_TEST_TMPDIR}"
   seed_repo_with_origin
+  telemetry_setup
 }
 
 teardown() {
+  telemetry_teardown
   rm -rf "$REPO" "$BARE"
 }
 

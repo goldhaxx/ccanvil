@@ -220,6 +220,19 @@ Layer 2 of the Dark Code framework — Self-Describing Systems. Each substrate p
 | `module-manifest.sh query '<key>:<value>'` | Substring-match filter against `.ccanvil/state/manifests.json` (regenerated lazily if mtime-stale). Returns JSON array of matching entries. Empty array on no match. Exit 0 always (2 on usage error). |
 | `module-manifest.sh index` | Walk `.ccanvil/scripts/`, `.claude/hooks/`, `.claude/hooks/_lib/` (`.sh` only) PLUS `.claude/skills/<n>/SKILL.md`, `.claude/rules/*.md`, `.claude/agents/*.md`, `.claude/commands/*.md` (BTS-240), invoke `extract` per file, merge into a sorted JSON object keyed `<path>:<id>` at `.ccanvil/state/manifests.json` (gitignored). Atomic via `mv`; deterministic across runs. |
 
+## Telemetry Wiring Substrate (BTS-504)
+
+Wires the BTS-497 telemetry helper (`hub/tests/_helpers/telemetry.bash`) into bats test files via category-dispatched template injection. 6-row truth table on 4 booleans (`setup_file`/`teardown_file`/`setup`/`teardown` presence) partitions the supported shapes; everything else surfaces as `UNCLASSIFIED` (file unchanged).
+
+| Command | What it does |
+|---------|-------------|
+| `inject-telemetry-source.sh classify <file>` | Emit `A\|B\|C\|E\|F\|G\|SKIP\|UNCLASSIFIED` per the truth table. |
+| `inject-telemetry-source.sh <file>` | Wire one file (idempotent — already-wired files exit 0 unchanged). |
+| `inject-telemetry-source.sh --all [--root <dir>]` | Walk `hub/tests/*.bats` (or `<dir>`); accumulate-then-exit (every non-skip-listed file processed, then exit 0 iff `unclassified == 0`); JSON envelope `{wired, already_wired, skipped, unclassified, unclassified_files}`. |
+| `inject-telemetry-source.sh print-skip-list` | Print one filename per line — the documented skip-list (single source of truth shared with the drift-guard `hub/tests/telemetry-coverage.bats`). |
+
+Drift-guard: `hub/tests/telemetry-coverage.bats` fails if any non-skip-listed bats file lacks the wiring marker, so new files added to `hub/tests/` cannot ship without the helper wired in.
+
 ## Stack Distribution Scripts
 
 | Command | What it does |

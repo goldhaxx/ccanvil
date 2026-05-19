@@ -5,6 +5,11 @@
 
 bats_require_minimum_version 1.5.0
 
+# BTS-497 telemetry hooks.
+source "$BATS_TEST_DIRNAME/_helpers/telemetry.bash"
+setup_file()    { telemetry_setup_file; }
+teardown_file() { telemetry_teardown_file; }
+
 SCRIPT="$BATS_TEST_DIRNAME/../../.ccanvil/scripts/permissions-audit.sh"
 
 setup() {
@@ -13,9 +18,11 @@ setup() {
   # (tests that specifically test missing/invalid log override this)
   echo '{"entries":{}}' > "$FIXTURE/permissions-log.json"
   DEFAULT_LOG="$FIXTURE/permissions-log.json"
+  telemetry_setup
 }
 
 teardown() {
+  telemetry_teardown
   rm -rf "$FIXTURE"
 }
 

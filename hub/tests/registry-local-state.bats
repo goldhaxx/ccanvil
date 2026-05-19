@@ -1,4 +1,9 @@
 #!/usr/bin/env bats
+
+# BTS-497 telemetry hooks.
+source "$BATS_TEST_DIRNAME/_helpers/telemetry.bash"
+setup_file()    { telemetry_setup_file; }
+teardown_file() { telemetry_teardown_file; }
 # Tests for registry-local-state: registry.json is gitignored local state,
 # no hub commits during register/broadcast, append-only events.log audit trail.
 # Spec: docs/specs/registry-local-state.md
@@ -40,6 +45,7 @@ HUBEOF
   git -C "$NODE" config user.name test
   git -C "$NODE" add -A
   git -C "$NODE" commit -q -m "init node"
+  telemetry_setup
 }
 
 teardown() { rm -rf "$HUB" "$NODE"; }

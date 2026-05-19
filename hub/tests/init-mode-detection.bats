@@ -1,4 +1,9 @@
 #!/usr/bin/env bats
+
+# BTS-497 telemetry hooks.
+source "$BATS_TEST_DIRNAME/_helpers/telemetry.bash"
+setup_file()    { telemetry_setup_file; }
+teardown_file() { telemetry_teardown_file; }
 # Tests for project-mode detection in ccanvil-sync.sh init-preflight.
 #
 # Mode detection classifies the target directory into one of five modes
@@ -17,9 +22,11 @@ setup() {
   mkdir -p "$NODE/.ccanvil/scripts"
   cp "$SCRIPT" "$NODE/.ccanvil/scripts/ccanvil-sync.sh"
   cd "$NODE"
+  telemetry_setup
 }
 
 teardown() {
+  telemetry_teardown
   rm -rf "$NODE"
 }
 

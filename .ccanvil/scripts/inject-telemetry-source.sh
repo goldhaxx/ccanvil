@@ -185,7 +185,23 @@ _wire_with_directives() {
   awk -v blockfile="$blockfile" \
       -v pre_sf="$pre_sf" -v pre_t="$pre_t" \
       -v app_s="$app_s"  -v app_tf="$app_tf" '
-    BEGIN { inserted = 0; state = "outside" }
+    BEGIN { inserted = 0; state = "outside"; heredoc_id = ""; heredoc_dash = 0 }
+
+    # Heredoc pass-through: print line, check for closing terminator, do
+    # NOT process function open/close patterns while inside a heredoc.
+    # Bash heredocs with quoted or unquoted IDs all close on the line
+    # containing only the ID; <<- variants allow leading tabs.
+    heredoc_id != "" {
+      print
+      if (heredoc_dash) {
+        if ($0 ~ ("^[\t]*" heredoc_id "[[:space:]]*$")) {
+          heredoc_id = ""; heredoc_dash = 0
+        }
+      } else {
+        if ($0 == heredoc_id) { heredoc_id = ""; heredoc_dash = 0 }
+      }
+      next
+    }
 
     # Source+ADD block insertion (once, after bats_require_minimum_version).
     !inserted && /^bats_require_minimum_version/ {
@@ -220,7 +236,7 @@ _wire_with_directives() {
       next
     }
 
-    # User function close (bare `}`).
+    # User function close (bare `}`). Only reachable when NOT inside heredoc.
     state != "outside" && /^\}[[:space:]]*$/ {
       if (state == "in_setup" && app_s == "yes")            print "  telemetry_setup"
       if (state == "in_teardown_file" && app_tf == "yes")   print "  telemetry_teardown_file"
@@ -229,7 +245,32 @@ _wire_with_directives() {
       next
     }
 
-    { print }
+    # Default: emit + check for heredoc opening on the line.
+    {
+      print
+      # Detect heredoc opening: << optionally followed by -, optional
+      # whitespace, optional quote, identifier, optional matching quote.
+      # Match the LAST occurrence on the line (bash takes the rightmost
+      # `<<` when multiple appear).
+      tmp_s = $0
+      last_start = 0
+      while (match(tmp_s, /<<-?[[:space:]]*['\''"]?[A-Za-z_][A-Za-z0-9_]*['\''"]?/)) {
+        last_start = RSTART
+        last_chunk = substr(tmp_s, RSTART, RLENGTH)
+        tmp_s = substr(tmp_s, RSTART + RLENGTH)
+      }
+      if (last_start > 0) {
+        # Strip leading <<.
+        rest = last_chunk
+        sub(/^<</, "", rest)
+        heredoc_dash = 0
+        if (substr(rest, 1, 1) == "-") { heredoc_dash = 1; rest = substr(rest, 2) }
+        sub(/^[[:space:]]+/, "", rest)
+        sub(/^['\''"]/, "", rest)
+        sub(/['\''"]$/, "", rest)
+        heredoc_id = rest
+      }
+    }
   ' "$file" > "$tmp" 2>/dev/null
 
   # Fallback: no bats_require_minimum_version line → insert after shebang.
@@ -238,7 +279,16 @@ _wire_with_directives() {
     awk -v blockfile="$blockfile" \
         -v pre_sf="$pre_sf" -v pre_t="$pre_t" \
         -v app_s="$app_s"  -v app_tf="$app_tf" '
-      BEGIN { inserted = 0; state = "outside" }
+      BEGIN { inserted = 0; state = "outside"; heredoc_id = ""; heredoc_dash = 0 }
+      heredoc_id != "" {
+        print
+        if (heredoc_dash) {
+          if ($0 ~ ("^[\t]*" heredoc_id "[[:space:]]*$")) { heredoc_id = ""; heredoc_dash = 0 }
+        } else {
+          if ($0 == heredoc_id) { heredoc_id = ""; heredoc_dash = 0 }
+        }
+        next
+      }
       NR == 1 && !inserted {
         print
         while ((getline line < blockfile) > 0) print line
@@ -263,7 +313,20 @@ _wire_with_directives() {
         if (state == "in_teardown_file" && app_tf == "yes") print "  telemetry_teardown_file"
         print; state = "outside"; next
       }
-      { print }
+      {
+        print
+        tmp_s = $0; last_start = 0
+        while (match(tmp_s, /<<-?[[:space:]]*['\''"]?[A-Za-z_][A-Za-z0-9_]*['\''"]?/)) {
+          last_start = RSTART; last_chunk = substr(tmp_s, RSTART, RLENGTH)
+          tmp_s = substr(tmp_s, RSTART + RLENGTH)
+        }
+        if (last_start > 0) {
+          rest = last_chunk; sub(/^<</, "", rest); heredoc_dash = 0
+          if (substr(rest, 1, 1) == "-") { heredoc_dash = 1; rest = substr(rest, 2) }
+          sub(/^[[:space:]]+/, "", rest); sub(/^['\''"]/, "", rest); sub(/['\''"]$/, "", rest)
+          heredoc_id = rest
+        }
+      }
     ' "$file" > "$tmp"
   fi
 
@@ -361,14 +424,19 @@ cmd_all() {
   done
   shopt -u nullglob
 
-  # JSON envelope.
+  # JSON envelope. Compose unclassified_files JSON conditionally so an empty
+  # array stays as [] rather than collapsing to [""] via the printf|jq pipeline.
+  local uf_json="[]"
+  if (( ${#unclassified_files[@]} > 0 )); then
+    uf_json=$(printf '%s\n' "${unclassified_files[@]}" | jq -R . | jq -s .)
+  fi
   jq -n \
     --arg root "$root" \
     --argjson wired "$wired" \
     --argjson already "$already" \
     --argjson skipped "$skipped" \
     --argjson unclassified "$unclassified" \
-    --argjson unclassified_files "$(printf '%s\n' "${unclassified_files[@]+"${unclassified_files[@]}"}" | jq -R . | jq -s .)" \
+    --argjson unclassified_files "$uf_json" \
     '{root: $root, wired: $wired, already_wired: $already, skipped: $skipped, unclassified: $unclassified, unclassified_files: $unclassified_files}'
 
   if (( unclassified > 0 )); then

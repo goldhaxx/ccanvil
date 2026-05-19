@@ -1,4 +1,10 @@
 #!/usr/bin/env bats
+
+# BTS-497 telemetry hooks.
+source "$BATS_TEST_DIRNAME/_helpers/telemetry.bash"
+setup_file()    { telemetry_setup_file; }
+teardown_file() { telemetry_teardown_file; }
+teardown()      { telemetry_teardown; }
 # BTS-497 Step 3 — otel-flatten.sh core flatten path (AC-10).
 #
 # The flatten step reads OTLP `ExportTraceServiceRequest` envelopes from
@@ -16,6 +22,7 @@ FIXTURE="$BATS_TEST_DIRNAME/fixtures/raw-traces-sample.jsonl"
 setup() {
   export OTEL_FLATTEN_INPUT="$FIXTURE"
   export OTEL_FLATTEN_OUTPUT="$BATS_TEST_TMPDIR/test-runs.jsonl"
+  telemetry_setup
 }
 
 # =========================================================================

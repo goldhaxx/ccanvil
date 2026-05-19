@@ -1,4 +1,9 @@
 #!/usr/bin/env bats
+
+# BTS-497 telemetry hooks.
+source "$BATS_TEST_DIRNAME/_helpers/telemetry.bash"
+setup_file()    { telemetry_setup_file; }
+teardown_file() { telemetry_teardown_file; }
 # Tests for the idea-upgrade feature.
 # Covers:
 #   - docs-check.sh title-from-body (AC-9..AC-12)
@@ -12,9 +17,11 @@ setup() {
   export TMPDIR="${BATS_TEST_TMPDIR}"
   PROJECT=$(mktemp -d)
   mkdir -p "$PROJECT/.ccanvil"
+  telemetry_setup
 }
 
 teardown() {
+  telemetry_teardown
   rm -rf "$PROJECT"
 }
 

@@ -1,4 +1,9 @@
 #!/usr/bin/env bats
+
+# BTS-497 telemetry hooks.
+source "$BATS_TEST_DIRNAME/_helpers/telemetry.bash"
+setup_file()    { telemetry_setup_file; }
+teardown_file() { telemetry_teardown_file; }
 # Tests for scripts/manifest-check.sh
 #
 # Each test creates isolated temp directories with mock README and files.
@@ -10,9 +15,11 @@ setup() {
   REPO=$(mktemp -d)
   cd "$REPO"
   git init -q
+  telemetry_setup
 }
 
 teardown() {
+  telemetry_teardown
   rm -rf "$REPO"
 }
 

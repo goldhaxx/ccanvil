@@ -8,6 +8,13 @@
 
 bats_require_minimum_version 1.5.0
 
+# BTS-497 telemetry hooks.
+source "$BATS_TEST_DIRNAME/_helpers/telemetry.bash"
+setup_file()    { telemetry_setup_file; }
+teardown_file() { telemetry_teardown_file; }
+setup()         { telemetry_setup; }
+teardown()      { telemetry_teardown; }
+
 HOOK="$BATS_TEST_DIRNAME/../../.claude/hooks/guard-workspace.sh"
 
 # Helper: build the hook input for a given Bash command and run the hook.

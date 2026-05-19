@@ -1,4 +1,9 @@
 #!/usr/bin/env bats
+
+# BTS-497 telemetry hooks.
+source "$BATS_TEST_DIRNAME/_helpers/telemetry.bash"
+setup_file()    { telemetry_setup_file; }
+teardown_file() { telemetry_teardown_file; }
 # Tests for ccanvil.json + ccanvil.local.json overlay merge behavior.
 #
 # Each test creates an isolated project directory with fixture configs.
@@ -13,9 +18,11 @@ setup() {
   export CCANVIL_OPERATOR_CONFIG_OVERRIDE="${BATS_TEST_TMPDIR}/no-operator-config.json"
   PROJECT=$(mktemp -d)
   mkdir -p "$PROJECT/.claude"
+  telemetry_setup
 }
 
 teardown() {
+  telemetry_teardown
   rm -rf "$PROJECT"
 }
 

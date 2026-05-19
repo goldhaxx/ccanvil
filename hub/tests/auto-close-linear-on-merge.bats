@@ -1,4 +1,9 @@
 #!/usr/bin/env bats
+
+# BTS-497 telemetry hooks.
+source "$BATS_TEST_DIRNAME/_helpers/telemetry.bash"
+setup_file()    { telemetry_setup_file; }
+teardown_file() { telemetry_teardown_file; }
 # Tests for auto-close Linear on PR merge — BTS-119.
 # cmd_extract_work helper + cmd_land AUTO-CLOSE intent emission + /idea sync
 # support for the ticket.transition op shape.
@@ -9,9 +14,11 @@ setup() {
   export TMPDIR="${BATS_TEST_TMPDIR}"
   PROJECT=$(mktemp -d)
   mkdir -p "$PROJECT/.ccanvil" "$PROJECT/.claude" "$PROJECT/docs/specs"
+  telemetry_setup
 }
 
 teardown() {
+  telemetry_teardown
   rm -rf "$PROJECT"
 }
 

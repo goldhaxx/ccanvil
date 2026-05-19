@@ -1,4 +1,10 @@
 #!/usr/bin/env bats
+
+# BTS-497 telemetry hooks.
+source "$BATS_TEST_DIRNAME/_helpers/telemetry.bash"
+setup_file()    { telemetry_setup_file; }
+teardown_file() { telemetry_teardown_file; }
+teardown()      { telemetry_teardown; }
 # BTS-239 Step 10: drift-guard with mutation tests — AC-8.
 
 setup() {
@@ -9,6 +15,7 @@ setup() {
   # Stage a single greenfield fixture as the only source.
   cp "$REPO_ROOT/hub/tests/fixtures/manifest/valid-deep.sh" "$PROJ/.ccanvil/scripts/valid-deep.sh"
   echo ".ccanvil/scripts/valid-deep.sh:valid_deep_func" > "$PROJ/.ccanvil/manifest-allowlist.txt"
+  telemetry_setup
 }
 
 @test "drift-guard clean state: validate exits 0" {

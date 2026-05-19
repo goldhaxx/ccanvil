@@ -5,6 +5,11 @@
 
 bats_require_minimum_version 1.5.0
 
+# BTS-497 telemetry hooks.
+source "$BATS_TEST_DIRNAME/_helpers/telemetry.bash"
+setup_file()    { telemetry_setup_file; }
+teardown_file() { telemetry_teardown_file; }
+
 SCRIPT="$BATS_TEST_DIRNAME/../../.ccanvil/scripts/security-audit.sh"
 
 setup() {
@@ -13,9 +18,11 @@ setup() {
   git init -q
   echo "# Clean project" > README.md
   git add -A && git commit -q -m "init"
+  telemetry_setup
 }
 
 teardown() {
+  telemetry_teardown
   rm -rf "$REPO"
 }
 

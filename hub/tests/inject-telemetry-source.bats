@@ -292,6 +292,31 @@ _setup_copy() {
   [ "$status" -eq 0 ]
 }
 
+# ---------------------------------------------------------------------------
+# Step 9 — Heredoc-protected function bodies (regression guard).
+# The state-machine MUST NOT treat a heredoc-internal bare `}` as the
+# function close. Anchored on the BTS-504 Step 9 rollout regression.
+# ---------------------------------------------------------------------------
+
+@test "AC-1 (heredoc): bare-} inside heredoc body NOT misread as function close" {
+  cp "$FIX/cat-c-heredoc.bats" "$BATS_TEST_TMPDIR/cat-c-heredoc.bats"
+  target="$BATS_TEST_TMPDIR/cat-c-heredoc.bats"
+  run bash "$SCRIPT" "$target"
+  [ "$status" -eq 0 ]
+  # telemetry_setup must appear AFTER EXAMPLE_VAR="hello" (the real setup
+  # body's tail), not after the heredoc-internal `}`. Equivalently:
+  # telemetry_setup must appear AFTER `EOF` (which ends the heredoc) AND
+  # AFTER EXAMPLE_VAR (which follows EOF in the existing body).
+  eof_line=$(grep -n '^EOF$' "$target" | head -1 | cut -d: -f1)
+  example=$(grep -n 'EXAMPLE_VAR="hello"' "$target" | head -1 | cut -d: -f1)
+  telemetry=$(grep -n '^[[:space:]]*telemetry_setup[[:space:]]*$' "$target" | head -1 | cut -d: -f1)
+  [ -n "$eof_line" ] && [ -n "$example" ] && [ -n "$telemetry" ]
+  [ "$telemetry" -gt "$eof_line" ]
+  [ "$telemetry" -gt "$example" ]
+  CCANVIL_TELEMETRY_DISABLED=1 run bats "$target"
+  [ "$status" -eq 0 ]
+}
+
 # Cat G — teardown() only → PREPEND telemetry_teardown; ADD setup_file/teardown_file/setup.
 @test "AC-1 (Cat G): telemetry_teardown PREPENDED to existing teardown body" {
   target=$(_setup_copy g)

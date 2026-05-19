@@ -1,4 +1,9 @@
 #!/usr/bin/env bats
+
+# BTS-497 telemetry hooks.
+source "$BATS_TEST_DIRNAME/_helpers/telemetry.bash"
+setup_file()    { telemetry_setup_file; }
+teardown_file() { telemetry_teardown_file; }
 # Tests for the idea-triage-native feature.
 # Covers the five-state lifecycle (triage → backlog / icebox / canceled / duplicate),
 # agentic mutations via state IDs, Icebox review, and legacy migration.
@@ -10,9 +15,11 @@ setup() {
   export TMPDIR="${BATS_TEST_TMPDIR}"
   PROJECT=$(mktemp -d)
   mkdir -p "$PROJECT/.ccanvil"
+  telemetry_setup
 }
 
 teardown() {
+  telemetry_teardown
   rm -rf "$PROJECT"
 }
 

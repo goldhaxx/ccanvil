@@ -1,4 +1,9 @@
 #!/usr/bin/env bats
+
+# BTS-497 telemetry hooks.
+source "$BATS_TEST_DIRNAME/_helpers/telemetry.bash"
+setup_file()    { telemetry_setup_file; }
+teardown_file() { telemetry_teardown_file; }
 # Tests for pull-apply take-hub auto-reinvoking stack-apply.
 # Spec: docs/specs/take-hub-stack-reapply.md (BTS-74, Feature 2 of 3)
 
@@ -74,9 +79,11 @@ SEOF
   }
 }
 LOCKEOF
+  telemetry_setup
 }
 
 teardown() {
+  telemetry_teardown
   rm -rf "$HUB" "$NODE"
 }
 

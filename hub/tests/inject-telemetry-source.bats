@@ -110,3 +110,216 @@ FIX="$BATS_TEST_DIRNAME/fixtures/inject-telemetry"
   [ "$status" -eq 0 ]
   echo "$output" | grep -qFx 'telemetry-helper.bats'
 }
+
+# ---------------------------------------------------------------------------
+# Step 3 — Cat A wiring (AC-1 partial).
+# Reference: hub/tests/canonical-fixtures.bats:12-17.
+# ---------------------------------------------------------------------------
+
+_setup_cat_a_copy() {
+  # Copy the Cat A fixture into a writable tmp file (the fixture itself must
+  # stay pristine for re-use across tests).
+  cp "$FIX/cat-a.bats" "$BATS_TEST_TMPDIR/cat-a.bats"
+  echo "$BATS_TEST_TMPDIR/cat-a.bats"
+}
+
+@test "AC-1 (Cat A): wiring injects source line + 4 wrappers in order" {
+  target=$(_setup_cat_a_copy)
+  run bash "$SCRIPT" "$target"
+  [ "$status" -eq 0 ]
+  # Source line present.
+  grep -qE '^source "\$BATS_TEST_DIRNAME/_helpers/telemetry\.bash"$' "$target"
+  # All 4 lifecycle wrappers present.
+  grep -qE '^setup_file\(\)[[:space:]]*\{.*telemetry_setup_file' "$target"
+  grep -qE '^teardown_file\(\)[[:space:]]*\{.*telemetry_teardown_file' "$target"
+  grep -qE '^setup\(\)[[:space:]]*\{.*telemetry_setup' "$target"
+  grep -qE '^teardown\(\)[[:space:]]*\{.*telemetry_teardown' "$target"
+}
+
+@test "AC-1 (Cat A): source line appears AFTER bats_require_minimum_version" {
+  target=$(_setup_cat_a_copy)
+  bash "$SCRIPT" "$target"
+  bats_line=$(grep -n '^bats_require_minimum_version' "$target" | head -1 | cut -d: -f1)
+  source_line=$(grep -n '^source.*telemetry\.bash' "$target" | head -1 | cut -d: -f1)
+  [ -n "$bats_line" ] && [ -n "$source_line" ]
+  [ "$source_line" -gt "$bats_line" ]
+}
+
+@test "AC-1 (Cat A): existing @test block is preserved" {
+  target=$(_setup_cat_a_copy)
+  bash "$SCRIPT" "$target"
+  grep -qF '@test "cat-a fixture: trivial test passes"' "$target"
+}
+
+@test "AC-1 (Cat A): post-wiring file still parses as valid bats" {
+  target=$(_setup_cat_a_copy)
+  bash "$SCRIPT" "$target"
+  # Disabled mode keeps the helper a no-op so we don't need the OTel stack.
+  CCANVIL_TELEMETRY_DISABLED=1 run bats "$target"
+  [ "$status" -eq 0 ]
+}
+
+# ---------------------------------------------------------------------------
+# Step 4 — Cat B / C / E / F wiring (AC-1 full, including order sensitivity).
+# ---------------------------------------------------------------------------
+
+_setup_copy() {
+  # $1 = category letter (a|b|c|e|f). Returns absolute path of tmp copy.
+  cp "$FIX/cat-$1.bats" "$BATS_TEST_TMPDIR/cat-$1.bats"
+  echo "$BATS_TEST_TMPDIR/cat-$1.bats"
+}
+
+# Cat B — setup() only → APPEND telemetry_setup; ADD setup_file/teardown_file/teardown.
+@test "AC-1 (Cat B): telemetry_setup APPENDED to existing setup body" {
+  target=$(_setup_copy b)
+  run bash "$SCRIPT" "$target"
+  [ "$status" -eq 0 ]
+  # telemetry_setup must appear AFTER the existing EXAMPLE_VAR assignment
+  # but BEFORE the closing brace of the setup() function.
+  existing_line=$(grep -n 'EXAMPLE_VAR="hello"' "$target" | head -1 | cut -d: -f1)
+  telemetry_line=$(grep -n '^[[:space:]]*telemetry_setup[[:space:]]*$' "$target" | head -1 | cut -d: -f1)
+  [ -n "$existing_line" ] && [ -n "$telemetry_line" ]
+  [ "$telemetry_line" -gt "$existing_line" ]
+}
+
+@test "AC-1 (Cat B): ADD setup_file, teardown_file, teardown wrappers" {
+  target=$(_setup_copy b)
+  bash "$SCRIPT" "$target"
+  grep -qE '^setup_file\(\)[[:space:]]*\{.*telemetry_setup_file' "$target"
+  grep -qE '^teardown_file\(\)[[:space:]]*\{.*telemetry_teardown_file' "$target"
+  grep -qE '^teardown\(\)[[:space:]]*\{.*telemetry_teardown' "$target"
+}
+
+@test "AC-1 (Cat B): post-wiring file still parses as valid bats" {
+  target=$(_setup_copy b)
+  bash "$SCRIPT" "$target"
+  CCANVIL_TELEMETRY_DISABLED=1 run bats "$target"
+  [ "$status" -eq 0 ]
+}
+
+# Cat C — setup() + teardown() → APPEND telemetry_setup; PREPEND telemetry_teardown;
+# ADD setup_file/teardown_file.
+@test "AC-1 (Cat C): telemetry_teardown PREPENDED to existing teardown body" {
+  target=$(_setup_copy c)
+  run bash "$SCRIPT" "$target"
+  [ "$status" -eq 0 ]
+  # telemetry_teardown must appear AFTER the teardown() opening line but
+  # BEFORE the existing `unset EXAMPLE_VAR` body.
+  teardown_open=$(grep -n '^teardown()' "$target" | head -1 | cut -d: -f1)
+  telemetry_line=$(grep -n '^[[:space:]]*telemetry_teardown[[:space:]]*$' "$target" | head -1 | cut -d: -f1)
+  unset_line=$(grep -n 'unset EXAMPLE_VAR' "$target" | head -1 | cut -d: -f1)
+  [ "$telemetry_line" -gt "$teardown_open" ]
+  [ "$telemetry_line" -lt "$unset_line" ]
+}
+
+@test "AC-1 (Cat C): telemetry_setup APPENDED to existing setup body" {
+  target=$(_setup_copy c)
+  bash "$SCRIPT" "$target"
+  existing=$(grep -n 'EXAMPLE_VAR="hello"' "$target" | head -1 | cut -d: -f1)
+  telemetry=$(grep -n '^[[:space:]]*telemetry_setup[[:space:]]*$' "$target" | head -1 | cut -d: -f1)
+  [ "$telemetry" -gt "$existing" ]
+}
+
+@test "AC-1 (Cat C): post-wiring file still parses as valid bats" {
+  target=$(_setup_copy c)
+  bash "$SCRIPT" "$target"
+  CCANVIL_TELEMETRY_DISABLED=1 run bats "$target"
+  [ "$status" -eq 0 ]
+}
+
+# Cat E — setup_file() + setup(), no teardown — PREPEND telemetry_setup_file;
+# APPEND telemetry_setup; ADD teardown/teardown_file.
+@test "AC-1 (Cat E): telemetry_setup_file PREPENDED to existing setup_file body" {
+  target=$(_setup_copy e)
+  run bash "$SCRIPT" "$target"
+  [ "$status" -eq 0 ]
+  setup_file_open=$(grep -n '^setup_file()' "$target" | head -1 | cut -d: -f1)
+  telemetry_line=$(grep -n '^[[:space:]]*telemetry_setup_file[[:space:]]*$' "$target" | head -1 | cut -d: -f1)
+  existing=$(grep -n 'EXAMPLE_FILE_VAR' "$target" | head -1 | cut -d: -f1)
+  [ "$telemetry_line" -gt "$setup_file_open" ]
+  [ "$telemetry_line" -lt "$existing" ]
+}
+
+@test "AC-1 (Cat E): ADD teardown + teardown_file wrappers" {
+  target=$(_setup_copy e)
+  bash "$SCRIPT" "$target"
+  grep -qE '^teardown\(\)[[:space:]]*\{.*telemetry_teardown' "$target"
+  grep -qE '^teardown_file\(\)[[:space:]]*\{.*telemetry_teardown_file' "$target"
+}
+
+@test "AC-1 (Cat E): post-wiring file still parses as valid bats" {
+  target=$(_setup_copy e)
+  bash "$SCRIPT" "$target"
+  CCANVIL_TELEMETRY_DISABLED=1 run bats "$target"
+  [ "$status" -eq 0 ]
+}
+
+# Cat F — setup_file() + teardown_file() only → PREPEND telemetry_setup_file;
+# APPEND telemetry_teardown_file; ADD setup/teardown.
+@test "AC-1 (Cat F): telemetry_setup_file PREPENDED, telemetry_teardown_file APPENDED" {
+  target=$(_setup_copy f)
+  run bash "$SCRIPT" "$target"
+  [ "$status" -eq 0 ]
+  # Prepend on setup_file.
+  sf_open=$(grep -n '^setup_file()' "$target" | head -1 | cut -d: -f1)
+  pre_t=$(grep -n '^[[:space:]]*telemetry_setup_file[[:space:]]*$' "$target" | head -1 | cut -d: -f1)
+  [ "$pre_t" -gt "$sf_open" ]
+  # Append on teardown_file.
+  tf_open=$(grep -n '^teardown_file()' "$target" | head -1 | cut -d: -f1)
+  tf_close_after=$(awk -v start="$tf_open" 'NR > start && /^}/ { print NR; exit }' "$target")
+  append_t=$(grep -n '^[[:space:]]*telemetry_teardown_file[[:space:]]*$' "$target" | head -1 | cut -d: -f1)
+  [ "$append_t" -gt "$tf_open" ]
+  [ "$append_t" -lt "$tf_close_after" ]
+}
+
+@test "AC-1 (Cat F): ADD setup + teardown wrappers" {
+  target=$(_setup_copy f)
+  bash "$SCRIPT" "$target"
+  grep -qE '^setup\(\)[[:space:]]*\{.*telemetry_setup' "$target"
+  grep -qE '^teardown\(\)[[:space:]]*\{.*telemetry_teardown' "$target"
+}
+
+@test "AC-1 (Cat F): post-wiring file still parses as valid bats" {
+  target=$(_setup_copy f)
+  bash "$SCRIPT" "$target"
+  CCANVIL_TELEMETRY_DISABLED=1 run bats "$target"
+  [ "$status" -eq 0 ]
+}
+
+# ---------------------------------------------------------------------------
+# Step 5 — Idempotency (AC-2): re-running on a wired file is byte-identical.
+# ---------------------------------------------------------------------------
+
+@test "AC-2 (Cat A): re-running injector on already-wired file is byte-identical no-op" {
+  target=$(_setup_copy a)
+  bash "$SCRIPT" "$target"        # first wire
+  pre_sha=$(shasum -a 256 "$target" | awk '{print $1}')
+  run bash "$SCRIPT" "$target"    # second invocation
+  [ "$status" -eq 0 ]
+  post_sha=$(shasum -a 256 "$target" | awk '{print $1}')
+  [ "$pre_sha" = "$post_sha" ]
+}
+
+@test "AC-2 (Cat C): idempotency holds on multi-directive wiring" {
+  target=$(_setup_copy c)
+  bash "$SCRIPT" "$target"
+  pre_sha=$(shasum -a 256 "$target" | awk '{print $1}')
+  bash "$SCRIPT" "$target"
+  post_sha=$(shasum -a 256 "$target" | awk '{print $1}')
+  [ "$pre_sha" = "$post_sha" ]
+}
+
+# ---------------------------------------------------------------------------
+# Step 6 — UNCLASSIFIED error path (AC-7).
+# ---------------------------------------------------------------------------
+
+@test "AC-7: UNCLASSIFIED file → exit non-zero + stderr UNCLASSIFIED + file unchanged" {
+  target="$BATS_TEST_TMPDIR/all-hooks.bats"
+  cp "$FIX/all-hooks-unclassified.bats" "$target"
+  pre_sha=$(shasum -a 256 "$target" | awk '{print $1}')
+  run bash "$SCRIPT" "$target"
+  [ "$status" -ne 0 ]
+  echo "$output" | grep -qE '^UNCLASSIFIED:'
+  post_sha=$(shasum -a 256 "$target" | awk '{print $1}')
+  [ "$pre_sha" = "$post_sha" ]
+}

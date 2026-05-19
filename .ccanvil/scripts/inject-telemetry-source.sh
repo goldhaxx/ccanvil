@@ -22,7 +22,7 @@
 # output: exit-codes 0 ok, 2 usage-error, 3 unclassified-file-in-bulk-mode|unclassified-file-in-single-mode
 # depends-on: jq
 # depends-on: bash >= 3.2
-# side-effect: rewrites-bats-files-in-place (single-file invocation modifies the named file unless already-wired)
+# side-effect: rewrites-bats-files-in-place
 # failure-mode: unknown-subcommand | exit=2 | visible=stderr-Usage
 # failure-mode: missing-file-arg | exit=2 | visible=stderr-Usage
 # failure-mode: unclassified-shape | exit=3 | visible=stderr-UNCLASSIFIED
@@ -135,10 +135,179 @@ cmd_classify() {
   _classify_file "$file"
 }
 
+# ---------------------------------------------------------------------------
+# Wiring templates (BTS-504 Step 3+). Mirror the BTS-497 sample exactly so
+# diff-vs-reference produces identical output to hub/tests/canonical-fixtures.bats
+# (Cat A) and hub/tests/lifecycle-state.bats (Cat C).
+# ---------------------------------------------------------------------------
+
+# Already-wired heuristic (preview of AC-2; full idempotency in Step 5).
+_is_wired() {
+  local file="$1"
+  grep -qE '^source[[:space:]]+"\$BATS_TEST_DIRNAME/_helpers/telemetry\.bash"' "$file"
+}
+
+# Emit a per-category source+ADD block (always includes source + comment;
+# ADD wrappers depend on which lifecycle hooks the file is missing).
+# $1 = "yes|no" for each of add_setup_file add_teardown_file add_setup add_teardown.
+_emit_block() {
+  local add_sf="$1" add_tf="$2" add_s="$3" add_t="$4"
+  printf '\n'
+  printf '# BTS-497 telemetry hooks.\n'
+  printf 'source "$BATS_TEST_DIRNAME/_helpers/telemetry.bash"\n'
+  [[ "$add_sf" == "yes" ]] && printf 'setup_file()    { telemetry_setup_file; }\n'
+  [[ "$add_tf" == "yes" ]] && printf 'teardown_file() { telemetry_teardown_file; }\n'
+  [[ "$add_s"  == "yes" ]] && printf 'setup()         { telemetry_setup; }\n'
+  [[ "$add_t"  == "yes" ]] && printf 'teardown()      { telemetry_teardown; }\n'
+  return 0
+}
+
+# Convenience: Cat A emits all four ADDs.
+_emit_cat_a_block() {
+  _emit_block yes yes yes yes
+}
+
+# Apply per-category wiring: insert source+ADD block + PREPEND/APPEND inside
+# existing user functions. State-machine awk emits in a single pass.
+# Args: file pre_sf pre_t app_s app_tf  add_sf add_tf add_s add_t
+_wire_with_directives() {
+  local file="$1" pre_sf="$2" pre_t="$3" app_s="$4" app_tf="$5"
+  local add_sf="$6" add_tf="$7" add_s="$8" add_t="$9"
+  local tmp; tmp=$(mktemp "${file}.XXXXXX")
+  local blockfile; blockfile=$(mktemp)
+  _emit_block "$add_sf" "$add_tf" "$add_s" "$add_t" > "$blockfile"
+
+  # The state-machine recognises the OPEN of a user multiline function ONLY
+  # when the line ends right after `{` (optional trailing whitespace). This
+  # keeps single-line ADD wrappers (e.g. `setup() { telemetry_setup; }`)
+  # emitted by the block from being entered as state.
+  awk -v blockfile="$blockfile" \
+      -v pre_sf="$pre_sf" -v pre_t="$pre_t" \
+      -v app_s="$app_s"  -v app_tf="$app_tf" '
+    BEGIN { inserted = 0; state = "outside" }
+
+    # Source+ADD block insertion (once, after bats_require_minimum_version).
+    !inserted && /^bats_require_minimum_version/ {
+      print
+      while ((getline line < blockfile) > 0) print line
+      close(blockfile)
+      inserted = 1
+      next
+    }
+
+    # User multiline-function entry (opening brace at end of line).
+    state == "outside" && /^setup_file[[:space:]]*\([[:space:]]*\)[[:space:]]*\{[[:space:]]*$/ {
+      print
+      if (pre_sf == "yes") print "  telemetry_setup_file"
+      state = "in_setup_file"
+      next
+    }
+    state == "outside" && /^teardown_file[[:space:]]*\([[:space:]]*\)[[:space:]]*\{[[:space:]]*$/ {
+      print
+      state = "in_teardown_file"
+      next
+    }
+    state == "outside" && /^teardown[[:space:]]*\([[:space:]]*\)[[:space:]]*\{[[:space:]]*$/ {
+      print
+      if (pre_t == "yes") print "  telemetry_teardown"
+      state = "in_teardown"
+      next
+    }
+    state == "outside" && /^setup[[:space:]]*\([[:space:]]*\)[[:space:]]*\{[[:space:]]*$/ {
+      print
+      state = "in_setup"
+      next
+    }
+
+    # User function close (bare `}`).
+    state != "outside" && /^\}[[:space:]]*$/ {
+      if (state == "in_setup" && app_s == "yes")            print "  telemetry_setup"
+      if (state == "in_teardown_file" && app_tf == "yes")   print "  telemetry_teardown_file"
+      print
+      state = "outside"
+      next
+    }
+
+    { print }
+  ' "$file" > "$tmp" 2>/dev/null
+
+  # Fallback: no bats_require_minimum_version line → insert after shebang.
+  # We rerun with NR==1 trigger to keep the single-pass guarantee.
+  if ! grep -q '^bats_require_minimum_version' "$file"; then
+    awk -v blockfile="$blockfile" \
+        -v pre_sf="$pre_sf" -v pre_t="$pre_t" \
+        -v app_s="$app_s"  -v app_tf="$app_tf" '
+      BEGIN { inserted = 0; state = "outside" }
+      NR == 1 && !inserted {
+        print
+        while ((getline line < blockfile) > 0) print line
+        close(blockfile)
+        inserted = 1
+        next
+      }
+      state == "outside" && /^setup_file[[:space:]]*\([[:space:]]*\)[[:space:]]*\{[[:space:]]*$/ {
+        print; if (pre_sf == "yes") print "  telemetry_setup_file"; state = "in_setup_file"; next
+      }
+      state == "outside" && /^teardown_file[[:space:]]*\([[:space:]]*\)[[:space:]]*\{[[:space:]]*$/ {
+        print; state = "in_teardown_file"; next
+      }
+      state == "outside" && /^teardown[[:space:]]*\([[:space:]]*\)[[:space:]]*\{[[:space:]]*$/ {
+        print; if (pre_t == "yes") print "  telemetry_teardown"; state = "in_teardown"; next
+      }
+      state == "outside" && /^setup[[:space:]]*\([[:space:]]*\)[[:space:]]*\{[[:space:]]*$/ {
+        print; state = "in_setup"; next
+      }
+      state != "outside" && /^\}[[:space:]]*$/ {
+        if (state == "in_setup" && app_s == "yes")          print "  telemetry_setup"
+        if (state == "in_teardown_file" && app_tf == "yes") print "  telemetry_teardown_file"
+        print; state = "outside"; next
+      }
+      { print }
+    ' "$file" > "$tmp"
+  fi
+
+  rm -f "$blockfile"
+  mv "$tmp" "$file"
+}
+
+# Per-category wiring. Each row of the truth table maps to one of these.
+_wire_cat_a() { _wire_with_directives "$1"  no no no no   yes yes yes yes ; }
+_wire_cat_b() { _wire_with_directives "$1"  no no yes no  yes yes no  yes ; }
+_wire_cat_c() { _wire_with_directives "$1"  no yes yes no yes yes no  no  ; }
+_wire_cat_e() { _wire_with_directives "$1"  yes no yes no no  yes no  yes ; }
+_wire_cat_f() { _wire_with_directives "$1"  yes no no yes  no  no  yes yes ; }
+
 # @side-effect: rewrites-bats-files-in-place
 cmd_wire_single() {
-  echo "ERROR: single-file wiring not yet implemented (BTS-504 Step 3+)" >&2
-  exit 3
+  if [[ $# -lt 1 ]]; then
+    echo "Usage: inject-telemetry-source.sh <file>" >&2
+    exit 2
+  fi
+  local file="$1"
+  if [[ ! -f "$file" ]]; then
+    echo "Usage: file not found: $file" >&2
+    exit 2
+  fi
+  # Idempotency preview (full coverage in Step 5).
+  if _is_wired "$file"; then
+    return 0
+  fi
+  local base; base="$(basename "$file")"
+  if _is_skip_listed "$base"; then
+    return 0
+  fi
+  local cat; cat="$(_classify_file "$file")"
+  case "$cat" in
+    A) _wire_cat_a "$file" ;;
+    B) _wire_cat_b "$file" ;;
+    C) _wire_cat_c "$file" ;;
+    E) _wire_cat_e "$file" ;;
+    F) _wire_cat_f "$file" ;;
+    UNCLASSIFIED)
+      echo "UNCLASSIFIED: $file: shape does not match any of A|B|C|E|F" >&2
+      exit 3
+      ;;
+  esac
 }
 
 cmd_all() {

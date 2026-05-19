@@ -1266,8 +1266,9 @@ cmd_query() {
 # failure-mode: extract-failed | exit=2 | visible=propagated-from-cmd_extract
 # contract: deterministic-lexicographically-sorted-keys
 # contract: empty-object-when-no-sources
-# contract: atomic-write-via-mv
+# contract: atomic-write-via-mktemp-and-mv
 # anchor: BTS-239 (origin)
+# anchor: BTS-510 (concurrent-safe mktemp swap)
 cmd_index() {
   local out=".ccanvil/state/manifests.json"
   local src_dirs=(".ccanvil/scripts" ".claude/hooks" ".claude/hooks/_lib")

@@ -44,3 +44,19 @@ _cmd_index_manifest() {
   echo "$body" | grep -qF 'mkdir -p "$(dirname "$out")"' \
     || { echo "AC-7 mkdir -p missing:" >&2; echo "$body" >&2; return 1; }
 }
+
+@test "AC-6: cmd_index manifest declares atomic-write-via-mktemp-and-mv contract" {
+  manifest=$(_cmd_index_manifest)
+  local n
+  n=$(printf '%s' "$manifest" | awk '/^# contract: atomic-write-via-mktemp-and-mv$/{c++} END {print c+0}')
+  [ "$n" -eq 1 ] \
+    || { echo "expected 1 match for new contract; got $n. Manifest:" >&2; echo "$manifest" >&2; return 1; }
+}
+
+@test "AC-6: cmd_index manifest no longer declares atomic-write-via-mv (stale)" {
+  manifest=$(_cmd_index_manifest)
+  local n
+  n=$(printf '%s' "$manifest" | awk '/^# contract: atomic-write-via-mv$/{c++} END {print c+0}')
+  [ "$n" -eq 0 ] \
+    || { echo "expected 0 matches for stale contract; got $n. Manifest:" >&2; echo "$manifest" >&2; return 1; }
+}

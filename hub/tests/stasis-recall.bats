@@ -372,6 +372,7 @@ OPERATIONS="$REPO_ROOT/.ccanvil/scripts/operations.sh"
     --exclude-dir=dist \
     --exclude-dir=generated \
     --exclude-dir=.claude/worktrees \
+    --exclude-dir=observability \
     'checkpoint|catchup' \
     .claude .ccanvil hub docs README.md CLAUDE.md 2>/dev/null \
     | sed 's|^\./||' || true)

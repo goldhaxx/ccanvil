@@ -98,6 +98,37 @@ setup() {
 # reflects actual test wall time (was point-in-time → all spans <1ms).
 # =========================================================================
 
+@test "BTS-504 follow-up: trace-id shared across spans (single waterfall)" {
+  [ -n "${CCANVIL_TELEMETRY_DISABLED:-}" ] && skip "incompatible with --no-telemetry"
+  # Shim otel-cli to log argv per invocation.
+  local shim_dir="$BATS_TEST_TMPDIR/shim"
+  mkdir -p "$shim_dir"
+  cat > "$shim_dir/otel-cli" <<'SHIM'
+#!/bin/bash
+echo "$@" >> "${BATS_TEST_TMPDIR}/otel-cli.argv"
+exit 0
+SHIM
+  chmod +x "$shim_dir/otel-cli"
+  # Emit two spans back-to-back; assert both shared the SAME trace_id.
+  PATH="$shim_dir:$PATH" \
+  BATS_TEST_FILENAME="$BATS_TEST_DIRNAME/telemetry-helper.bats" \
+  bash -c "
+    source '$HELPER'
+    BTS_TEST_DESCRIPTION='span-1' BATS_TEST_COMPLETED=1 telemetry_setup_file
+    BATS_TEST_DESCRIPTION='span-1' BATS_TEST_COMPLETED=1 telemetry_setup && telemetry_teardown
+    BATS_TEST_DESCRIPTION='span-2' BATS_TEST_COMPLETED=1 telemetry_setup && telemetry_teardown
+  "
+  [ -f "$BATS_TEST_TMPDIR/otel-cli.argv" ]
+  # Use grep -oE for literal flag+value extraction (robust against the flag
+  # string appearing inside other --name args).
+  local trace_ids
+  trace_ids=$(grep -oE -- '--force-trace-id [0-9a-f]{32}' "$BATS_TEST_TMPDIR/otel-cli.argv" \
+              | awk '{print $2}' | sort -u)
+  local count; count=$(echo "$trace_ids" | wc -l | tr -d ' ')
+  [ "$count" -eq 1 ] \
+    || { echo "expected 1 unique trace_id, got $count: $trace_ids" >&2; cat "$BATS_TEST_TMPDIR/otel-cli.argv" >&2; return 1; }
+}
+
 @test "BTS-504 follow-up: telemetry_teardown invokes otel-cli with --start AND --end (non-zero duration)" {
   [ -n "${CCANVIL_TELEMETRY_DISABLED:-}" ] && skip "incompatible with --no-telemetry"
   # Shim otel-cli to log its args, exit 0 without contacting any endpoint.

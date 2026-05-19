@@ -68,6 +68,22 @@ _telemetry_cache_invariants() {
   # AC-1: git.sha = current HEAD. Resolves once per file; degrades to
   # "unknown" outside a git tree rather than failing.
   export BTS_TELEMETRY_GIT_SHA="$(git rev-parse HEAD 2>/dev/null || echo unknown)"
+  # BTS-504 follow-up: trace.id — when bats-report.sh runs the suite it
+  # exports BTS_TELEMETRY_TRACE_ID, so every test span across every file
+  # shares ONE trace_id. Grafana / Tempo then renders the suite as a
+  # single waterfall (parallel files = stacked swimlanes, tests within a
+  # file = sequential bars). Standalone bats runs without the wrapper
+  # generate a per-file trace_id so the same waterfall view works at file
+  # granularity. 32 lowercase hex chars per W3C Trace Context.
+  if [[ -z "${BTS_TELEMETRY_TRACE_ID:-}" ]]; then
+    if command -v openssl >/dev/null 2>&1; then
+      export BTS_TELEMETRY_TRACE_ID="$(openssl rand -hex 16 2>/dev/null)"
+    else
+      # Fallback: hash run-id + pid; sufficient for offline mode.
+      export BTS_TELEMETRY_TRACE_ID="$(printf '%s-%s' "$BTS_TELEMETRY_RUN_ID" "$$" \
+        | shasum -a 256 | awk '{print substr($1, 1, 32)}')"
+    fi
+  fi
 }
 
 # Compose the otel-cli --attrs value from cached invariants + per-test args.
@@ -179,6 +195,10 @@ telemetry_teardown() {
   # duration 0, making Grafana show every test as <1ms with no end time.
   local end_epoch; end_epoch="$(date +%s.%N 2>/dev/null || echo 0)"
   local start_epoch="${BTS_TELEMETRY_TEST_START_EPOCH:-$end_epoch}"
+  # BTS-504 follow-up: --force-trace-id ties every test span to the shared
+  # suite trace_id so Grafana renders the whole run as one waterfall.
+  local trace_args=()
+  [[ -n "${BTS_TELEMETRY_TRACE_ID:-}" ]] && trace_args=(--force-trace-id "$BTS_TELEMETRY_TRACE_ID")
   otel-cli span \
     --endpoint "${BTS_TELEMETRY_ENDPOINT:-http://127.0.0.1:4318}" \
     --protocol http/protobuf \
@@ -188,6 +208,7 @@ telemetry_teardown() {
     --end "$end_epoch" \
     --status-code "$status_code" \
     --attrs "$attrs" \
+    "${trace_args[@]+"${trace_args[@]}"}" \
     --timeout 2s \
     >/dev/null 2>&1 || true
 }

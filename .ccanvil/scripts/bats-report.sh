@@ -187,6 +187,15 @@ bats_cmd+=("${passthrough[@]+"${passthrough[@]}"}")
 # want a deterministic id).
 export BTS_RUN_ID="${BTS_RUN_ID:-$(date +%s)-$$}"
 
+# BTS-504 follow-up: emit ONE trace_id per suite run so every test span across
+# every parallel worker shares the same OTel trace. Grafana / Tempo then
+# renders the whole bats invocation as a single waterfall — parallel files
+# appear as stacked swimlanes; tests within a file appear as sequential bars.
+# Honors externally-set value. 32 lowercase hex chars per W3C Trace Context.
+if [[ -z "${BTS_TELEMETRY_TRACE_ID:-}" ]] && command -v openssl >/dev/null 2>&1; then
+  export BTS_TELEMETRY_TRACE_ID="$(openssl rand -hex 16 2>/dev/null)"
+fi
+
 # BTS-281: pre-warm module-manifest validate JSON ONCE before the suite runs,
 # expose via env var. The 4 bats files that need this read the cached path
 # instead of re-running validate. Skip when caller already set the env var

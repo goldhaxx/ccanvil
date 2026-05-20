@@ -1,10 +1,13 @@
 #!/usr/bin/env bats
 
-# BTS-497 telemetry hooks.
+# BTS-497 telemetry hooks. BTS-543: this file TESTS the telemetry helper — its
+# tests deliberately mutate OTEL_SPAN_* / CCANVIL_TELEMETRY_* env, which would
+# make the file's own suite-telemetry spans non-deterministic. The wiring is
+# present but force-disabled: otel-span.bats deterministically emits zero spans.
 source "$BATS_TEST_DIRNAME/_helpers/telemetry.bash"
-setup_file()    { telemetry_setup_file; }
-teardown_file() { telemetry_teardown_file; }
-teardown()      { telemetry_teardown; }
+setup_file()    { CCANVIL_TELEMETRY_DISABLED=1 telemetry_setup_file; }
+teardown_file() { CCANVIL_TELEMETRY_DISABLED=1 telemetry_teardown_file; }
+teardown()      { CCANVIL_TELEMETRY_DISABLED=1 telemetry_teardown; }
 
 # BTS-543 — unit tests for the generic otel-span.sh helper library.
 #
@@ -16,7 +19,7 @@ teardown()      { telemetry_teardown; }
 OTEL_SPAN="$BATS_TEST_DIRNAME/../../.ccanvil/observability/otel-span.sh"
 
 setup() {
-  telemetry_setup
+  CCANVIL_TELEMETRY_DISABLED=1 telemetry_setup
   source "$OTEL_SPAN"
 }
 

@@ -88,6 +88,7 @@ otel_span_sanitize() {
 # Cache run.id / git.sha / project root. Idempotent — honors pre-set values
 # so a caller can pin them (e.g. one run.id for a whole multi-process run).
 otel_span_cache_invariants() {
+  # @side-effect: exports-cache-env-vars
   export OTEL_SPAN_RUN_ID="${OTEL_SPAN_RUN_ID:-$(date +%s)-$$}"
   export OTEL_SPAN_GIT_SHA="${OTEL_SPAN_GIT_SHA:-$(git rev-parse HEAD 2>/dev/null || echo unknown)}"
   if [[ -z "${OTEL_SPAN_PROJECT_ROOT:-}" ]]; then
@@ -112,10 +113,13 @@ otel_span_init() {
     export OTEL_SPAN_INIT_DONE=1
     return 0
   fi
+  # @failure-mode: otel-cli-missing
+  # @failure-mode: collector-unreachable
   if command -v "${OTEL_SPAN_CLI:-otel-cli}" >/dev/null 2>&1 \
      && curl -fsS --max-time 2 "$OTEL_SPAN_HEALTH_URL" >/dev/null 2>&1; then
     export OTEL_SPAN_LIVE=1
   else
+    # otel-cli absent OR Collector unreachable → emission skipped, never fatal.
     export OTEL_SPAN_LIVE=0
   fi
   export OTEL_SPAN_INIT_DONE=1
@@ -165,6 +169,7 @@ otel_span_emit() {
   [[ -n "$span_id" ]]   && args+=( --force-span-id "$span_id" )
   [[ -n "$parent_id" ]] && args+=( --force-parent-span-id "$parent_id" )
   args+=( --timeout "$timeout" )
+  # @side-effect: emits-otel-spans
   "${OTEL_SPAN_CLI:-otel-cli}" "${args[@]}" >/dev/null 2>&1 || true
   return 0
 }

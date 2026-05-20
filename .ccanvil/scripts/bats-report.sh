@@ -529,19 +529,18 @@ if (( no_telemetry == 0 )) \
   suite_end_epoch="$(date +%s.%N 2>/dev/null || date +%s)"
   suite_status="unset"
   (( bats_exit != 0 )) && suite_status="error"
-  otel-cli span \
-    --endpoint "${CCANVIL_OTLP_ENDPOINT:-http://127.0.0.1:4318}" \
-    --protocol http/protobuf \
+  # BTS-543: emit the suite-root span via the shared otel-span.sh helper.
+  source "$(dirname "${BASH_SOURCE[0]}")/../observability/otel-span.sh"
+  otel_span_emit \
     --service ccanvil-test \
     --name "bats suite ($BTS_RUN_ID)" \
     --start "$BTS_TELEMETRY_SUITE_START_EPOCH" \
     --end "$suite_end_epoch" \
-    --status-code "$suite_status" \
-    --force-trace-id "$BTS_TELEMETRY_TRACE_ID" \
-    --force-span-id "$BTS_TELEMETRY_SUITE_SPAN_ID" \
+    --status "$suite_status" \
+    --trace-id "$BTS_TELEMETRY_TRACE_ID" \
+    --span-id "$BTS_TELEMETRY_SUITE_SPAN_ID" \
     --attrs "suite.kind=bats,suite.parallel=${parallel_mode},suite.jobs=${jobs:-1},suite.total=${total:-0},suite.passed=${ok:-0},suite.failed=${not_ok:-0},run.id=$BTS_RUN_ID,git.sha=$(git rev-parse HEAD 2>/dev/null || echo unknown)" \
-    --timeout 5s \
-    >/dev/null 2>&1 || true
+    --timeout 5s
 fi
 
 if (( parallel_mode == 1 )) && (( no_telemetry == 0 )); then

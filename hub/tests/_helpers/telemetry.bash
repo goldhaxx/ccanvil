@@ -27,6 +27,10 @@
 # ~12-35 s of wall time, well inside AC-7's 50 ms p95 budget. No background
 # process means no kill/wait/teardown — terminating by construction.
 
+# BTS-543: span emission mechanics now live in the shared otel-span.sh helper;
+# telemetry.bash is a thin bats adapter over it. Required same-repo dependency.
+source "$(dirname "${BASH_SOURCE[0]}")/../../../.ccanvil/observability/otel-span.sh"
+
 telemetry_setup_file() {
   # AC-7 / Step 14 escape hatch: disabled mode is a hard no-op so substrate
   # self-tests run without the stack.
@@ -169,25 +173,18 @@ telemetry_teardown_file() {
   # the test-span shape so dashboards filter cleanly across span types.
   local file_root="${BTS_TELEMETRY_PROJECT_ROOT:-${PWD:-}}"
   [[ -n "$file_root" ]] && file_path="${file_path#$file_root/}"
-  local parent_args=()
-  [[ -n "${BTS_TELEMETRY_SUITE_SPAN_ID:-}" ]] \
-    && parent_args=(--force-parent-span-id "$BTS_TELEMETRY_SUITE_SPAN_ID")
-  local trace_args=()
-  [[ -n "${BTS_TELEMETRY_TRACE_ID:-}" ]] \
-    && trace_args=(--force-trace-id "$BTS_TELEMETRY_TRACE_ID")
-  otel-cli span \
-    --endpoint "${BTS_TELEMETRY_ENDPOINT:-http://127.0.0.1:4318}" \
-    --protocol http/protobuf \
+  # BTS-543: emit the file span via the shared otel-span.sh helper. --span-id
+  # forces the file's own span id; --parent-id nests it under the suite root.
+  otel_span_emit \
     --service ccanvil-test \
     --name "file: $file_basename" \
     --start "${BTS_TELEMETRY_FILE_START_EPOCH:-$file_end_epoch}" \
     --end "$file_end_epoch" \
     --attrs "test.file=$file_path,worker.id=${BTS_TELEMETRY_WORKER_ID:-0},runner.kind=bats,run.id=${BTS_TELEMETRY_RUN_ID:-unknown},git.sha=${BTS_TELEMETRY_GIT_SHA:-unknown}" \
-    --force-span-id "$BTS_TELEMETRY_FILE_SPAN_ID" \
-    "${trace_args[@]+"${trace_args[@]}"}" \
-    "${parent_args[@]+"${parent_args[@]}"}" \
-    --timeout 2s \
-    >/dev/null 2>&1 || true
+    --span-id "$BTS_TELEMETRY_FILE_SPAN_ID" \
+    --trace-id "${BTS_TELEMETRY_TRACE_ID:-}" \
+    --parent-id "${BTS_TELEMETRY_SUITE_SPAN_ID:-}" \
+    --timeout 2s
 }
 
 telemetry_setup() {
@@ -250,26 +247,18 @@ telemetry_teardown() {
   # duration 0, making Grafana show every test as <1ms with no end time.
   local end_epoch; end_epoch="$(date +%s.%N 2>/dev/null || echo 0)"
   local start_epoch="${BTS_TELEMETRY_TEST_START_EPOCH:-$end_epoch}"
-  # BTS-504 follow-up: --force-trace-id ties every test span to the shared
-  # suite trace_id; --force-parent-span-id links the test as a child of its
-  # file span (set in telemetry_setup_file), forming the suite→file→test
-  # hierarchy Grafana renders as a nested waterfall.
-  local trace_args=()
-  [[ -n "${BTS_TELEMETRY_TRACE_ID:-}" ]] && trace_args=(--force-trace-id "$BTS_TELEMETRY_TRACE_ID")
-  local parent_args=()
-  [[ -n "${BTS_TELEMETRY_FILE_SPAN_ID:-}" ]] \
-    && parent_args=(--force-parent-span-id "$BTS_TELEMETRY_FILE_SPAN_ID")
-  otel-cli span \
-    --endpoint "${BTS_TELEMETRY_ENDPOINT:-http://127.0.0.1:4318}" \
-    --protocol http/protobuf \
+  # BTS-543: emit via the shared otel-span.sh helper. --trace-id ties the test
+  # span to the suite trace; --parent-id nests it under its file span
+  # (suite→file→test). Empty IDs are dropped by otel_span_emit, preserving the
+  # prior conditional --force-* behavior.
+  otel_span_emit \
     --service ccanvil-test \
     --name "${BATS_TEST_DESCRIPTION:-unknown}" \
     --start "$start_epoch" \
     --end "$end_epoch" \
-    --status-code "$status_code" \
+    --status "$status_code" \
     --attrs "$attrs" \
-    "${trace_args[@]+"${trace_args[@]}"}" \
-    "${parent_args[@]+"${parent_args[@]}"}" \
-    --timeout 2s \
-    >/dev/null 2>&1 || true
+    --trace-id "${BTS_TELEMETRY_TRACE_ID:-}" \
+    --parent-id "${BTS_TELEMETRY_FILE_SPAN_ID:-}" \
+    --timeout 2s
 }

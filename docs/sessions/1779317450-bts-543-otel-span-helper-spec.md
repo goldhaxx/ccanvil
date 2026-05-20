@@ -1,9 +1,9 @@
-# Feature: Generic otel-span.sh helper library
+# Feature: Generic [otel-span.sh](<http://otel-span.sh>) helper library
 
 > Feature: bts-543-otel-span-helper
 > Work: linear:BTS-543
 > Created: 1779311468
-> Subject: Generic otel-span.sh helper library
+> Subject: Generic [otel-span.sh](<http://otel-span.sh>) helper library
 > Status: In Progress
 
 ## Summary
@@ -35,7 +35,7 @@ Each criterion is independently testable. Binary pass/fail.
 ## Affected Files
 
 | File | Change |
-|------|--------|
+| -- | -- |
 | `.ccanvil/observability/otel-span.sh` | New — generic span helper library |
 | `hub/tests/_helpers/telemetry.bash` | Modified — source the helper; thin bats adapters |
 | `.ccanvil/scripts/bats-report.sh` | Modified — suite-root span via `otel_span_emit` |
@@ -44,21 +44,21 @@ Each criterion is independently testable. Binary pass/fail.
 
 ## Dependencies
 
-- **Requires:** the BTS-497 observability stack (`otel-cli`, the OTel Collector) — already present.
-- **Blocked by:** nothing. This is the umbrella's foundation child.
+* **Requires:** the BTS-497 observability stack (`otel-cli`, the OTel Collector) — already present.
+* **Blocked by:** nothing. This is the umbrella's foundation child.
 
 ## Out of Scope
 
-- Any new span source — scripts, hooks, tool calls (BTS-545 / BTS-547).
-- Session-trace correlation (BTS-544).
-- Renaming the four bats lifecycle functions — `inject-telemetry-source.sh` hard-codes those names; renaming is explicitly excluded.
-- Capturing an `error.excerpt` attribute on script spans — deferred.
+* Any new span source — scripts, hooks, tool calls (BTS-545 / BTS-547).
+* Session-trace correlation (BTS-544).
+* Renaming the four bats lifecycle functions — `inject-telemetry-source.sh` hard-codes those names; renaming is explicitly excluded.
+* Capturing an `error.excerpt` attribute on script spans — deferred.
 
 ## Implementation Notes
 
-- Lift the generic logic verbatim from `telemetry.bash`: `_telemetry_cache_invariants` (git.sha, project root, trace-id generation), `_telemetry_sanitize`, and the `otel-cli span` invocation blocks. ID generation is `openssl rand -hex 16`/`-hex 8` with a `shasum`-based fallback.
-- `otel_span_emit` MUST construct a byte-identical `otel-cli` argv to today's inline calls — map every existing flag 1:1. This is what makes AC-8 hold.
-- Graceful-skip belongs to `otel-span.sh`. The bats helper KEEPS its existing hard-fail Collector healthcheck (a test run must not run blind) — do not delegate that decision to the helper.
-- `_telemetry_compose_attrs` stays in `telemetry.bash` — it is bats-coupled (reads `BATS_TEST_*`). It just calls `otel_span_sanitize` instead of the local copy.
-- Manifest: file-level block; `caller:` lists `hub/tests/_helpers/telemetry.bash` and `.ccanvil/scripts/bats-report.sh` only (the post-refactor sourcers).
-- The AC-8 byte-identical flatten diff is the load-bearing verification — run it as the acceptance gate, with the "before" baseline captured on `main`.
+* Lift the generic logic verbatim from `telemetry.bash`: `_telemetry_cache_invariants` (git.sha, project root, trace-id generation), `_telemetry_sanitize`, and the `otel-cli span` invocation blocks. ID generation is `openssl rand -hex 16`/`-hex 8` with a `shasum`-based fallback.
+* `otel_span_emit` MUST construct a byte-identical `otel-cli` argv to today's inline calls — map every existing flag 1:1. This is what makes AC-8 hold.
+* Graceful-skip belongs to `otel-span.sh`. The bats helper KEEPS its existing hard-fail Collector healthcheck (a test run must not run blind) — do not delegate that decision to the helper.
+* `_telemetry_compose_attrs` stays in `telemetry.bash` — it is bats-coupled (reads `BATS_TEST_*`). It just calls `otel_span_sanitize` instead of the local copy.
+* Manifest: file-level block; `caller:` lists `hub/tests/_helpers/telemetry.bash` and `.ccanvil/scripts/bats-report.sh` only (the post-refactor sourcers).
+* The AC-8 byte-identical flatten diff is the load-bearing verification — run it as the acceptance gate, with the "before" baseline captured on `main`.

@@ -4,7 +4,7 @@
 > Work: linear:BTS-543
 > Created: 1779311468
 > Subject: Generic otel-span.sh helper library
-> Status: In Progress
+> Status: Complete
 
 ## Summary
 

@@ -270,3 +270,6 @@
 .ccanvil/scripts/docs-check.sh:cmd_test_state
 .ccanvil/scripts/docs-check.sh:cmd_check_skip_validate
 .claude/rules/test-discipline.md
+
+# BTS-543 — generic otel-span helper (Workflow Observability foundation).
+.ccanvil/observability/otel-span.sh

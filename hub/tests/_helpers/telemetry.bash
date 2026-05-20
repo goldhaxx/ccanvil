@@ -78,6 +78,13 @@ _telemetry_cache_invariants() {
   # AC-1: git.sha = current HEAD. Resolves once per file; degrades to
   # "unknown" outside a git tree rather than failing.
   export BTS_TELEMETRY_GIT_SHA="$(git rev-parse HEAD 2>/dev/null || echo unknown)"
+  # BTS-533: project root anchor for repo-relative test.file paths. Cached
+  # once per file so per-test PWD changes (tests that cd without restoring)
+  # can't desync file_rel across tests in the same file. Falls back to PWD
+  # outside a git tree.
+  if [[ -z "${BTS_TELEMETRY_PROJECT_ROOT:-}" ]]; then
+    export BTS_TELEMETRY_PROJECT_ROOT="$(git rev-parse --show-toplevel 2>/dev/null || echo "${PWD:-}")"
+  fi
   # BTS-504 follow-up: trace.id — when bats-report.sh runs the suite it
   # exports BTS_TELEMETRY_TRACE_ID, so every test span across every file
   # shares ONE trace_id. Grafana / Tempo then renders the suite as a
@@ -117,9 +124,12 @@ _telemetry_sanitize() {
 _telemetry_compose_attrs() {
   local outcome="$1" duration_ms="$2" error_excerpt="${3:-}"
   local file_rel="${BATS_TEST_FILENAME:-unknown}"
-  # Strip leading $PWD/ so attribute matches repo-relative path used in the
-  # flat JSONL schema (test_file field).
-  [[ -n "${PWD:-}" ]] && file_rel="${file_rel#$PWD/}"
+  # BTS-533: strip project root prefix for repo-relative paths. Anchored on
+  # BTS_TELEMETRY_PROJECT_ROOT (cached once per file in _telemetry_cache_invariants)
+  # so tests that cd freely don't break the strip on subsequent siblings.
+  # Falls back to PWD for backward-compat with callers that bypass the cache.
+  local root="${BTS_TELEMETRY_PROJECT_ROOT:-${PWD:-}}"
+  [[ -n "$root" ]] && file_rel="${file_rel#$root/}"
   local name_safe; name_safe=$(_telemetry_sanitize "${BATS_TEST_DESCRIPTION:-unknown}")
   local file_safe; file_safe=$(_telemetry_sanitize "$file_rel")
   local out="test.name=${name_safe}"
@@ -155,6 +165,10 @@ telemetry_teardown_file() {
   file_end_epoch="$(date +%s.%N 2>/dev/null || date +%s)"
   file_path="${BTS_TELEMETRY_FILE_PATH:-unknown}"
   file_basename="$(basename "$file_path")"
+  # BTS-533: emit repo-relative test.file on the FILE span too, matching
+  # the test-span shape so dashboards filter cleanly across span types.
+  local file_root="${BTS_TELEMETRY_PROJECT_ROOT:-${PWD:-}}"
+  [[ -n "$file_root" ]] && file_path="${file_path#$file_root/}"
   local parent_args=()
   [[ -n "${BTS_TELEMETRY_SUITE_SPAN_ID:-}" ]] \
     && parent_args=(--force-parent-span-id "$BTS_TELEMETRY_SUITE_SPAN_ID")

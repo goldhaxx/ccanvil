@@ -143,16 +143,23 @@ jq -c --arg RUN_ID "$RUN_ID" --slurpfile existing "$OUTPUT" '
     | add // {}
   ) as $attrs |
   select($attrs["run.id"] == $RUN_ID) |
+  # BTS-533: skip non-test spans. BTS-504 added suite-root + file spans to
+  # the trace hierarchy; those carry run.id but no test.name / worker.id, so
+  # `worker.id | tonumber` below would abort the whole flatten on `null`.
+  # The flat JSONL sidecar is a per-TEST record schema (SCHEMA.md) — suite
+  # and file spans do not belong in it. test.name is the discriminator:
+  # only test spans set it.
+  select($attrs["test.name"] != null) |
   {
     run_id: $attrs["run.id"],
     span_id: $span.spanId,
     test_name: $attrs["test.name"],
     test_file: $attrs["test.file"],
     test_outcome: $attrs["test.outcome"],
-    worker_id: ($attrs["worker.id"] | tonumber),
+    worker_id: ($attrs["worker.id"] | if . == null then null else tonumber end),
     runner_kind: $attrs["runner.kind"],
     git_sha: $attrs["git.sha"],
-    started_at_unix_nano: ($span.startTimeUnixNano | tonumber),
+    started_at_unix_nano: ($span.startTimeUnixNano | if . == null then null else tonumber end),
     duration_ms: ($attrs["test.duration_ms"] | if . == null then null else tonumber end),
     error_excerpt: $attrs["test.error_excerpt"],
     schema_version: "v1.0.0"

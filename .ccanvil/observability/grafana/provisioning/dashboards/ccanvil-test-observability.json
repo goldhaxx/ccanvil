@@ -1,0 +1,284 @@
+{
+  "annotations": { "list": [] },
+  "editable": true,
+  "fiscalYearStartMonth": 0,
+  "graphTooltip": 0,
+  "id": null,
+  "links": [],
+  "liveNow": true,
+  "panels": [
+    {
+      "collapsed": false,
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 0 },
+      "id": 100,
+      "panels": [],
+      "title": "NOW — what's running",
+      "type": "row"
+    },
+    {
+      "datasource": { "type": "tempo", "uid": "tempo-bts-497" },
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": [
+          { "matcher": { "id": "byName", "options": "Trace Name" }, "properties": [ { "id": "custom.hidden", "value": true } ] },
+          { "matcher": { "id": "byName", "options": "Trace Service" }, "properties": [ { "id": "custom.hidden", "value": true } ] }
+        ]
+      },
+      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 1 },
+      "id": 1,
+      "title": "Recent suite roots — click Span ID for full waterfall",
+      "description": "One row per bats suite run, newest first. Click the Span ID to open the nested waterfall (suite → file → test). suite.total / suite.passed / suite.failed are on the root span. Trace Name / Trace Service columns hidden — Tempo's computed root name is unreliable for traces that span many storage blocks.",
+      "type": "table",
+      "timeFrom": "now-1h",
+      "options": { "showHeader": true, "cellHeight": "sm" },
+      "transformations": [
+        { "id": "sortBy", "options": { "sort": [ { "field": "Start time", "desc": true }, { "field": "Span ID", "desc": false } ] } }
+      ],
+      "targets": [
+        {
+          "datasource": { "type": "tempo", "uid": "tempo-bts-497" },
+          "queryType": "traceql",
+          "query": "{ name =~ \"bats suite.*\" } | select(span.suite.total, span.suite.passed, span.suite.failed, span.suite.parallel, span.suite.jobs)",
+          "tableType": "spans",
+          "limit": 500,
+          "spss": 5,
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "datasource": { "type": "tempo", "uid": "tempo-bts-497" },
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": [
+          { "matcher": { "id": "byName", "options": "Trace Name" }, "properties": [ { "id": "custom.hidden", "value": true } ] },
+          { "matcher": { "id": "byName", "options": "Trace Service" }, "properties": [ { "id": "custom.hidden", "value": true } ] }
+        ]
+      },
+      "gridPos": { "h": 12, "w": 24, "x": 0, "y": 9 },
+      "id": 2,
+      "title": "Live test feed — recent tests",
+      "description": "Stream of TEST spans (suite + file spans excluded) from the last hour, newest first. Auto-refresh 5s. The query returns the full hour so the row set is stable between refreshes; sortBy (Start time, then Span ID) pins the order deterministically.",
+      "type": "table",
+      "timeFrom": "now-1h",
+      "options": { "showHeader": true, "cellHeight": "sm" },
+      "transformations": [
+        { "id": "sortBy", "options": { "sort": [ { "field": "Start time", "desc": true }, { "field": "Span ID", "desc": false } ] } },
+        { "id": "limit", "options": { "limitField": 300 } }
+      ],
+      "targets": [
+        {
+          "datasource": { "type": "tempo", "uid": "tempo-bts-497" },
+          "queryType": "traceql",
+          "query": "{ resource.service.name=\"ccanvil-test\" && name !~ \"bats suite.*\" && name !~ \"file:.*\" } | select(span.test.file, span.test.outcome, span.worker.id, span.run.id)",
+          "tableType": "spans",
+          "limit": 500,
+          "spss": 100,
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "collapsed": false,
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 21 },
+      "id": 101,
+      "panels": [],
+      "title": "SLOW — what dragged the suite",
+      "type": "row"
+    },
+    {
+      "datasource": { "type": "tempo", "uid": "tempo-bts-497" },
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": [
+          { "matcher": { "id": "byName", "options": "Trace Name" }, "properties": [ { "id": "custom.hidden", "value": true } ] },
+          { "matcher": { "id": "byName", "options": "Trace Service" }, "properties": [ { "id": "custom.hidden", "value": true } ] }
+        ]
+      },
+      "gridPos": { "h": 10, "w": 12, "x": 0, "y": 22 },
+      "id": 3,
+      "title": "Slowest tests (24h)",
+      "description": "Top 30 TEST spans by duration in the last 24h. The query returns the full 24h set (no limit truncation → stable between refreshes); sortBy (Duration, then Span ID) ranks deterministically and the limit transformation keeps the top 30.",
+      "type": "table",
+      "options": { "showHeader": true, "cellHeight": "sm" },
+      "transformations": [
+        { "id": "sortBy", "options": { "sort": [ { "field": "Duration", "desc": true }, { "field": "Span ID", "desc": false } ] } },
+        { "id": "limit", "options": { "limitField": 30 } }
+      ],
+      "targets": [
+        {
+          "datasource": { "type": "tempo", "uid": "tempo-bts-497" },
+          "queryType": "traceql",
+          "query": "{ resource.service.name=\"ccanvil-test\" && name !~ \"bats suite.*\" && name !~ \"file:.*\" && duration > 100ms } | select(span.test.file, span.test.outcome)",
+          "tableType": "spans",
+          "limit": 500,
+          "spss": 100,
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "datasource": { "type": "tempo", "uid": "tempo-bts-497" },
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": [
+          { "matcher": { "id": "byName", "options": "Trace Name" }, "properties": [ { "id": "custom.hidden", "value": true } ] },
+          { "matcher": { "id": "byName", "options": "Trace Service" }, "properties": [ { "id": "custom.hidden", "value": true } ] }
+        ]
+      },
+      "gridPos": { "h": 10, "w": 12, "x": 12, "y": 22 },
+      "id": 4,
+      "title": "Slowest files (24h)",
+      "description": "Top 20 FILE spans by duration in the last 24h. File span duration = wall time from first test setup to last teardown for that .bats file. Full set returned; sortBy (Duration, then Span ID) ranks deterministically.",
+      "type": "table",
+      "options": { "showHeader": true, "cellHeight": "sm" },
+      "transformations": [
+        { "id": "sortBy", "options": { "sort": [ { "field": "Duration", "desc": true }, { "field": "Span ID", "desc": false } ] } },
+        { "id": "limit", "options": { "limitField": 20 } }
+      ],
+      "targets": [
+        {
+          "datasource": { "type": "tempo", "uid": "tempo-bts-497" },
+          "queryType": "traceql",
+          "query": "{ name =~ \"file:.*\" } | select(span.test.file, span.worker.id, span.run.id)",
+          "tableType": "spans",
+          "limit": 500,
+          "spss": 100,
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "collapsed": false,
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 32 },
+      "id": 102,
+      "panels": [],
+      "title": "DIDN'T PASS — what to look at first",
+      "type": "row"
+    },
+    {
+      "datasource": { "type": "tempo", "uid": "tempo-bts-497" },
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": [
+          { "matcher": { "id": "byName", "options": "Trace Name" }, "properties": [ { "id": "custom.hidden", "value": true } ] },
+          { "matcher": { "id": "byName", "options": "Trace Service" }, "properties": [ { "id": "custom.hidden", "value": true } ] }
+        ]
+      },
+      "gridPos": { "h": 10, "w": 16, "x": 0, "y": 33 },
+      "id": 5,
+      "title": "Failed tests (24h)",
+      "description": "TEST spans with status=error in the last 24h, newest first. Suite-root error spans excluded so this is failing tests only, not failing-suite rollups. Full set returned; sortBy (Start time, then Span ID) pins the order.",
+      "type": "table",
+      "options": { "showHeader": true, "cellHeight": "sm" },
+      "transformations": [
+        { "id": "sortBy", "options": { "sort": [ { "field": "Start time", "desc": true }, { "field": "Span ID", "desc": false } ] } }
+      ],
+      "targets": [
+        {
+          "datasource": { "type": "tempo", "uid": "tempo-bts-497" },
+          "queryType": "traceql",
+          "query": "{ resource.service.name=\"ccanvil-test\" && status = error && name !~ \"bats suite.*\" && name !~ \"file:.*\" } | select(span.test.file, span.test.error_excerpt, span.run.id)",
+          "tableType": "spans",
+          "limit": 500,
+          "spss": 100,
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "datasource": { "type": "tempo", "uid": "tempo-bts-497" },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "orange", "value": 1 },
+              { "color": "red", "value": 10 }
+            ]
+          }
+        },
+        "overrides": [
+          { "matcher": { "id": "byName", "options": "Duration" }, "properties": [ { "id": "unit", "value": "short" }, { "id": "custom.hidden", "value": true } ] },
+          { "matcher": { "id": "byName", "options": "Start time" }, "properties": [ { "id": "custom.hidden", "value": true } ] },
+          { "matcher": { "id": "byName", "options": "Trace Name" }, "properties": [ { "id": "custom.hidden", "value": true } ] },
+          { "matcher": { "id": "byName", "options": "Trace Service" }, "properties": [ { "id": "custom.hidden", "value": true } ] }
+        ]
+      },
+      "gridPos": { "h": 10, "w": 8, "x": 16, "y": 33 },
+      "id": 6,
+      "title": "Failures (24h)",
+      "description": "Count of failing TEST spans in the last 24h. Green=0, orange=1-9, red=10+. The query returns the full 24h set so the count is stable between refreshes.",
+      "type": "stat",
+      "options": {
+        "reduceOptions": { "calcs": ["count"], "fields": "", "values": false },
+        "graphMode": "area",
+        "colorMode": "value"
+      },
+      "targets": [
+        {
+          "datasource": { "type": "tempo", "uid": "tempo-bts-497" },
+          "queryType": "traceql",
+          "query": "{ resource.service.name=\"ccanvil-test\" && status = error && name !~ \"bats suite.*\" && name !~ \"file:.*\" }",
+          "tableType": "spans",
+          "limit": 500,
+          "spss": 100,
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "collapsed": false,
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 43 },
+      "id": 103,
+      "panels": [],
+      "title": "TREND — how things move over time",
+      "type": "row"
+    },
+    {
+      "datasource": { "type": "tempo", "uid": "tempo-bts-497" },
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": [
+          { "matcher": { "id": "byName", "options": "Trace Name" }, "properties": [ { "id": "custom.hidden", "value": true } ] },
+          { "matcher": { "id": "byName", "options": "Trace Service" }, "properties": [ { "id": "custom.hidden", "value": true } ] }
+        ]
+      },
+      "gridPos": { "h": 10, "w": 24, "x": 0, "y": 44 },
+      "id": 7,
+      "title": "Suite history (7d)",
+      "description": "Every bats suite run in the last 7 days with pass/fail counts + wall time, newest first. Suite-root spans only. Full set returned; sortBy (Start time, then Span ID) pins the order.",
+      "type": "table",
+      "timeFrom": "now-7d",
+      "options": { "showHeader": true, "cellHeight": "sm" },
+      "transformations": [
+        { "id": "sortBy", "options": { "sort": [ { "field": "Start time", "desc": true }, { "field": "Span ID", "desc": false } ] } }
+      ],
+      "targets": [
+        {
+          "datasource": { "type": "tempo", "uid": "tempo-bts-497" },
+          "queryType": "traceql",
+          "query": "{ name =~ \"bats suite.*\" } | select(span.suite.total, span.suite.passed, span.suite.failed, span.suite.parallel, span.suite.jobs, span.git.sha)",
+          "tableType": "spans",
+          "limit": 500,
+          "spss": 5,
+          "refId": "A"
+        }
+      ]
+    }
+  ],
+  "refresh": "5s",
+  "schemaVersion": 39,
+  "tags": ["ccanvil", "tests", "bts-504", "bts-533"],
+  "templating": { "list": [] },
+  "time": { "from": "now-24h", "to": "now" },
+  "timepicker": {
+    "refresh_intervals": ["5s", "10s", "30s", "1m", "5m"]
+  },
+  "timezone": "browser",
+  "title": "ccanvil — Test observability",
+  "uid": "ccanvil-test-obs",
+  "version": 1
+}

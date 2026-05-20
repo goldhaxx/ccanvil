@@ -90,15 +90,19 @@ STUB
 
 @test "AC-4: otel_span_emit is a no-op returning 0 when telemetry disabled" {
   export CCANVIL_TELEMETRY_DISABLED=1
+  # OTEL_SPAN_RAN_MARKER is explicitly exported so the stub subprocess sees it
+  # — a regressed disabled-guard would run the stub and create the marker,
+  # failing the negative assertion below.
+  export OTEL_SPAN_RAN_MARKER="$BATS_TEST_TMPDIR/ran-marker"
   export OTEL_SPAN_CLI="$BATS_TEST_TMPDIR/should-not-run"
   cat > "$OTEL_SPAN_CLI" <<'STUB'
 #!/usr/bin/env bash
-echo ran > "$BATS_TEST_TMPDIR/ran-marker"
+echo ran > "$OTEL_SPAN_RAN_MARKER"
 STUB
   chmod +x "$OTEL_SPAN_CLI"
   run otel_span_emit --service s --name n --start 1 --end 2 --attrs "k=v"
   [ "$status" -eq 0 ]
-  [ ! -f "$BATS_TEST_TMPDIR/ran-marker" ]
+  [ ! -f "$OTEL_SPAN_RAN_MARKER" ]
 }
 
 @test "AC-4: otel_span_run still runs the wrapped command when disabled" {

@@ -65,12 +65,12 @@
       "id": 4,
       "title": "Slowest tests across last 7d",
       "type": "table",
-      "description": "Top-N slowest tests across the 7-day window. TraceQL sorts by span duration.",
+      "description": "Top-N slowest tests across the 7-day window — TEST-level spans only (excludes suite-root and file-level spans, which would dwarf individual test durations).",
       "targets": [
         {
           "datasource": { "type": "tempo", "uid": "tempo-bts-497" },
           "queryType": "traceql",
-          "query": "{ resource.service.name=\"ccanvil-test\" } | select(span.test.name, span.test.file, span.test.duration_ms)",
+          "query": "{ resource.service.name=\"ccanvil-test\" && .runner.kind=\"bats\" && name !~ \"^bats suite\" && name !~ \"^file:\" } | select(span.test.name, span.test.file, span.test.duration_ms)",
           "refId": "A"
         }
       ]

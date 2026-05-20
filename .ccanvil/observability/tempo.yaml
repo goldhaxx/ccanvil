@@ -15,9 +15,16 @@ distributor:
           endpoint: 0.0.0.0:4318
 
 ingester:
-  trace_idle_period: 10s
+  # BTS-504 follow-up: tuned for near-real-time search visibility during
+  # long-running suites. With the hierarchical model (one trace per ~6-min
+  # bats run), the trace never idles → ingester never flushes mid-run on
+  # idle alone. max_block_duration becomes the dominant flush trigger.
+  # 30s gives the live-feed dashboard ~30-45s lag, well within "real time"
+  # for test runs. Trade-off: ~12× more blocks per suite (compactor
+  # merges them within an hour). Acceptable for a single-user local stack.
+  trace_idle_period: 5s
   max_block_bytes: 1_000_000
-  max_block_duration: 5m
+  max_block_duration: 30s
 
 compactor:
   compaction:

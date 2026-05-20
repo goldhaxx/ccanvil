@@ -1,10 +1,17 @@
 #!/usr/bin/env bats
+
+# BTS-497 telemetry hooks.
+source "$BATS_TEST_DIRNAME/_helpers/telemetry.bash"
+setup_file()    { telemetry_setup_file; }
+teardown_file() { telemetry_teardown_file; }
+teardown()      { telemetry_teardown; }
 # BTS-240 Step 1+2: cmd_extract markdown branch — AC-1, AC-2, AC-3, AC-8
 
 setup() {
   REPO_ROOT="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"
   SCRIPT="$REPO_ROOT/.ccanvil/scripts/module-manifest.sh"
   FIXTURES="$REPO_ROOT/hub/tests/fixtures/manifest"
+  telemetry_setup
 }
 
 @test "extract markdown: emits one JSON object per manifest block" {

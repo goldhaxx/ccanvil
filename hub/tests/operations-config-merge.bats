@@ -9,6 +9,12 @@
 
 bats_require_minimum_version 1.5.0
 
+# BTS-497 telemetry hooks.
+source "$BATS_TEST_DIRNAME/_helpers/telemetry.bash"
+setup_file()    { telemetry_setup_file; }
+teardown_file() { telemetry_teardown_file; }
+teardown()      { telemetry_teardown; }
+
 OPS="$BATS_TEST_DIRNAME/../../.ccanvil/scripts/operations.sh"
 
 setup() {
@@ -16,6 +22,7 @@ setup() {
   # and missing-tier cases are deterministic.
   export HOME="$BATS_TEST_TMPDIR/fake-home"
   mkdir -p "$HOME/.ccanvil"
+  telemetry_setup
 }
 
 _node_with() {

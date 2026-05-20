@@ -1,4 +1,9 @@
 #!/usr/bin/env bats
+
+# BTS-497 telemetry hooks.
+source "$BATS_TEST_DIRNAME/_helpers/telemetry.bash"
+setup_file()    { telemetry_setup_file; }
+teardown_file() { telemetry_teardown_file; }
 # Tests for cmd_register auto-commit of .claude/ccanvil.local.json.
 # Spec: docs/specs/register-auto-commit.md (BTS-74, Feature 1 of 3)
 #
@@ -38,9 +43,11 @@ LOCKEOF
   # Git identity for subsequent commits made by the script
   git -C "$NODE" config user.email "test@test"
   git -C "$NODE" config user.name "test"
+  telemetry_setup
 }
 
 teardown() {
+  telemetry_teardown
   rm -rf "$HUB" "$NODE"
 }
 

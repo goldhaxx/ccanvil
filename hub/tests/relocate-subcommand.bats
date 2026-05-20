@@ -1,4 +1,9 @@
 #!/usr/bin/env bats
+
+# BTS-497 telemetry hooks.
+source "$BATS_TEST_DIRNAME/_helpers/telemetry.bash"
+setup_file()    { telemetry_setup_file; }
+teardown_file() { telemetry_teardown_file; }
 # Tests for ccanvil-sync.sh relocate <old-path>.
 # Spec: docs/specs/relocate-subcommand.md (BTS-74, Feature 3 of 3)
 #
@@ -35,9 +40,11 @@ JSONL
   cat > "$OLD_DIR/session-2.jsonl" <<JSONL
 {"type":"user","cwd":"/somewhere/else","message":"no match here"}
 JSONL
+  telemetry_setup
 }
 
 teardown() {
+  telemetry_teardown
   rm -rf "$FAKE_HOME" "$NEW_PATH"
 }
 

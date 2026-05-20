@@ -1,4 +1,9 @@
 #!/usr/bin/env bats
+
+# BTS-497 telemetry hooks.
+source "$BATS_TEST_DIRNAME/_helpers/telemetry.bash"
+setup_file()    { telemetry_setup_file; }
+teardown_file() { telemetry_teardown_file; }
 # Tests for docs-check.sh legacy-refs-scan subcommand.
 # Spec: docs/specs/stasis-recall.md AC-35 through AC-37.
 
@@ -6,9 +11,11 @@ SCRIPT="$BATS_TEST_DIRNAME/../../.ccanvil/scripts/docs-check.sh"
 
 setup() {
   FIXTURE=$(mktemp -d)
+  telemetry_setup
 }
 
 teardown() {
+  telemetry_teardown
   rm -rf "$FIXTURE"
 }
 

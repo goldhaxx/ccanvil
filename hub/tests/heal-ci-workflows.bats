@@ -8,6 +8,12 @@
 
 bats_require_minimum_version 1.5.0
 
+# BTS-497 telemetry hooks.
+source "$BATS_TEST_DIRNAME/_helpers/telemetry.bash"
+setup_file()    { telemetry_setup_file; }
+teardown_file() { telemetry_teardown_file; }
+setup()         { telemetry_setup; }
+
 SCRIPT="$BATS_TEST_DIRNAME/../../.ccanvil/scripts/ccanvil-sync.sh"
 
 # Configure git identity for any commits this test makes inside fixture nodes.
@@ -128,6 +134,7 @@ YAML
 }
 
 teardown() {
+  telemetry_teardown
   if [[ -n "${HUB:-}" ]]; then rm -rf "$HUB"; fi
   if [[ -n "${NODE:-}" ]]; then rm -rf "$NODE"; fi
   if [[ -n "${NODE2:-}" ]]; then rm -rf "$NODE2"; fi

@@ -1,4 +1,10 @@
 #!/usr/bin/env bats
+
+# BTS-497 telemetry hooks.
+source "$BATS_TEST_DIRNAME/_helpers/telemetry.bash"
+setup_file()    { telemetry_setup_file; }
+teardown_file() { telemetry_teardown_file; }
+teardown()      { telemetry_teardown; }
 # BTS-497 Step 14 — --no-telemetry escape hatch on bats-report.sh.
 #
 # Purpose: substrate self-tests (and any caller that wants the bats suite
@@ -20,6 +26,7 @@ setup() {
 @test "pass two" { true; }
 EOF
   export BATS_REPORT_STATE_DIR="$BATS_TEST_TMPDIR/state"
+  telemetry_setup
 }
 
 # =========================================================================

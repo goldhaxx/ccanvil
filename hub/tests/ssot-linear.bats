@@ -5,12 +5,19 @@
 
 bats_require_minimum_version 1.5.0
 
+# BTS-497 telemetry hooks.
+source "$BATS_TEST_DIRNAME/_helpers/telemetry.bash"
+setup_file()    { telemetry_setup_file; }
+teardown_file() { telemetry_teardown_file; }
+teardown()      { telemetry_teardown; }
+
 LQ="$BATS_TEST_DIRNAME/../../.ccanvil/scripts/linear-query.sh"
 
 setup() {
   export TMPDIR="${BATS_TEST_TMPDIR}"
   unset LINEAR_API_KEY
   unset LINEAR_QUERY_ENDPOINT
+  telemetry_setup
 }
 
 # =========================================================================

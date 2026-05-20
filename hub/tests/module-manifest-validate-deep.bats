@@ -1,10 +1,17 @@
 #!/usr/bin/env bats
+
+# BTS-497 telemetry hooks.
+source "$BATS_TEST_DIRNAME/_helpers/telemetry.bash"
+setup_file()    { telemetry_setup_file; }
+teardown_file() { telemetry_teardown_file; }
+teardown()      { telemetry_teardown; }
 # BTS-239 Step 5: cmd_validate (deep / bidirectional) — AC-3 cont., AC-4 (5 remaining drift classes)
 
 setup() {
   REPO_ROOT="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"
   SCRIPT="$REPO_ROOT/.ccanvil/scripts/module-manifest.sh"
   FIXTURES="$REPO_ROOT/hub/tests/fixtures/manifest"
+  telemetry_setup
 }
 
 # Helper: stage a single fixture file as the only source under .ccanvil/scripts.

@@ -7,6 +7,11 @@
 
 bats_require_minimum_version 1.5.0
 
+# BTS-497 telemetry hooks.
+source "$BATS_TEST_DIRNAME/_helpers/telemetry.bash"
+setup_file()    { telemetry_setup_file; }
+teardown_file() { telemetry_teardown_file; }
+
 load _helpers/bats-report-stub
 
 REPORT="$BATS_TEST_DIRNAME/../../.ccanvil/scripts/bats-report.sh"
@@ -15,9 +20,11 @@ setup() {
   stub_bats_report_prewarm
   WORK=$(mktemp -d)
   mkdir -p "$WORK/bin"
+  telemetry_setup
 }
 
 teardown() {
+  telemetry_teardown
   rm -rf "$WORK"
 }
 
@@ -56,7 +63,7 @@ SHIM
   seed_bats_shim
   PATH="$WORK/bin:$PATH" \
   BATS_REPORT_HAS_PARALLEL=1 \
-  run bash "$REPORT" --parallel /dev/null
+  run bash "$REPORT" --parallel --no-telemetry /dev/null
   [ "$status" -eq 0 ]
   grep -qE '^--jobs$' "$WORK/bats-args.log"
   jobs=$(awk '/^--jobs$/ {getline; print; exit}' "$WORK/bats-args.log")
@@ -69,7 +76,7 @@ SHIM
   seed_bats_shim
   PATH="$WORK/bin:$PATH" \
   BATS_REPORT_HAS_PARALLEL=1 \
-  run bash "$REPORT" --parallel /dev/null
+  run bash "$REPORT" --parallel --no-telemetry /dev/null
   [ "$status" -eq 0 ]
   jobs=$(awk '/^--jobs$/ {getline; print; exit}' "$WORK/bats-args.log")
   [ "$jobs" = "8" ]  # 16 / 2
@@ -81,7 +88,7 @@ SHIM
   seed_bats_shim
   PATH="$WORK/bin:$PATH" \
   BATS_REPORT_HAS_PARALLEL=1 \
-  run bash "$REPORT" --parallel /dev/null
+  run bash "$REPORT" --parallel --no-telemetry /dev/null
   [ "$status" -eq 0 ]
   jobs=$(awk '/^--jobs$/ {getline; print; exit}' "$WORK/bats-args.log")
   [ "$jobs" = "8" ]
@@ -94,7 +101,7 @@ SHIM
   PATH="$WORK/bin:$PATH" \
   BATS_REPORT_HAS_PARALLEL=1 \
   BATS_REPORT_PERF_CORES=4 \
-  run bash "$REPORT" --parallel /dev/null
+  run bash "$REPORT" --parallel --no-telemetry /dev/null
   [ "$status" -eq 0 ]
   jobs=$(awk '/^--jobs$/ {getline; print; exit}' "$WORK/bats-args.log")
   [ "$jobs" = "4" ]

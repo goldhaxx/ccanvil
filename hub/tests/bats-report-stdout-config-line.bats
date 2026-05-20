@@ -1,4 +1,10 @@
 #!/usr/bin/env bats
+
+# BTS-497 telemetry hooks.
+source "$BATS_TEST_DIRNAME/_helpers/telemetry.bash"
+setup_file()    { telemetry_setup_file; }
+teardown_file() { telemetry_teardown_file; }
+teardown()      { telemetry_teardown; }
 # BTS-497 Step 7 — AC-11: bats-report.sh --parallel surfaces the
 # parallelization config in human stdout, immediately above the
 # existing PASS / FAIL / TOTAL summary line.
@@ -29,6 +35,7 @@ EOF
   export BTS_RUN_ID=run-abc
   export OTEL_FLATTEN_INPUT="$BATS_TEST_DIRNAME/fixtures/raw-traces-sample.jsonl"
   export OTEL_FLATTEN_OUTPUT="$BATS_TEST_TMPDIR/test-runs.jsonl"
+  telemetry_setup
 }
 
 # =========================================================================

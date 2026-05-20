@@ -6,6 +6,11 @@
 
 bats_require_minimum_version 1.5.0
 
+# BTS-497 telemetry hooks.
+source "$BATS_TEST_DIRNAME/_helpers/telemetry.bash"
+setup_file()    { telemetry_setup_file; }
+teardown_file() { telemetry_teardown_file; }
+
 load _helpers/bats-report-stub
 
 REPORT="$BATS_TEST_DIRNAME/../../.ccanvil/scripts/bats-report.sh"
@@ -14,9 +19,11 @@ setup() {
   stub_bats_report_prewarm
   export TMPDIR="${BATS_TEST_TMPDIR}"
   WORK=$(mktemp -d)
+  telemetry_setup
 }
 
 teardown() {
+  telemetry_teardown
   rm -rf "$WORK"
 }
 
@@ -112,7 +119,7 @@ seed_bats() {
   seed_bats "$WORK/pass.bats" \
     'TESTZ "one" { [ 1 -eq 1 ]; }' \
     'TESTZ "two" { [ 2 -eq 2 ]; }'
-  run --separate-stderr bash "$REPORT" --parallel "$WORK/pass.bats"
+  run --separate-stderr bash "$REPORT" --parallel --no-telemetry "$WORK/pass.bats"
   [ "$status" -eq 0 ]
   [[ "$output" =~ "PASS: 2" ]]
 }
@@ -124,7 +131,7 @@ seed_bats() {
   # BATS_REPORT_HAS_PARALLEL=0 forces the missing-parallel branch for test
   # purposes, independent of actual install state. bats still resolves via the
   # inherited PATH so the overall invocation succeeds.
-  BATS_REPORT_HAS_PARALLEL=0 run --separate-stderr bash "$REPORT" --parallel "$WORK/pass.bats"
+  BATS_REPORT_HAS_PARALLEL=0 run --separate-stderr bash "$REPORT" --parallel --no-telemetry "$WORK/pass.bats"
   [ "$status" -eq 0 ]
   [[ "$stderr" =~ "WARN" ]]
   [[ "$stderr" =~ "parallel" ]]

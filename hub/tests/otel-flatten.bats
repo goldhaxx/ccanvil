@@ -1,4 +1,10 @@
 #!/usr/bin/env bats
+
+# BTS-497 telemetry hooks.
+source "$BATS_TEST_DIRNAME/_helpers/telemetry.bash"
+setup_file()    { telemetry_setup_file; }
+teardown_file() { telemetry_teardown_file; }
+teardown()      { telemetry_teardown; }
 # BTS-497 Step 3 — otel-flatten.sh core flatten path (AC-10).
 #
 # The flatten step reads OTLP `ExportTraceServiceRequest` envelopes from
@@ -16,6 +22,7 @@ FIXTURE="$BATS_TEST_DIRNAME/fixtures/raw-traces-sample.jsonl"
 setup() {
   export OTEL_FLATTEN_INPUT="$FIXTURE"
   export OTEL_FLATTEN_OUTPUT="$BATS_TEST_TMPDIR/test-runs.jsonl"
+  telemetry_setup
 }
 
 # =========================================================================
@@ -228,5 +235,31 @@ setup() {
   [ "$count" -eq 2 ]
   local bad
   bad=$(jq -c 'select(.run_id != "run-xyz")' "$OTEL_FLATTEN_OUTPUT" | wc -l | tr -d ' ')
+  [ "$bad" -eq 0 ]
+}
+
+# =========================================================================
+# BTS-533 — hierarchy spans (suite-root + file) must not break the flatten
+# =========================================================================
+# Regression: BTS-504 added suite-root + file spans to the trace. Suite-root
+# spans carry run.id but no worker.id, so `worker.id | tonumber` aborted the
+# whole flatten on `null`. The flat sidecar is a per-TEST schema — suite and
+# file spans must be skipped, not flattened.
+
+@test "BTS-533: flatten skips suite-root + file spans, emits only test records" {
+  export OTEL_FLATTEN_INPUT="$BATS_TEST_DIRNAME/fixtures/raw-traces-hierarchy.jsonl"
+  run bash "$FLATTEN" run-hier
+  [ "$status" -eq 0 ]
+  # Fixture has 1 suite-root + 1 file + 2 test spans — only the 2 tests flatten.
+  local count
+  count=$(wc -l < "$OTEL_FLATTEN_OUTPUT" | tr -d ' ')
+  [ "$count" -eq 2 ]
+}
+
+@test "BTS-533: every flattened hierarchy record has a non-null test_name" {
+  export OTEL_FLATTEN_INPUT="$BATS_TEST_DIRNAME/fixtures/raw-traces-hierarchy.jsonl"
+  bash "$FLATTEN" run-hier
+  local bad
+  bad=$(jq -c 'select(.test_name == null)' "$OTEL_FLATTEN_OUTPUT" | wc -l | tr -d ' ')
   [ "$bad" -eq 0 ]
 }

@@ -1,9 +1,16 @@
 #!/usr/bin/env bats
+
+# BTS-497 telemetry hooks.
+source "$BATS_TEST_DIRNAME/_helpers/telemetry.bash"
+setup_file()    { telemetry_setup_file; }
+teardown_file() { telemetry_teardown_file; }
+teardown()      { telemetry_teardown; }
 # BTS-267: cmd_seed_allowlist — proposes initial manifest allowlist for a downstream-node substrate.
 
 setup() {
   REPO_ROOT="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"
   SCRIPT="$REPO_ROOT/.ccanvil/scripts/module-manifest.sh"
+  telemetry_setup
 }
 
 # AC-4: nonexistent --dir → exit 2 with stderr error.

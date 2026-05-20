@@ -1,4 +1,11 @@
 #!/usr/bin/env bats
+
+# BTS-497 telemetry hooks.
+source "$BATS_TEST_DIRNAME/_helpers/telemetry.bash"
+setup_file()    { telemetry_setup_file; }
+teardown_file() { telemetry_teardown_file; }
+setup()         { telemetry_setup; }
+teardown()      { telemetry_teardown; }
 # Tests for stasis-recall: comprehensive rename of checkpoint/catchup →
 # stasis/recall across verbs, artifact filename, template, internal
 # identifiers, and guide references. Spec: docs/specs/stasis-recall.md
@@ -365,6 +372,8 @@ OPERATIONS="$REPO_ROOT/.ccanvil/scripts/operations.sh"
     --exclude-dir=dist \
     --exclude-dir=generated \
     --exclude-dir=.claude/worktrees \
+    --exclude-dir=observability \
+    --exclude-dir=state \
     'checkpoint|catchup' \
     .claude .ccanvil hub docs README.md CLAUDE.md 2>/dev/null \
     | sed 's|^\./||' || true)

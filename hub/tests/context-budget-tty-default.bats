@@ -3,6 +3,11 @@
 
 bats_require_minimum_version 1.5.0
 
+# BTS-497 telemetry hooks.
+source "$BATS_TEST_DIRNAME/_helpers/telemetry.bash"
+setup_file()    { telemetry_setup_file; }
+teardown_file() { telemetry_teardown_file; }
+
 SCRIPT="$BATS_TEST_DIRNAME/../../.ccanvil/scripts/context-budget.sh"
 
 setup() {
@@ -12,9 +17,11 @@ setup() {
   # Minimal viable project: empty CLAUDE.md is enough — the script measures
   # whatever it finds and doesn't blow up on small inputs.
   : > "$PROJECT/CLAUDE.md"
+  telemetry_setup
 }
 
 teardown() {
+  telemetry_teardown
   rm -rf "$PROJECT"
 }
 

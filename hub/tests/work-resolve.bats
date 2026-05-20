@@ -1,4 +1,9 @@
 #!/usr/bin/env bats
+
+# BTS-497 telemetry hooks.
+source "$BATS_TEST_DIRNAME/_helpers/telemetry.bash"
+setup_file()    { telemetry_setup_file; }
+teardown_file() { telemetry_teardown_file; }
 # Tests for work.resolve — provider-neutral work identity resolution.
 # BTS-130 (work-identity) — Phase 2: resolver.
 
@@ -8,9 +13,11 @@ setup() {
   export TMPDIR="${BATS_TEST_TMPDIR}"
   PROJECT=$(mktemp -d)
   mkdir -p "$PROJECT/.ccanvil" "$PROJECT/.claude"
+  telemetry_setup
 }
 
 teardown() {
+  telemetry_teardown
   rm -rf "$PROJECT"
 }
 

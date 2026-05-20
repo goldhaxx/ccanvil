@@ -1,4 +1,10 @@
 #!/usr/bin/env bats
+
+# BTS-497 telemetry hooks.
+source "$BATS_TEST_DIRNAME/_helpers/telemetry.bash"
+setup_file()    { telemetry_setup_file; }
+teardown_file() { telemetry_teardown_file; }
+teardown()      { telemetry_teardown; }
 # BTS-497 Step 8 — AC-8: docker-compose stack scaffold smoke tests.
 #
 # Validates the static structure of .ccanvil/observability/docker-compose.yml
@@ -15,6 +21,7 @@ COMPOSE="$BATS_TEST_DIRNAME/../../.ccanvil/observability/docker-compose.yml"
 setup() {
   command -v docker >/dev/null 2>&1 || skip "docker cli not on PATH"
   [ -f "$COMPOSE" ] || skip "docker-compose.yml not yet created"
+  telemetry_setup
 }
 
 # =========================================================================
@@ -178,7 +185,9 @@ COLLECTOR_CFG="$BATS_TEST_DIRNAME/../../.ccanvil/observability/otel-collector-co
 
 DS_TEMPO="$BATS_TEST_DIRNAME/../../.ccanvil/observability/grafana/provisioning/datasources/tempo.yaml"
 DASH_PROVIDER="$BATS_TEST_DIRNAME/../../.ccanvil/observability/grafana/provisioning/dashboards/test-runs.yaml"
-DASH_JSON="$BATS_TEST_DIRNAME/../../.ccanvil/observability/grafana/provisioning/dashboards/test-runs-overview.json"
+# BTS-533: the two prior dashboards (test-runs-overview + test-runs-live) were
+# consolidated into one — NOW / SLOW / DIDN'T PASS / TREND sections.
+DASH_JSON="$BATS_TEST_DIRNAME/../../.ccanvil/observability/grafana/provisioning/dashboards/ccanvil-test-observability.json"
 
 @test "AC-4: tempo datasource provisioning declares http://tempo:3200" {
   [ -f "$DS_TEMPO" ] || skip "datasource provisioning not yet created"
@@ -193,29 +202,43 @@ DASH_JSON="$BATS_TEST_DIRNAME/../../.ccanvil/observability/grafana/provisioning/
   grep -qE 'type: file' "$DASH_PROVIDER"
 }
 
-@test "AC-4: Test Runs Overview dashboard JSON is valid + UID stable" {
+@test "AC-4: consolidated dashboard JSON is valid + UID stable (BTS-533)" {
   [ -f "$DASH_JSON" ] || skip "dashboard JSON not yet created"
-  jq -e '.title == "Test Runs Overview"' "$DASH_JSON" >/dev/null
-  jq -e '.uid == "test-runs-overview"' "$DASH_JSON" >/dev/null
+  jq -e '.title == "ccanvil — Test observability"' "$DASH_JSON" >/dev/null
+  jq -e '.uid == "ccanvil-test-obs"' "$DASH_JSON" >/dev/null
 }
 
-@test "AC-4: dashboard declares 4 panels per spec (wall-time, count, outcome, slowest)" {
+@test "AC-4: dashboard declares the four section rows (BTS-533)" {
+  [ -f "$DASH_JSON" ] || skip "dashboard JSON not yet created"
+  # NOW / SLOW / DIDN'T PASS / TREND — each is a Grafana row.
+  jq -e '[.panels[] | select(.type == "row") | .title] | any(test("^NOW"))' "$DASH_JSON" >/dev/null
+  jq -e '[.panels[] | select(.type == "row") | .title] | any(test("^SLOW"))' "$DASH_JSON" >/dev/null
+  jq -e '[.panels[] | select(.type == "row") | .title] | any(test("DIDN.T PASS"))' "$DASH_JSON" >/dev/null
+  jq -e '[.panels[] | select(.type == "row") | .title] | any(test("^TREND"))' "$DASH_JSON" >/dev/null
+}
+
+@test "AC-4: dashboard declares the seven data panels (BTS-533)" {
   [ -f "$DASH_JSON" ] || skip "dashboard JSON not yet created"
   local count
-  count=$(jq '.panels | length' "$DASH_JSON")
-  [ "$count" -ge 4 ]
-  # Title-based assertions: the four AC-4 panels exist by name.
-  jq -e '[.panels[].title] | any(. == "Per-run wall time")' "$DASH_JSON" >/dev/null
-  jq -e '[.panels[].title] | any(. == "Test count per run")' "$DASH_JSON" >/dev/null
-  jq -e '[.panels[].title] | any(. == "Outcome summary")' "$DASH_JSON" >/dev/null
-  jq -e '[.panels[].title] | any(. == "Slowest tests across last 7d")' "$DASH_JSON" >/dev/null
+  count=$(jq '[.panels[] | select(.type != "row")] | length' "$DASH_JSON")
+  [ "$count" -eq 7 ]
 }
 
-@test "AC-4: every panel references the Tempo datasource UID (tempo-bts-497)" {
+@test "AC-4: every data panel references the Tempo datasource UID (tempo-bts-497)" {
   [ -f "$DASH_JSON" ] || skip "dashboard JSON not yet created"
+  # Rows carry no datasource — exclude them before asserting.
   local bad
-  bad=$(jq '[.panels[].datasource.uid // ""] | map(select(. != "tempo-bts-497")) | length' "$DASH_JSON")
+  bad=$(jq '[.panels[] | select(.type != "row") | .datasource.uid // ""] | map(select(. != "tempo-bts-497")) | length' "$DASH_JSON")
   [ "$bad" -eq 0 ]
+}
+
+@test "AC-4: no panel query uses a caret-anchored regex (Tempo =~ is implicit-anchored) (BTS-533)" {
+  [ -f "$DASH_JSON" ] || skip "dashboard JSON not yet created"
+  # Tempo's =~ / !~ are full-line anchored; a leading ^ makes the match
+  # never fire. Guard against the regression that motivated BTS-533.
+  local caret
+  caret=$(jq -r '[.panels[].targets // [] | .[].query // "" | select(test("[=!]~ \"\\^"))] | length' "$DASH_JSON")
+  [ "$caret" -eq 0 ]
 }
 
 @test "AC-8: grafana service bind-mounts provisioning dir read-only" {

@@ -1,4 +1,10 @@
 #!/usr/bin/env bats
+
+# BTS-497 telemetry hooks.
+source "$BATS_TEST_DIRNAME/_helpers/telemetry.bash"
+setup_file()    { telemetry_setup_file; }
+teardown_file() { telemetry_teardown_file; }
+teardown()      { telemetry_teardown; }
 # BTS-497 Step 15 — AC-2: docs-check.sh test-suite-run gates on the OTel
 # Collector healthcheck BEFORE forking bats. Closes the failure mode where
 # bats runs to completion only for the helper's setup_file to abort
@@ -21,6 +27,7 @@ setup() {
 @test "trivial pass" { true; }
 EOF
   export BATS_REPORT_STATE_DIR="$BATS_TEST_TMPDIR/state"
+  telemetry_setup
 }
 
 # =========================================================================

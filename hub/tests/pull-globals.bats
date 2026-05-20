@@ -1,4 +1,9 @@
 #!/usr/bin/env bats
+
+# BTS-497 telemetry hooks.
+source "$BATS_TEST_DIRNAME/_helpers/telemetry.bash"
+setup_file()    { telemetry_setup_file; }
+teardown_file() { telemetry_teardown_file; }
 # Tests for ccanvil-sync.sh pull-globals subcommand
 
 SCRIPT="$BATS_TEST_DIRNAME/../../.ccanvil/scripts/ccanvil-sync.sh"
@@ -37,9 +42,11 @@ HUBEOF
 
   cd "$NODE"
   bash "$NODE/.ccanvil/scripts/ccanvil-sync.sh" init "$HUB"
+  telemetry_setup
 }
 
 teardown() {
+  telemetry_teardown
   rm -rf "$HUB" "$NODE" "$FAKE_HOME"
 }
 

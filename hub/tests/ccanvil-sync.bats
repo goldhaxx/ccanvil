@@ -1,4 +1,9 @@
 #!/usr/bin/env bats
+
+# BTS-497 telemetry hooks.
+source "$BATS_TEST_DIRNAME/_helpers/telemetry.bash"
+setup_file()    { telemetry_setup_file; }
+teardown_file() { telemetry_teardown_file; }
 # Tests for scripts/ccanvil-sync.sh
 #
 # Each test creates isolated temp directories simulating hub + node repos.
@@ -169,9 +174,11 @@ HUBEOF
   # Commit registration in hub so hub stays clean
   git -C "$HUB" add -A
   git -C "$HUB" commit -q -m "register node" 2>/dev/null || true
+  telemetry_setup
 }
 
 teardown() {
+  telemetry_teardown
   rm -rf "$HUB" "$NODE"
 }
 

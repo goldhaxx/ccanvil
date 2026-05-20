@@ -1,4 +1,9 @@
 #!/usr/bin/env bats
+
+# BTS-497 telemetry hooks.
+source "$BATS_TEST_DIRNAME/_helpers/telemetry.bash"
+setup_file()    { telemetry_setup_file; }
+teardown_file() { telemetry_teardown_file; }
 # Tests for docs-check.sh validate — Work:-based alignment + session-kind
 # exclusion + legacy feature_id grandfather.
 # BTS-130 (work-identity) — Phase 3: validator.
@@ -8,9 +13,11 @@ SCRIPT="$BATS_TEST_DIRNAME/../../.ccanvil/scripts/docs-check.sh"
 setup() {
   export TMPDIR="${BATS_TEST_TMPDIR}"
   DOCS=$(mktemp -d)
+  telemetry_setup
 }
 
 teardown() {
+  telemetry_teardown
   rm -rf "$DOCS"
 }
 

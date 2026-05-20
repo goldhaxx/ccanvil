@@ -9,10 +9,17 @@
 
 bats_require_minimum_version 1.5.0
 
+# BTS-497 telemetry hooks.
+source "$BATS_TEST_DIRNAME/_helpers/telemetry.bash"
+setup_file()    { telemetry_setup_file; }
+teardown_file() { telemetry_teardown_file; }
+teardown()      { telemetry_teardown; }
+
 DC="$BATS_TEST_DIRNAME/../../.ccanvil/scripts/docs-check.sh"
 
 setup() {
   export HOME="$BATS_TEST_TMPDIR/fake-home"
+  telemetry_setup
 }
 
 @test "BTS-316 AC-1: operator-config init writes seeded shape with provider+team" {

@@ -1,4 +1,10 @@
 #!/usr/bin/env bats
+
+# BTS-497 telemetry hooks.
+source "$BATS_TEST_DIRNAME/_helpers/telemetry.bash"
+setup_file()    { telemetry_setup_file; }
+teardown_file() { telemetry_teardown_file; }
+teardown()      { telemetry_teardown; }
 # BTS-383 AC-4/AC-5: validate --changed-only [--since <ref>] scopes drift
 # detection to the git-diff ∩ allowlist subset.
 
@@ -6,6 +12,7 @@ setup() {
   REPO_ROOT="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"
   SCRIPT="$REPO_ROOT/.ccanvil/scripts/module-manifest.sh"
   FIXTURES="$REPO_ROOT/hub/tests/fixtures/manifest"
+  telemetry_setup
 }
 
 # Helper: build a project with two manifest-blocked files committed to a

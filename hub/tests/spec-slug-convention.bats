@@ -1,4 +1,9 @@
 #!/usr/bin/env bats
+
+# BTS-497 telemetry hooks.
+source "$BATS_TEST_DIRNAME/_helpers/telemetry.bash"
+setup_file()    { telemetry_setup_file; }
+teardown_file() { telemetry_teardown_file; }
 # Tests for slug-prefixed spec filenames and branch names.
 # BTS-130 (work-identity) — Phase 4: /spec filename + branch convention.
 #
@@ -21,9 +26,11 @@ setup() {
   git -C "$REPO" remote add origin "$BARE"
   git -C "$REPO" push -q -u origin main
   mkdir -p "$REPO/docs/specs"
+  telemetry_setup
 }
 
 teardown() {
+  telemetry_teardown
   rm -rf "$REPO" "$BARE"
 }
 

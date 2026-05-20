@@ -1,4 +1,9 @@
 #!/usr/bin/env bats
+
+# BTS-497 telemetry hooks.
+source "$BATS_TEST_DIRNAME/_helpers/telemetry.bash"
+setup_file()    { telemetry_setup_file; }
+teardown_file() { telemetry_teardown_file; }
 # Tests for broadcast bootstrap tolerance of gitignored lockfiles.
 #
 # Historical context: this file previously tested commit_hub_file and
@@ -41,9 +46,11 @@ HUBEOF
   git -C "$NODE" init -q
   git -C "$NODE" -c user.email=test@test.com -c user.name=test add -A
   git -C "$NODE" -c user.email=test@test.com -c user.name=test commit -q -m "init node"
+  telemetry_setup
 }
 
 teardown() {
+  telemetry_teardown
   rm -rf "$HUB" "$NODE"
 }
 

@@ -5,6 +5,13 @@
 
 bats_require_minimum_version 1.5.0
 
+# BTS-497 telemetry hooks.
+source "$BATS_TEST_DIRNAME/_helpers/telemetry.bash"
+setup_file()    { telemetry_setup_file; }
+teardown_file() { telemetry_teardown_file; }
+setup()         { telemetry_setup; }
+teardown()      { telemetry_teardown; }
+
 TDD_RULE="$BATS_TEST_DIRNAME/../../.claude/rules/tdd.md"
 PLAN_SKILL="$BATS_TEST_DIRNAME/../../.claude/commands/plan.md"
 SELF_REVIEW_RULE="$BATS_TEST_DIRNAME/../../.claude/rules/self-review.md"

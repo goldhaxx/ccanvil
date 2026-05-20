@@ -1,5 +1,11 @@
 #!/usr/bin/env bats
 
+# BTS-497 telemetry hooks.
+source "$BATS_TEST_DIRNAME/_helpers/telemetry.bash"
+setup_file()    { telemetry_setup_file; }
+teardown_file() { telemetry_teardown_file; }
+teardown()      { telemetry_teardown; }
+
 load _helpers/bats-report-stub
 
 setup() {
@@ -8,6 +14,7 @@ setup() {
   REPO_ROOT="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"
   FIXTURE_DIR="$REPO_ROOT/hub/tests/fixtures/bats-progress"
   cd "$REPO_ROOT"
+  telemetry_setup
 }
 
 @test "AC-2: --json envelope carries failures[] with shape on forced-fail fixture" {

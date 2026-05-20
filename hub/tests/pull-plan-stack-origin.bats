@@ -1,4 +1,9 @@
 #!/usr/bin/env bats
+
+# BTS-497 telemetry hooks.
+source "$BATS_TEST_DIRNAME/_helpers/telemetry.bash"
+setup_file()    { telemetry_setup_file; }
+teardown_file() { telemetry_teardown_file; }
 # Tests for pull-plan stack-origin classification (BTS-73 / spec: pull-plan-stack-origin)
 #
 # Bug: cmd_pull_plan flags files with `origin: stack:<id>` as "removed from hub"
@@ -35,9 +40,11 @@ setup() {
   "files": {}
 }
 LOCKEOF
+  telemetry_setup
 }
 
 teardown() {
+  telemetry_teardown
   rm -rf "$HUB" "$NODE"
 }
 

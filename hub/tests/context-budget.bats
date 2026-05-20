@@ -1,4 +1,9 @@
 #!/usr/bin/env bats
+
+# BTS-497 telemetry hooks.
+source "$BATS_TEST_DIRNAME/_helpers/telemetry.bash"
+setup_file()    { telemetry_setup_file; }
+teardown_file() { telemetry_teardown_file; }
 # Tests for scripts/context-budget.sh
 #
 # Each test creates an isolated fixture directory with known file content
@@ -27,9 +32,11 @@ setup() {
   # Disable global CLAUDE.md by default (point to nonexistent path)
   # Tests that need it override with --global-claude-md
   NO_GLOBAL="--global-claude-md /nonexistent/CLAUDE.md"
+  telemetry_setup
 }
 
 teardown() {
+  telemetry_teardown
   rm -rf "$FIXTURE"
 }
 

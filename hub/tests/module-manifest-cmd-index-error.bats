@@ -8,6 +8,12 @@
 
 bats_require_minimum_version 1.5.0
 
+# BTS-497 telemetry hooks.
+source "$BATS_TEST_DIRNAME/_helpers/telemetry.bash"
+setup_file()    { telemetry_setup_file; }
+teardown_file() { telemetry_teardown_file; }
+teardown()      { telemetry_teardown; }
+
 SCRIPT="$BATS_TEST_DIRNAME/../../.ccanvil/scripts/module-manifest.sh"
 
 setup() {
@@ -23,6 +29,7 @@ setup() {
 # anchor: BTS-510-test
 seed() { :; }
 EOF
+  telemetry_setup
 }
 
 _install_shim() {

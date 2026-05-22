@@ -1,6 +1,6 @@
 # Test Observability — Schema Contract
 
-Runner-neutral schema for ccanvil's test-observability stack. Versioned `v1.1.0`. Three schemas live here: the OTel **span schema** (emitted by every test runner via OTel-compatible exporters), the **flat JSONL record schema** (derived by `otel-flatten.sh` from the OTel Collector's `fileexporter` output for agent-readable per-test queries), and the **run & phase span schema** (BTS-560 — the rooted end-to-end trace `bats-report.sh` emits per run).
+Runner-neutral schema for ccanvil's test-observability stack. Versioned `v1.0.0`. Two schemas live here: the OTel **span schema** (emitted by every test runner via OTel-compatible exporters) and the **flat JSONL record schema** (derived by `otel-flatten.sh` from the OTel Collector's `fileexporter` output for agent-readable per-test queries). A third section — the **run & phase span schema** (BTS-560) — documents the rooted end-to-end trace `bats-report.sh` emits; those spans are Tempo-only and carry no `schema_version`, so they do not affect the `v1.0.0` contract above.
 
 The schema is single-source for both ccanvil's bats runner (Stage 1) and downstream-node distillation to pytest / vitest / go-test / cargo (Stage 2, per BTS-499). Any future runner emits the same shape; `runner.kind` discriminates.
 
@@ -61,7 +61,7 @@ The flatten step (AC-12) uses `(run_id, span_id)` as the unique identity. On eac
 
 ## Run & Phase Span Schema
 
-Version: v1.1.0 (added by BTS-560)
+Added by BTS-560. These spans are Tempo-only and carry no `schema_version` field — they are not part of the versioned `v1.0.0` contract above.
 
 A `test-suite-run` invocation (`bats-report.sh`) emits one **rooted trace** that wraps every phase of the run. These spans live in Tempo only — they are not flattened to `test-runs.jsonl` and carry no `schema_version` field (that field is on flat test records only).
 

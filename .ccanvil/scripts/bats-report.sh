@@ -251,15 +251,22 @@ if [[ -z "${BTS_MANIFEST_VALIDATE_CACHE:-}" ]] && [[ -x .ccanvil/scripts/module-
     rm -f "$__mm_cache" 2>/dev/null
   fi
   if _otel_trace_live; then
-    otel_span_emit \
-      --service ccanvil-test \
-      --name "manifest pre-warm" \
-      --start "$_prewarm_start_epoch" \
-      --end "$(date +%s.%N 2>/dev/null || date +%s)" \
-      --trace-id "$BTS_TELEMETRY_TRACE_ID" \
-      --parent-id "$BTS_TELEMETRY_RUN_SPAN_ID" \
-      --attrs "phase=manifest-prewarm,run.id=$BTS_RUN_ID" \
-      --timeout 5s
+    # BTS-560: emit in a subshell so otel_span_init's env exports
+    # (OTEL_SPAN_INIT_DONE / OTEL_SPAN_LIVE) do NOT leak into the bats
+    # subprocess that runs next — leaked init state would defeat the
+    # telemetry-disabled / Collector-unreachable paths in the test suite. The
+    # suite/root span emits run AFTER bats, so only this one needs isolation.
+    (
+      otel_span_emit \
+        --service ccanvil-test \
+        --name "manifest pre-warm" \
+        --start "$_prewarm_start_epoch" \
+        --end "$(date +%s.%N 2>/dev/null || date +%s)" \
+        --trace-id "$BTS_TELEMETRY_TRACE_ID" \
+        --parent-id "$BTS_TELEMETRY_RUN_SPAN_ID" \
+        --attrs "phase=manifest-prewarm,run.id=$BTS_RUN_ID" \
+        --timeout 5s
+    )
   fi
 fi
 

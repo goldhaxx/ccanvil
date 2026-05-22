@@ -268,9 +268,9 @@ EOF
 }
 
 @test "AC-8: an unreachable Collector degrades to a silent no-op" {
-  # No OTEL_SPAN_INIT_DONE/LIVE pin — otel-span.sh probes the (dead) Collector,
-  # finds it unreachable, and every otel_span_emit becomes a no-op.
-  run env \
+  # Unset any inherited init pin (`env -u`) so otel-span.sh actually probes the
+  # (dead) Collector, finds it unreachable, and every otel_span_emit no-ops.
+  run env -u OTEL_SPAN_INIT_DONE -u OTEL_SPAN_LIVE \
     OTEL_SPAN_CLI="$BATS_TEST_TMPDIR/otel-cli-stub" \
     CCANVIL_TELEMETRY_URL="http://127.0.0.1:1" \
     OTEL_SPAN_STUB_OUT="$OTEL_SPAN_STUB_OUT" \

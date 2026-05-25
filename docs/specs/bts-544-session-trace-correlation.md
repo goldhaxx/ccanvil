@@ -3,7 +3,7 @@
 > Feature: bts-544-session-trace-correlation
 > Work: linear:BTS-544
 > Created: 1779648721
-> Status: In Progress
+> Status: Complete
 > Subject: session-trace correlation via SessionStart/SessionEnd hooks
 
 ## Summary

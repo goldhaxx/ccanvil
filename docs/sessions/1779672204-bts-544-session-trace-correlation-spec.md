@@ -33,7 +33,7 @@ Each criterion is independently testable. Binary pass/fail.
 ## Affected Files
 
 | File | Change |
-|------|--------|
+| -- | -- |
 | `.claude/hooks/session-otel-open.sh` | New — SessionStart open + reaper |
 | `.claude/hooks/session-otel-close.sh` | New — SessionEnd close + emit rooted span |
 | `.claude/settings.json` | Append second SessionStart entry; new SessionEnd block |
@@ -43,27 +43,27 @@ Each criterion is independently testable. Binary pass/fail.
 
 ## Dependencies
 
-- **Requires:** BTS-543 (`otel-span.sh` helper) — shipped. C1 of the umbrella.
-- **Requires:** BTS-206 (`session-counter` + `session-boundary.sh`) — shipped. Provides the counter the session-id format reuses.
-- **Blocked by:** none.
+* **Requires:** BTS-543 (`otel-span.sh` helper) — shipped. C1 of the umbrella.
+* **Requires:** BTS-206 (`session-counter` + `session-boundary.sh`) — shipped. Provides the counter the session-id format reuses.
+* **Blocked by:** none.
 
 ## Out of Scope
 
-- Per-tool-call instrumentation (C5 / BTS-547) — Stop-hook flusher is its own ship.
-- Per-script instrumentation (C3 / BTS-545) — instruments the 5 deterministic scripts to parent under this session trace.
-- Dashboards (C4/C6) — BTS-546 and BTS-548.
-- Multi-session interleaving / nested-Claude-Code sessions — single-session-at-a-time assumed (the state file is the single hand-off).
+* Per-tool-call instrumentation (C5 / BTS-547) — Stop-hook flusher is its own ship.
+* Per-script instrumentation (C3 / BTS-545) — instruments the 5 deterministic scripts to parent under this session trace.
+* Dashboards (C4/C6) — BTS-546 and BTS-548.
+* Multi-session interleaving / nested-Claude-Code sessions — single-session-at-a-time assumed (the state file is the single hand-off).
 
 ## Implementation Notes
 
-- **Hook shape:** mirror `.claude/hooks/session-boundary.sh` line-for-line — `set +e`, `CLAUDE_PROJECT_DIR` fallback, source `_lib/record-failure.sh` with no-op fallback, atomic mktemp+mv writes, always `exit 0`.
-- **Span emission:** source `.ccanvil/observability/otel-span.sh`, call `otel_span_cache_invariants` then `otel_span_emit --service ccanvil-session --name ccanvil-session ...`. Init failure (Collector down, otel-cli missing) is silent — `otel_span_emit` already returns 0 in that case (`otel-span.sh:138`). Hook's failure-log line is in addition: record the skip reason.
-- **Reaper detection:** the existence of `.ccanvil/state/session-trace.json` at SessionStart is the abnormal-exit signal. No timestamp comparison needed — the close hook's contract is "remove the file on success."
-- **State file shape:** JSON, written via `jq -n` (no inline shell interpolation — same discipline as `session-boundary.sh:130`).
-- **Bats linkage seam:** `bats-report.sh` reads `.ccanvil/state/session-trace.json` near where it caches the trace/run IDs (lines ~190-220 currently). Resolve `session.id` and `claude_session_id` once into shell vars; append them to the `--attrs` strings on the suite spans only (do NOT propagate `trace_id`).
-- **Stdin payload reading (AC-2):** Claude Code's SessionStart/SessionEnd events deliver a JSON payload on fd 0 — read it ONCE near the top of `session-otel-open.sh` (e.g., `payload="$(cat -)"`) before any other read on fd 0. `claude_session_id` is the only field extracted from the payload in v1 (`jq -r '.session_id // ""'`); the close hook does not read stdin (the value is sourced from the state file).
-- **Hook-chaining model (load-bearing assumption):** the spec assumes Claude Code delivers an independent stdin copy of the event payload to each hook in the `SessionStart` array — `session-boundary.sh` (entry 1, doesn't consume stdin) and `session-otel-open.sh` (entry 2, consumes stdin) each see the full JSON payload on their own fd 0. This matches the observed Claude Code hook contract. If that model is wrong (shared-fd, first reader drains), AC-2's empty/malformed fallback covers the failure mode by construction: `claude_session_id` stores `""`, the omit-when-empty rule drops the attr from emitted spans, and the `session.id` primary key (derived from state files, not stdin) is unaffected. AC-9's simulated invocation must explicitly pipe the payload via `bash .claude/hooks/session-otel-open.sh < <(echo '{"hook_event_name":"SessionStart","session_id":"<uuid>","source":"startup"}')` to exercise the live contract.
-- **Live-API gate (AC-9, per `.claude/rules/tdd.md`):** the Claude Code SessionEnd contract is the unknown; AC-9 is the gate. The reaper covers the failure mode.
+* **Hook shape:** mirror `.claude/hooks/session-boundary.sh` line-for-line — `set +e`, `CLAUDE_PROJECT_DIR` fallback, source `_lib/record-failure.sh` with no-op fallback, atomic mktemp+mv writes, always `exit 0`.
+* **Span emission:** source `.ccanvil/observability/otel-span.sh`, call `otel_span_cache_invariants` then `otel_span_emit --service ccanvil-session --name ccanvil-session ...`. Init failure (Collector down, otel-cli missing) is silent — `otel_span_emit` already returns 0 in that case (`otel-span.sh:138`). Hook's failure-log line is in addition: record the skip reason.
+* **Reaper detection:** the existence of `.ccanvil/state/session-trace.json` at SessionStart is the abnormal-exit signal. No timestamp comparison needed — the close hook's contract is "remove the file on success."
+* **State file shape:** JSON, written via `jq -n` (no inline shell interpolation — same discipline as `session-boundary.sh:130`).
+* **Bats linkage seam:** `bats-report.sh` reads `.ccanvil/state/session-trace.json` near where it caches the trace/run IDs (lines \~190-220 currently). Resolve `session.id` and `claude_session_id` once into shell vars; append them to the `--attrs` strings on the suite spans only (do NOT propagate `trace_id`).
+* **Stdin payload reading (AC-2):** Claude Code's SessionStart/SessionEnd events deliver a JSON payload on fd 0 — read it ONCE near the top of `session-otel-open.sh` (e.g., `payload="$(cat -)"`) before any other read on fd 0. `claude_session_id` is the only field extracted from the payload in v1 (`jq -r '.session_id // ""'`); the close hook does not read stdin (the value is sourced from the state file).
+* **Hook-chaining model (load-bearing assumption):** the spec assumes Claude Code delivers an independent stdin copy of the event payload to each hook in the `SessionStart` array — `session-boundary.sh` (entry 1, doesn't consume stdin) and `session-otel-open.sh` (entry 2, consumes stdin) each see the full JSON payload on their own fd 0. This matches the observed Claude Code hook contract. If that model is wrong (shared-fd, first reader drains), AC-2's empty/malformed fallback covers the failure mode by construction: `claude_session_id` stores `""`, the omit-when-empty rule drops the attr from emitted spans, and the `session.id` primary key (derived from state files, not stdin) is unaffected. AC-9's simulated invocation must explicitly pipe the payload via `bash .claude/hooks/session-otel-open.sh < <(echo '{"hook_event_name":"SessionStart","session_id":"<uuid>","source":"startup"}')` to exercise the live contract.
+* **Live-API gate (AC-9, per** `.claude/rules/tdd.md`**):** the Claude Code SessionEnd contract is the unknown; AC-9 is the gate. The reaper covers the failure mode.
 
 <!-- NODE-SPECIFIC-START -->
 <!-- Add project-specific content below this line. -->

@@ -25,7 +25,7 @@
 # anchor: BTS-151 (git-commit carve-out)
 # anchor: BTS-155 (find traverse-and-mutate gate)
 # anchor: BTS-156 (rm recursive-force shape gate)
-# anchor: BTS-157 (sort -o gate — handled in guard-workspace)
+# anchor: BTS-157 (sort -o gate — UNMITIGATED after BTS-602 retired the workspace fence; TODO: capture follow-up)
 # anchor: BTS-202 (rm cluster-vs-cross-line refinement)
 # anchor: BTS-251 (manifest seed)
 
@@ -141,9 +141,10 @@ fi
 # Block find with -delete or -exec/-execdir/-okdir. Path-agnostic shape gate:
 # `find` reaches mutation verbs through these embedded operators, bypassing the
 # leading-verb regex that catches bare rm/cp/mv/chmod/chown. The traverse-and-
-# mutate shape is the catastrophic footgun, regardless of target. Workspace-
-# fence enforcement on out-of-workspace traversal is handled by guard-workspace
-# (find added to its verb regex). (BTS-155)
+# mutate shape is the catastrophic footgun, regardless of target. (BTS-155)
+# Note: out-of-tree `find` traversal was previously caught by the PreToolUse
+# path fence retired in BTS-602 — this gate now relies solely on the
+# traverse-and-mutate shape, not path locality.
 #
 # Word-anchor `find` to avoid xfind/findutils-substring false positives.
 # The action-operator boundary uses plain whitespace; quoted name patterns

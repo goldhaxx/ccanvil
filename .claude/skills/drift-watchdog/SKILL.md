@@ -39,10 +39,10 @@ This skill is designed to be invoked autonomously via `claude -p "/drift-watchdo
 **Operator install / reload (BTS-199):** one idempotent command wraps plist generation, lint, optional unload, copy, load, and verify:
 
 ```bash
-ALLOW_OUTSIDE_WORKSPACE=1 bash .ccanvil/scripts/ccanvil-sync.sh drift-watchdog-launchd-install --reload
+bash .ccanvil/scripts/ccanvil-sync.sh drift-watchdog-launchd-install --reload
 ```
 
-Without `--reload`, the install is idempotent for first-time setup. The `ALLOW_OUTSIDE_WORKSPACE=1` prefix is required because the wrapper writes to `~/Library/LaunchAgents/`. The legacy multi-step recipe (`drift-watchdog-launchd-print` + `plutil -lint` + `launchctl unload/cp/load -w` + verify) still works directly but is no longer the canonical path — use the wrapper.
+Without `--reload`, the install is idempotent for first-time setup. (BTS-602: the `ALLOW_OUTSIDE_WORKSPACE=1` prefix is no longer required — the PreToolUse path fence was retired, so writes to `~/Library/LaunchAgents/` run unfenced.) The legacy multi-step recipe (`drift-watchdog-launchd-print` + `plutil -lint` + `launchctl unload/cp/load -w` + verify) still works directly but is no longer the canonical path — use the wrapper.
 
 ## Steps
 

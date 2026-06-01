@@ -489,3 +489,54 @@ JSON
   [ "$status" -eq 0 ]
 }
 
+# =========================================================================
+# guard-destructive.sh — git-commit carve-out (BTS-151)
+# =========================================================================
+# Originally lived in a mixed BTS-151 block exercising both WORKSPACE_HOOK and
+# DESTRUCTIVE_HOOK. The workspace-side cases retired with the hook (BTS-602);
+# the destructive-side cases below pin the git-commit early-exit in
+# guard-destructive.sh (regex at line ~54) — without these tests the live
+# carve-out would have no regression anchor.
+
+@test "BTS-151 AC-1: guard-destructive allows git commit with literal rm -rf in body" {
+  # The BTS-156 regex matches rm + recursive + force anywhere in the
+  # command string. Without an early-exit, a commit message that talks
+  # about the rm-rf gate trips the destructive hook.
+  input='{"tool_name":"Bash","tool_input":{"command":"git commit -m \"feat(bts-156): add rm -rf shape gate\""}}'
+  run bash -c "echo '$input' | '$DESTRUCTIVE_HOOK'"
+  [ "$status" -eq 0 ]
+}
+
+@test "BTS-151 AC-3 (destructive half): allows git commit -am with /tmp/foo in body" {
+  input='{"tool_name":"Bash","tool_input":{"command":"git commit -am \"msg with /tmp/foo\""}}'
+  run bash -c "echo '$input' | '$DESTRUCTIVE_HOOK'"
+  [ "$status" -eq 0 ]
+}
+
+@test "BTS-151 AC-6: rm -rf still blocks (carve-out doesn't leak)" {
+  input='{"tool_name":"Bash","tool_input":{"command":"rm -rf /tmp/foo"}}'
+  run bash -c "echo '$input' | '$DESTRUCTIVE_HOOK'"
+  [ "$status" -eq 2 ]
+}
+
+@test "BTS-151 AC-7 (destructive half): git status exits 0" {
+  input='{"tool_name":"Bash","tool_input":{"command":"git status"}}'
+  run bash -c "echo '$input' | '$DESTRUCTIVE_HOOK'"
+  [ "$status" -eq 0 ]
+}
+
+@test "BTS-151 AC-8 (destructive half): git commit (no flags) exits 0" {
+  input='{"tool_name":"Bash","tool_input":{"command":"git commit"}}'
+  run bash -c "echo '$input' | '$DESTRUCTIVE_HOOK'"
+  [ "$status" -eq 0 ]
+}
+
+@test "BTS-151 AC-9 (known gap): git commit chained with rm -rf bypasses destructive check" {
+  # Documented trade-off — chaining destructive ops after commit is rare.
+  # If this test ever needs to flip to exit 2, the early-exit pattern
+  # should be tightened to forbid chain operators in the command.
+  input='{"tool_name":"Bash","tool_input":{"command":"git commit -m \"x\" && rm -rf /tmp/foo"}}'
+  run bash -c "echo '$input' | '$DESTRUCTIVE_HOOK'"
+  [ "$status" -eq 0 ]
+}
+

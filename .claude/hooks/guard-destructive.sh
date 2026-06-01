@@ -25,7 +25,7 @@
 # anchor: BTS-151 (git-commit carve-out)
 # anchor: BTS-155 (find traverse-and-mutate gate)
 # anchor: BTS-156 (rm recursive-force shape gate)
-# anchor: BTS-157 (sort -o gate — UNMITIGATED after BTS-602 retired the workspace fence; TODO: capture follow-up)
+# anchor: BTS-157 (sort -o gate — UNMITIGATED after BTS-602 retired the workspace fence; BTS-604 captured for the follow-up gate)
 # anchor: BTS-202 (rm cluster-vs-cross-line refinement)
 # anchor: BTS-251 (manifest seed)
 

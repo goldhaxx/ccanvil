@@ -496,16 +496,18 @@ Rules that apply when working in this area of the codebase.
   .claude/agents/*
   .claude/commands/*
   .ccanvil/              (entire preset infrastructure)
+  .ccanvil/ccanvil.lock  (sync provenance — records the hub commit + file hashes)
   .claudeignore
   .mcp.json
   docs/spec.md
   docs/plan.md
 
-❌ Gitignore (personal):
+❌ Gitignore (personal / machine-local):
   .claude/settings.local.json
   .claude/local/CLAUDE.md
-  .ccanvil/ccanvil.lock  (sync state — node-specific)
-  docs/stasis.md         (ephemeral session state)
+  .ccanvil/registry.json   (downstream node registry — machine-local)
+  .ccanvil/events.log      (sync audit trail — machine-local)
+  docs/stasis.md           (ephemeral session state)
 ```
 
 Add to your `.gitignore`:

@@ -40,7 +40,7 @@ You classify changes in a downstream project as **generalizable** (worth upstrea
 
 You receive:
 - The project path (current working directory)
-- The hub path (from `.claude/ccanvil.lock`)
+- The hub path (from `.ccanvil/ccanvil.lock`)
 - Optionally, specific files to analyze or user context about what to upstream
 
 ## Process

@@ -28,7 +28,7 @@ graph TB
         N_GUIDE[".ccanvil/guide/<br/><i>hub + node sections</i>"]
         N_CLAUDE["CLAUDE.md<br/><i>node identity + hub methodology</i>"]
         N_FRAMEWORK[".ccanvil/guide/foundations.md<br/><i>read-only copy</i>"]
-        LOCK[".claude/ccanvil.lock<br/><i>provenance manifest</i>"]
+        LOCK[".ccanvil/ccanvil.lock<br/><i>provenance manifest</i>"]
     end
 
     H_RULES <-->|"sync"| N_RULES

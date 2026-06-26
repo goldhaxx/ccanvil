@@ -29,11 +29,17 @@ RULE="$BATS_TEST_DIRNAME/../../.claude/rules/test-discipline.md"
   grep -qE 'docs/research/test-discipline-research\.md' "$BATS_TEST_TMPDIR/fm.yaml"
 }
 
-@test "AC-4: manifest block present in frontmatter" {
+@test "AC-4: manifest present via sidecar (BTS-666 relocation)" {
   set -e
+  # BTS-666: the manifest block relocated from the rule frontmatter into a
+  # co-located sidecar. The rule declares manifest_ref; the sidecar holds the
+  # manifest: mapping with the matching id.
   awk '/^---$/{c++; next} c==1' "$RULE" > "$BATS_TEST_TMPDIR/fm.yaml"
-  grep -qE '^manifest:' "$BATS_TEST_TMPDIR/fm.yaml"
-  grep -qE '^[[:space:]]+id:[[:space:]]*test-discipline' "$BATS_TEST_TMPDIR/fm.yaml"
+  grep -qE '^manifest_ref:[[:space:]]*test-discipline\.manifest\.yaml' "$BATS_TEST_TMPDIR/fm.yaml"
+  local sidecar="${RULE%.md}.manifest.yaml"
+  [ -f "$sidecar" ]
+  grep -qE '^manifest:' "$sidecar"
+  grep -qE '^[[:space:]]+id:[[:space:]]*test-discipline' "$sidecar"
 }
 
 @test "AC-4: rule file size <= 900 tokens (rough token = words / 0.75)" {

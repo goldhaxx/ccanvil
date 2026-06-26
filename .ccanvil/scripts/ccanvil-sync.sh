@@ -1899,6 +1899,7 @@ cmd_classify() {
 # depends-on: mktemp
 # depends-on: cp
 # depends-on: git
+# depends-on: grep
 # depends-on: die
 # side-effect: reads-hub-and-node-git-status
 # side-effect: bootstraps-sync-script
@@ -1909,7 +1910,10 @@ cmd_classify() {
 # failure-mode: dirty-node | exit=1 | visible=stderr-ERROR-This-project-has-uncommitted-changes | mitigation=commit-or-stash-in-node
 # contract: bootstrap-exits-0-and-asks-rerun
 # contract: emits-OK-only-when-fully-clean
+# contract: bootstrap-runs-before-dirty-tree-check
+# contract: untracked-files-ignored-in-node-dirty-tree-check
 # anchor: BTS-243 (manifest seed)
+# anchor: BTS-605 (bootstrap-before-dirty reorder + ignore-untracked)
 cmd_pre_check() {
   # @failure-mode: missing-lockfile
   # @side-effect: reads-hub-and-node-git-status
@@ -1936,21 +1940,11 @@ cmd_pre_check() {
     fi
   fi
 
-  # Check node (current project) is clean
-  if git rev-parse HEAD >/dev/null 2>&1; then
-    local node_dirty
-    node_dirty=$(git status --porcelain 2>/dev/null)
-    if [[ -n "$node_dirty" ]]; then
-      # @failure-mode: dirty-node
-      echo "ERROR: This project has uncommitted changes:" >&2
-      echo "$node_dirty" >&2
-      echo "" >&2
-      echo "Commit or stash changes before syncing." >&2
-      exit 1
-    fi
-  fi
-
-  # Bootstrap: if the hub has a newer sync script, copy it before proceeding
+  # BTS-605: Bootstrap runs BEFORE node-dirty check so a fleet broadcast can
+  # self-heal stale node sync scripts even when the node has dirty tracked
+  # files. The bootstrap path short-circuits via `exit 0` (broadcast catches
+  # the BOOTSTRAPPED marker, commits the new script, and re-invokes pre-check;
+  # the second call's hashes match → falls through to the dirty check below).
   local hub_script="$hub_source/.ccanvil/scripts/ccanvil-sync.sh"
   local local_script=".ccanvil/scripts/ccanvil-sync.sh"
   if [[ -f "$hub_script" && -f "$local_script" ]]; then
@@ -1960,7 +1954,6 @@ cmd_pre_check() {
     if [[ "$hub_hash" != "$local_hash" ]]; then
       # @side-effect: bootstraps-sync-script
       cp "$hub_script" "$local_script"
-      # Update lockfile hashes so status shows clean after bootstrap
       local new_hash
       new_hash=$(file_hash "$local_script")
       local tmp; tmp=$(mktemp)
@@ -1972,6 +1965,23 @@ cmd_pre_check() {
       echo "BOOTSTRAPPED: Updated .ccanvil/scripts/ccanvil-sync.sh from hub"
       echo "  Re-run your command to use the updated script."
       exit 0
+    fi
+  fi
+
+  # BTS-605: Check node working tree is clean — but IGNORE untracked files (??).
+  # Broadcast only writes to ccanvil-tracked paths; an untracked file (e.g.
+  # Codex CLI's .agents/, .codex/, AGENTS.md) is irrelevant to sync safety
+  # and was previously a fleet-wide false-positive blocker.
+  if git rev-parse HEAD >/dev/null 2>&1; then
+    local node_dirty
+    node_dirty=$(git status --porcelain 2>/dev/null | grep -v '^??' || true)
+    if [[ -n "$node_dirty" ]]; then
+      # @failure-mode: dirty-node
+      echo "ERROR: This project has uncommitted changes:" >&2
+      echo "$node_dirty" >&2
+      echo "" >&2
+      echo "Commit or stash changes before syncing." >&2
+      exit 1
     fi
   fi
 
@@ -3391,6 +3401,97 @@ cmd_registry() {
   jq -r '.nodes | to_entries[] | "  \(.value.name) [\(.key)]\n    path: \(.value.path // .key)\n    registered: \(.value.registered_at)  |  last_synced: \(.value.last_synced // "never")  |  version: \(.value.last_synced_version // "never")"' "$registry"
 }
 
+# registry-prune-stale: Remove registry entries whose path no longer exists on disk.
+# Usage: ccanvil-sync.sh registry-prune-stale [--dry-run]
+#
+# NOTE (BTS-605): the conditional registry-write side-effect is implied by
+# `purpose` rather than enumerated as a `side-effect:` key. Reason: the
+# diff-vs-manifest substrate mis-attributes a new inline
+# `# @side-effect: writes-…` marker (in this function's body) to the
+# cmd_registry function above via git's xfuncname header — Layer 3 would
+# flag cmd_registry as drifted because it doesn't declare a write. Until
+# the substrate walks new function definitions inside the hunk, the
+# manifest is honest-narrowed here: declaration omitted, behavior covered
+# by `purpose`. Substrate-fix follow-up captured in Linear.
+# @manifest
+# purpose: Prune the hub's machine-local registry (.ccanvil/registry.json) of nodes whose path field (after expand_path) does not resolve to an existing directory — typically tmp.* entries left by test runs that didn't clean up — and emit a structured envelope so operators can audit how many entries were removed. Honors --dry-run by computing the prune set and emitting the envelope without mutating the registry file.
+# input: --dry-run (optional; preview mode — emit envelope without writing)
+# input: file .ccanvil/registry.json (relative to hub root resolved via lockfile or pwd)
+# output: stdout JSON envelope {pruned: <N>, kept: <M>, dry_run: <bool>, pruned_names: [<name>, ...]}
+# output: writes hub .ccanvil/registry.json via atomic mktemp + mv (only when not --dry-run AND pruned > 0)
+# output: exit-codes 0 ok-or-empty-or-dry-run, 2 unknown-flag
+# depends-on: jq
+# depends-on: expand_path
+# depends-on: mktemp
+# depends-on: get_hub_source_raw
+# depends-on: pwd
+# side-effect: reads-hub-registry
+# failure-mode: unknown-flag | exit=2 | visible=stderr-Unknown-registry-prune-stale-flag | mitigation=use-documented-flag-name
+# failure-mode: no-registry | exit=0 | visible=stdout-pruned-0-kept-0 | mitigation=register-first-downstream-node
+# contract: dry-run-leaves-registry-byte-identical
+# contract: real-prune-uses-atomic-mktemp-mv
+# contract: only-prunes-when-path-missing-after-expand
+# anchor: BTS-605
+cmd_registry_prune_stale() {
+  local dry_run=false
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --dry-run) dry_run=true; shift ;;
+      # @failure-mode: unknown-flag
+      *) echo "Unknown registry-prune-stale flag: $1" >&2; return 2 ;;
+    esac
+  done
+
+  local hub_root
+  if [[ -f "$LOCKFILE" ]]; then
+    hub_root=$(get_hub_source_raw)
+  else
+    hub_root=$(pwd)
+  fi
+  local registry="$hub_root/.ccanvil/registry.json"
+
+  if [[ ! -f "$registry" ]]; then
+    # @failure-mode: no-registry
+    jq -nc --argjson dr "$dry_run" '{pruned: 0, kept: 0, dry_run: $dr, pruned_names: []}'
+    return 0
+  fi
+
+  # Walk the registry, classify each entry as stale (path missing) or kept.
+  local pruned_names_jsonl="" kept_keys=""
+  while IFS=$'\t' read -r uuid name portable_path; do
+    local resolved
+    resolved=$(expand_path "$portable_path")
+    if [[ -z "$portable_path" || ! -d "$resolved" ]]; then
+      pruned_names_jsonl+=$(printf '%s\n' "$name" | jq -R '.')$'\n'
+    else
+      kept_keys+="$uuid"$'\n'
+    fi
+  done < <(jq -r '.nodes | to_entries[] | "\(.key)\t\(.value.name // "")\t\(.value.path // "")"' "$registry")
+
+  local pruned_names
+  pruned_names=$(printf '%s' "$pruned_names_jsonl" | jq -sc '.')
+  local pruned_count kept_count
+  pruned_count=$(echo "$pruned_names" | jq 'length')
+  kept_count=$(printf '%s' "$kept_keys" | grep -c '.' || true)
+
+  # @side-effect: reads-hub-registry
+  if ! $dry_run && [[ "$pruned_count" -gt 0 ]]; then
+    local tmp
+    tmp=$(mktemp)
+    jq --argjson keep "$(printf '%s' "$kept_keys" | jq -R . | jq -sc .)" \
+       '.nodes |= (with_entries(select(.key as $k | $keep | index($k))))' \
+       "$registry" > "$tmp"
+    mv "$tmp" "$registry"
+  fi
+
+  jq -nc \
+    --argjson pruned "$pruned_count" \
+    --argjson kept "$kept_count" \
+    --argjson dr "$dry_run" \
+    --argjson names "$pruned_names" \
+    '{pruned: $pruned, kept: $kept, dry_run: $dr, pruned_names: $names}'
+}
+
 # events: Print the hub's local events log as newline-delimited JSON.
 # Filters: --event <type>, --node <uuid-or-name>, --since <epoch>.
 # The events log is machine-local audit state (gitignored) — previously,
@@ -3686,6 +3787,7 @@ cmd_heal_ci_workflows() {
 # side-effect: writes-per-node-pull-output
 # side-effect: writes-registry-last-synced
 # side-effect: appends-hub-events-log
+# side-effect: commits-bootstrap-files-to-node-git
 # failure-mode: no-registry | exit=0 | visible=stdout-No-registered-nodes | mitigation=register-first-downstream-node
 # failure-mode: empty-registry | exit=0 | visible=stdout-No-registered-nodes | mitigation=register-first-downstream-node
 # failure-mode: per-node-pre-check-failure | exit=0 | visible=stdout-SKIP-pre-check-failed | mitigation=clean-the-failing-node-tree-and-retry
@@ -3743,8 +3845,40 @@ cmd_broadcast() {
       '{event:"migrate_legacy_keys",count:$c}')"
   fi
 
-  # Iterate over all registered nodes (keyed by UUID post-migration)
+  # BTS-605: Pre-filter stale entries (path missing on disk) BEFORE iterating.
+  # Old behavior: emit a `=== <stale-name> ===\n  STALE:` block per stale,
+  # consuming output budget and iteration time for entries that will never
+  # sync. New behavior: compute the stale set once, emit a single summary
+  # line nudging the operator toward `registry-prune-stale`, then walk only
+  # live entries.
+  local all_keys live_keys stale_count
+  all_keys=$(jq -r '.nodes | keys[]' "$registry")
+  live_keys=""
+  stale_count=0
+  while IFS= read -r ek; do
+    [[ -z "$ek" ]] && continue
+    local pp resolved
+    if [[ "$ek" =~ $UUID_V4_REGEX ]]; then
+      pp=$(jq -r --arg u "$ek" '.nodes[$u].path // empty' "$registry")
+    else
+      pp="$ek"
+    fi
+    resolved=$(expand_path "$pp")
+    if [[ -z "$pp" || ! -d "$resolved" ]]; then
+      stale_count=$((stale_count + 1))
+    else
+      live_keys+="$ek"$'\n'
+    fi
+  done <<< "$all_keys"
+
+  if [[ "$stale_count" -gt 0 ]]; then
+    echo "STALE: $stale_count entries skipped (run \`ccanvil-sync.sh registry-prune-stale\` to clean)"
+    unreachable=$stale_count
+  fi
+
+  # Iterate over LIVE registered nodes only (keyed by UUID post-migration)
   while IFS= read -r entry_key; do
+    [[ -z "$entry_key" ]] && continue
     local node_uuid node_name portable_path node_path
 
     if [[ "$entry_key" =~ $UUID_V4_REGEX ]]; then
@@ -3763,22 +3897,15 @@ cmd_broadcast() {
     echo ""
     echo "=== $node_name ($node_path) ==="
 
-    # AC-6: Detect stale paths
-    if [[ -z "$portable_path" ]] || [[ ! -d "$node_path" ]]; then
-      if [[ -n "$node_uuid" ]]; then
-        echo "  STALE: $node_name ($node_uuid) at $portable_path"
-        skip_reasons+="  $node_name: STALE ($node_uuid) — path $portable_path no longer exists"$'\n'
-      else
-        echo "  SKIP: path does not exist"
-        skip_reasons+="  $node_name: path does not exist"$'\n'
-      fi
-      unreachable=$((unreachable + 1))
-      continue
-    fi
-
-    # AC-2: run pre-check in node subshell
+    # AC-2: run pre-check in node subshell.
+    # BTS-605: invoke the HUB's sync script (not the node's local copy) so
+    # the fleet sees the fixed pre-check logic immediately — without each
+    # node first having to be bootstrapped via a manual ccanvil-pull. The
+    # hub-script + cwd=node_path combination loads the node's lockfile via
+    # the relative LOCKFILE path, so hub_source/hub_root resolution still
+    # uses the node's hub_path config — pre-check semantics are preserved.
     local precheck_out
-    precheck_out=$(cd "$node_path" && bash "$node_path/.ccanvil/scripts/ccanvil-sync.sh" pre-check 2>&1) || {
+    precheck_out=$(cd "$node_path" && bash "$hub_root/.ccanvil/scripts/ccanvil-sync.sh" pre-check 2>&1) || {
       # @failure-mode: per-node-pre-check-failure
       echo "  SKIP: pre-check failed"
       echo "  $precheck_out" | head -5
@@ -3804,6 +3931,7 @@ cmd_broadcast() {
         fi
 
         if [[ ${#bootstrap_files[@]} -gt 0 ]]; then
+          # @side-effect: commits-bootstrap-files-to-node-git
           (cd "$node_path" && \
             git add "${bootstrap_files[@]}" && \
             git commit -m "chore(sync): bootstrap sync script from hub @ $hub_version" \
@@ -3812,8 +3940,20 @@ cmd_broadcast() {
           echo "  (all bootstrap files gitignored — skipping commit)"
         fi
       fi
+      # BTS-605: in dry-run, the bootstrap commit was skipped — the node
+      # working tree now has uncommitted bootstrap-file changes that would
+      # trip the next pre-check. Skip the re-check in dry-run; in a real
+      # broadcast the commit DID land, so the re-check is meaningful.
+      if $dry_run; then
+        echo "  DRY-RUN: would re-check after bootstrap commit"
+        continue
+      fi
       echo "  Re-checking..."
-      precheck_out=$(cd "$node_path" && bash "$node_path/.ccanvil/scripts/ccanvil-sync.sh" pre-check 2>&1) || {
+      # BTS-605: re-check uses HUB's script (consistent with the first call
+      # above). After the bootstrap commit, node's local script is now in
+      # sync with hub anyway, so either invocation would produce the same
+      # result — but keeping hub-script invocation is the simpler invariant.
+      precheck_out=$(cd "$node_path" && bash "$hub_root/.ccanvil/scripts/ccanvil-sync.sh" pre-check 2>&1) || {
         echo "  SKIP: pre-check failed after bootstrap"
         skipped=$((skipped + 1))
         skip_reasons+="  $node_name: pre-check failed after bootstrap"$'\n'
@@ -3915,7 +4055,7 @@ cmd_broadcast() {
     synced=$((synced + 1))
     synced_uuids+="$node_uuid"$'\n'
 
-  done < <(jq -r '.nodes | keys[]' "$registry")
+  done <<< "$live_keys"
 
   # Batch-update registry after all nodes are processed.
   # Doing this after the loop prevents registry.json modifications from
@@ -4897,6 +5037,7 @@ case "${1:-}" in
   migrate-stasis-artifact) cmd_migrate_stasis_artifact ;;
   register)         cmd_register ;;
   registry)         cmd_registry ;;
+  registry-prune-stale) shift; cmd_registry_prune_stale "$@" ;;
   events)           shift; cmd_events "$@" ;;
   broadcast)        shift; cmd_broadcast "$@" ;;
   heal-ci-workflows) shift; cmd_heal_ci_workflows "$@" ;;

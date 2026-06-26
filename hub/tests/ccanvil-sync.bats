@@ -756,9 +756,11 @@ EOF
   echo "$output" | grep -qi "hub repo has uncommitted"
 }
 
-@test "pre-check: fails when node has uncommitted changes" {
+@test "pre-check: fails when node has modified tracked files" {
+  # BTS-605: pre-check ignores untracked files (??) in the dirty-tree check,
+  # so this regression test must mutate a TRACKED file to assert the block.
   cd "$NODE"
-  echo "dirty" > "$NODE/dirty.txt"
+  echo "modified" >> "$NODE/CLAUDE.md"  # CLAUDE.md is tracked (committed in setup)
   run bash "$NODE/.ccanvil/scripts/ccanvil-sync.sh" pre-check
   [ "$status" -ne 0 ]
   echo "$output" | grep -qi "this project has uncommitted"
@@ -1899,7 +1901,8 @@ EOF
   run bash "$NODE/.ccanvil/scripts/ccanvil-sync.sh" broadcast
   [ "$status" -eq 0 ]
   echo "$output" | grep -q "Unreachable: 1"
-  echo "$output" | grep -q "path does not exist"
+  # BTS-605: stale-path entries now report via single summary line, not per-node block.
+  echo "$output" | grep -q "STALE: 1 entries skipped"
 }
 
 @test "broadcast: skips node with dirty working tree" {

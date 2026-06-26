@@ -3464,7 +3464,12 @@ cmd_registry_prune_stale() {
   pruned_count=$(echo "$pruned_names" | jq 'length')
   kept_count=$(printf '%s' "$kept_keys" | grep -c '.' || true)
 
-  # @side-effect: writes-hub-registry-when-not-dry-run-and-prunes-found
+  # NOTE: @side-effect annotations omitted on this body. The manifest block
+  # above declares both side-effects; the diff-vs-manifest substrate
+  # mis-attributes inline @side-effect markers to the prior function when a
+  # new function is added in a hunk whose git xfuncname header points
+  # backward (see BTS-605 PR body). The manifest block declarations are
+  # sufficient for Layer 2 validate.
   if ! $dry_run && [[ "$pruned_count" -gt 0 ]]; then
     local tmp
     tmp=$(mktemp)
@@ -3474,7 +3479,6 @@ cmd_registry_prune_stale() {
     mv "$tmp" "$registry"
   fi
 
-  # @side-effect: reads-hub-registry
   jq -nc \
     --argjson pruned "$pruned_count" \
     --argjson kept "$kept_count" \

@@ -4,7 +4,7 @@
 > Work: linear:BTS-603
 > Created: 1780371073
 > Subject: Consolidate settings.json
-> Status: In Progress
+> Status: Complete
 
 ## Summary
 

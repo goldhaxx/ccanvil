@@ -213,6 +213,7 @@
 .ccanvil/scripts/security-audit.sh
 # Batch 2 — hooks (12).
 .claude/hooks/branch-name-lint.sh
+.claude/hooks/ci-status-check.sh
 .claude/hooks/commit-msg-lint.sh
 .claude/hooks/format-on-write.sh
 .claude/hooks/guard-destructive.sh

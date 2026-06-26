@@ -3409,7 +3409,6 @@ cmd_registry() {
 # output: stdout JSON envelope {pruned: <N>, kept: <M>, dry_run: <bool>, pruned_names: [<name>, ...]}
 # output: writes hub .ccanvil/registry.json via atomic mktemp + mv (only when not --dry-run AND pruned > 0)
 # output: exit-codes 0 ok-or-empty-or-dry-run, 2 unknown-flag
-# caller: skill:/ccanvil-status
 # depends-on: jq
 # depends-on: expand_path
 # depends-on: mktemp

@@ -347,8 +347,9 @@ teardown() {
   local output
   output=$(bash "$HUB/.ccanvil/scripts/ccanvil-sync.sh" broadcast 2>&1 || true)
 
-  echo "$output" | grep -qi "STALE"
-  echo "$output" | grep -q "$uuid"
+  # BTS-605: stale entries are now reported via single summary line, not
+  # per-entry block. UUID assertion replaced with summary-shape match.
+  echo "$output" | grep -q "^STALE: 1 entries skipped"
 
   # Recreate NODE so teardown doesn't error
   mkdir -p "$NODE"

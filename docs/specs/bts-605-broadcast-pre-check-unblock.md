@@ -4,7 +4,7 @@
 > Work: linear:BTS-605
 > Created: 1782439224
 > Subject: Unblock ccanvil-sync.sh broadcast across downstream nodes
-> Status: In Progress
+> Status: Complete
 
 ## Summary
 

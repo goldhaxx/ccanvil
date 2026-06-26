@@ -23,7 +23,7 @@ flowchart TD
     C --> D["Copies tracked files<br/>to current directory"]
     D --> E["Asks for project name<br/>and one-line description"]
     E --> F["Replaces placeholders<br/>in CLAUDE.md"]
-    F --> G["Generates .claude/ccanvil.lock<br/><i>tracks sync state</i>"]
+    F --> G["Generates .ccanvil/ccanvil.lock<br/><i>tracks sync state</i>"]
     G --> H["git init && git add -A<br/>&& git commit"]
     H --> I["Ready to build"]
 

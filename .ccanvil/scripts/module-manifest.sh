@@ -328,7 +328,13 @@ _extract_markdown() {
   # Compose the block. block_end_idx points past the closing `---` so the
   # _compose_block function-definition scan walks markdown body (finds nothing)
   # and falls through to the basename fallback.
-  _compose_block "$path" "$((mf_start+1))" "$block_data" "$((fm_close+1))" "$tmp" "$total" || return 2
+  # BTS-666: when parsing a sidecar, `path` was mutated to <id>.manifest.yaml;
+  # pass the .md-equivalent so the basename fallback yields <id> (not
+  # "<id>.manifest"), matching the inline-extraction id for sidecars that omit
+  # an explicit `id:` key.
+  local _compose_path="$path"
+  [[ "$_compose_path" == *.manifest.yaml ]] && _compose_path="${_compose_path%.manifest.yaml}.md"
+  _compose_block "$_compose_path" "$((mf_start+1))" "$block_data" "$((fm_close+1))" "$tmp" "$total" || return 2
 
   jq -s '.' < "$tmp"
 }
@@ -1061,8 +1067,13 @@ if not isinstance(data, dict) or not isinstance(data.get("manifest"), dict):
 print(json.dumps({"id": data["manifest"].get("id")}))
 PY
 )
-          _sc_malformed=$(echo "$_sc_check" | jq -r '._malformed // empty')
-          if [[ -n "$_sc_malformed" ]]; then
+          # BTS-666: when PyYAML is unavailable the parser emits {_skip:true};
+          # treat as "cannot validate" — do NOT fall through to the id-match
+          # check (which would read _sc_id="" and false-positive id-mismatch on
+          # every sidecar-backed rule). Mirrors the frontmatter parser's _skip.
+          if [[ -n "$(echo "$_sc_check" | jq -r '._skip // empty')" ]]; then
+            :
+          elif [[ -n "$(echo "$_sc_check" | jq -r '._malformed // empty')" ]]; then
             drift_records+=("$(jq -nc --arg p "$_sidecar_path" --arg id "$_rule_id" \
               '{path:$p, id:$id, reason:"rule-manifest-sidecar-malformed"}')")
           else

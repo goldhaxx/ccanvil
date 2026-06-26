@@ -3930,6 +3930,14 @@ cmd_broadcast() {
           echo "  (all bootstrap files gitignored — skipping commit)"
         fi
       fi
+      # BTS-605: in dry-run, the bootstrap commit was skipped — the node
+      # working tree now has uncommitted bootstrap-file changes that would
+      # trip the next pre-check. Skip the re-check in dry-run; in a real
+      # broadcast the commit DID land, so the re-check is meaningful.
+      if $dry_run; then
+        echo "  DRY-RUN: would re-check after bootstrap commit"
+        continue
+      fi
       echo "  Re-checking..."
       # BTS-605: re-check uses HUB's script (consistent with the first call
       # above). After the bootstrap commit, node's local script is now in

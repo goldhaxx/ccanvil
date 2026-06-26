@@ -32,6 +32,7 @@ LOCKFILE=".ccanvil/ccanvil.lock"
 # Directories and patterns to track (relative to project root)
 TRACKED_PATTERNS=(
   ".claude/rules/*.md"
+  ".claude/rules/*.manifest.yaml"
   ".claude/commands/*.md"
   ".claude/agents/*.md"
   ".claude/skills/*/SKILL.md"

@@ -3888,9 +3888,15 @@ cmd_broadcast() {
     echo ""
     echo "=== $node_name ($node_path) ==="
 
-    # AC-2: run pre-check in node subshell
+    # AC-2: run pre-check in node subshell.
+    # BTS-605: invoke the HUB's sync script (not the node's local copy) so
+    # the fleet sees the fixed pre-check logic immediately — without each
+    # node first having to be bootstrapped via a manual ccanvil-pull. The
+    # hub-script + cwd=node_path combination loads the node's lockfile via
+    # the relative LOCKFILE path, so hub_source/hub_root resolution still
+    # uses the node's hub_path config — pre-check semantics are preserved.
     local precheck_out
-    precheck_out=$(cd "$node_path" && bash "$node_path/.ccanvil/scripts/ccanvil-sync.sh" pre-check 2>&1) || {
+    precheck_out=$(cd "$node_path" && bash "$hub_root/.ccanvil/scripts/ccanvil-sync.sh" pre-check 2>&1) || {
       # @failure-mode: per-node-pre-check-failure
       echo "  SKIP: pre-check failed"
       echo "  $precheck_out" | head -5
@@ -3925,7 +3931,11 @@ cmd_broadcast() {
         fi
       fi
       echo "  Re-checking..."
-      precheck_out=$(cd "$node_path" && bash "$node_path/.ccanvil/scripts/ccanvil-sync.sh" pre-check 2>&1) || {
+      # BTS-605: re-check uses HUB's script (consistent with the first call
+      # above). After the bootstrap commit, node's local script is now in
+      # sync with hub anyway, so either invocation would produce the same
+      # result — but keeping hub-script invocation is the simpler invariant.
+      precheck_out=$(cd "$node_path" && bash "$hub_root/.ccanvil/scripts/ccanvil-sync.sh" pre-check 2>&1) || {
         echo "  SKIP: pre-check failed after bootstrap"
         skipped=$((skipped + 1))
         skip_reasons+="  $node_name: pre-check failed after bootstrap"$'\n'

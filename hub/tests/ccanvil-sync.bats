@@ -1901,7 +1901,8 @@ EOF
   run bash "$NODE/.ccanvil/scripts/ccanvil-sync.sh" broadcast
   [ "$status" -eq 0 ]
   echo "$output" | grep -q "Unreachable: 1"
-  echo "$output" | grep -q "path does not exist"
+  # BTS-605: stale-path entries now report via single summary line, not per-node block.
+  echo "$output" | grep -q "STALE: 1 entries skipped"
 }
 
 @test "broadcast: skips node with dirty working tree" {

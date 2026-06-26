@@ -64,6 +64,18 @@ Each criterion is independently testable. Binary pass/fail.
 - **Manifest impact:** `cmd_pre_check` and `cmd_broadcast` get new contract bullets (e.g. `contract: ignores-untracked-files-in-dirty-tree-check`). `cmd_registry_prune_stale` is a fresh entry with full manifest block (purpose, input, output, exit-codes, caller, depends-on, side-effect, failure-mode, contract, anchor).
 - **Live verification (AC-6):** the spec is contract-uncertain on whether ALL stale-block-only nodes will go green after the fix — some nodes may have additional tracked modifications. AC-6 is phrased to allow that. The pre-merge live run is the empirical proof.
 
+## Spec Amendment (2026-06-26) — broadcast invokes HUB's pre-check, not node's
+
+**What changed:** `cmd_broadcast` now invokes `bash "$hub_root/.ccanvil/scripts/ccanvil-sync.sh" pre-check` (HUB's sync script) instead of `bash "$node_path/.ccanvil/scripts/ccanvil-sync.sh" pre-check` (node's local copy) when running each node's pre-check during a broadcast.
+
+**Why:** Live AC-6 verification revealed a chicken-and-egg: nodes whose local `.ccanvil/scripts/ccanvil-sync.sh` is older than the hub's still ran the OLD pre-check logic on the first broadcast — and OLD pre-check evaluates node-dirty BEFORE bootstrap, so Codex-laden nodes never reached the bootstrap step that would have upgraded their sync script. The original spec's OoS clause ("FIRST broadcast still requires each node's existing pre-check to either run the new (post-reorder) logic OR have already been bootstrapped") acknowledged but did not close the gap, leaving AC-6's strict "no SKIP block with `??`-only porcelain" criterion unsatisfiable until each node had been manually `ccanvil-pull`'d.
+
+**Mechanism:** the change is one line per call site. Hub-script + cwd=node_path loads the NODE's lockfile (via the relative `LOCKFILE=".ccanvil/ccanvil.lock"`), so `get_hub_source` / `get_hub_source_raw` still resolve through the node's hub_path config — pre-check semantics are preserved. The dirty-check still operates on `git status` from the node's cwd. The bootstrap block inside the hub script fires on hash mismatch and writes the new sync script into the node, then short-circuits with `BOOTSTRAPPED:` — broadcast's existing `BOOTSTRAPPED:` handler commits the change and re-invokes (still through the hub script, same path).
+
+**Impact on AC-6:** the strict criterion now holds — every `SKIP: pre-check failed` block reflects real tracked-file modifications, not stale-node-script artifacts. **Out-of-Scope clause supersession:** the "self-healing fleet without operator action" item is now IN scope and delivered.
+
+**Test coverage:** AC-3's bats fixture (hash-mismatch + dirty tracked + untracked-Codex on the NODE, invoked directly) still verifies the bootstrap-before-dirty semantics; broadcast's runtime-binding of the hub script is verified empirically by the AC-6 live run.
+
 <!-- NODE-SPECIFIC-START -->
 <!-- Add project-specific content below this line. -->
 <!-- Hub content above is updated via /ccanvil-pull. -->

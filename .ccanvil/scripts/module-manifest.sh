@@ -214,9 +214,43 @@ _extract_markdown() {
     return 2
   fi
 
-  # Locate `manifest:` zero-indent inside the frontmatter region.
-  local mf_start=-1
+  # BTS-666: sidecar redirect. If the frontmatter declares `manifest_ref`, the
+  # manifest block lives in a co-located sidecar (.claude/rules/<id>.manifest.yaml)
+  # rather than inline. Reload `lines` from the sidecar and reframe the search
+  # bounds so the existing `manifest:` subtree parser runs over the sidecar (whose
+  # `manifest:` key sits at line 0, with no leading `---` fence). The sidecar holds
+  # the relocated block verbatim, so the parse logic below is reused unchanged.
+  local mf_search_start=1
+  local manifest_ref=""
   for ((i=1; i<fm_close; i++)); do
+    if [[ "${lines[i]}" =~ ^manifest_ref:[[:space:]]*(.*)$ ]]; then
+      manifest_ref="${BASH_REMATCH[1]}"
+      manifest_ref="${manifest_ref%\"}"; manifest_ref="${manifest_ref#\"}"
+      manifest_ref="${manifest_ref%\'}"; manifest_ref="${manifest_ref#\'}"
+      break
+    fi
+  done
+  if [[ -n "$manifest_ref" ]]; then
+    local sidecar_path
+    sidecar_path="$(dirname "$path")/$manifest_ref"
+    if [[ ! -f "$sidecar_path" ]]; then
+      echo "MALFORMED: $path: manifest_ref points to missing sidecar: $sidecar_path" >&2
+      return 2
+    fi
+    lines=(); idx=0
+    while IFS= read -r line || [[ -n "$line" ]]; do
+      lines[idx]="$line"; idx=$((idx+1))
+    done < "$sidecar_path"
+    total="$idx"
+    fm_close="$total"
+    mf_search_start=0
+    path="$sidecar_path"
+  fi
+
+  # Locate `manifest:` zero-indent inside the frontmatter region (or anywhere in
+  # the sidecar when mf_search_start=0).
+  local mf_start=-1
+  for ((i=mf_search_start; i<fm_close; i++)); do
     if [[ "${lines[i]}" =~ ^manifest:[[:space:]]*$ ]]; then
       mf_start="$i"
       break
@@ -856,6 +890,9 @@ cmd_validate() {
   #   - drift: rule-frontmatter-malformed (block-shape — exit 2)
   #   - info:  frontmatter-missing (advisory; never affects status)
   local info_records=()
+  # BTS-666: accumulates basenames of sidecars referenced by some rule's
+  # manifest_ref, consumed by the orphan-bijection check after the loop.
+  local _referenced_sidecars=""
   local _rule_files=(.claude/rules/*.md)
   if [[ -e "${_rule_files[0]}" ]]; then
     local _rule_file _rule_id _rule_size _rule_tokens _fm_check _fm_err _fm_no _tier
@@ -895,6 +932,9 @@ if not isinstance(fm, dict):
     print(json.dumps({"_error": "frontmatter-not-mapping"}))
     sys.exit(0)
 out = {"tier": fm.get("tier", 0)}
+# BTS-666: surface the sidecar back-reference so the bash guard can validate
+# resolution + id-match + malformed-sidecar without re-parsing frontmatter.
+out["manifest_ref"] = fm.get("manifest_ref")
 # BTS-384: scope-vocabulary validation. Accepted: universal | substrate | hub-only.
 ACCEPTED_SCOPES = ("universal", "substrate", "hub-only")
 if "scope" in fm:
@@ -978,6 +1018,67 @@ PY
         info_records+=("$(jq -nc --arg p "$_rule_file" --arg id "$_rule_id" --argjson t "$_leak_tokens" \
           '{path:$p, id:$id, reason:"rule-vocabulary-leak", tokens:$t}')")
       fi
+      # BTS-666: rule-manifest sidecar back-reference integrity (AC-2/AC-8).
+      # When a rule declares manifest_ref, the sidecar must (a) exist,
+      # (b) be valid YAML with a manifest: mapping, and (c) carry manifest.id
+      # equal to the rule id. Each failure is block-shape drift.
+      local _manifest_ref _sidecar_path _sc_check _sc_malformed _sc_id
+      _manifest_ref=$(echo "$_fm_check" | jq -r '.manifest_ref // empty')
+      if [[ -n "$_manifest_ref" ]]; then
+        _referenced_sidecars+=" $(basename "$_manifest_ref")"
+        _sidecar_path="$(dirname "$_rule_file")/$_manifest_ref"
+        if [[ ! -f "$_sidecar_path" ]]; then
+          drift_records+=("$(jq -nc --arg p "$_rule_file" --arg id "$_rule_id" --arg s "$_manifest_ref" \
+            '{path:$p, id:$id, reason:"rule-manifest-ref-broken", reason_detail:("missing-sidecar:"+$s)}')")
+        else
+          _sc_check=$(python3 - "$_sidecar_path" <<'PY'
+import sys, json
+try:
+    import yaml
+except ImportError:
+    print(json.dumps({"_skip": True})); sys.exit(0)
+with open(sys.argv[1]) as f:
+    text = f.read()
+try:
+    data = yaml.safe_load(text)
+except yaml.YAMLError as e:
+    print(json.dumps({"_malformed": True, "reason": str(e)[:200]})); sys.exit(0)
+if not isinstance(data, dict) or not isinstance(data.get("manifest"), dict):
+    print(json.dumps({"_malformed": True, "reason": "no manifest: mapping"})); sys.exit(0)
+print(json.dumps({"id": data["manifest"].get("id")}))
+PY
+)
+          _sc_malformed=$(echo "$_sc_check" | jq -r '._malformed // empty')
+          if [[ -n "$_sc_malformed" ]]; then
+            drift_records+=("$(jq -nc --arg p "$_sidecar_path" --arg id "$_rule_id" \
+              '{path:$p, id:$id, reason:"rule-manifest-sidecar-malformed"}')")
+          else
+            _sc_id=$(echo "$_sc_check" | jq -r '.id // empty')
+            if [[ "$_sc_id" != "$_rule_id" ]]; then
+              drift_records+=("$(jq -nc --arg p "$_rule_file" --arg id "$_rule_id" --arg sid "$_sc_id" \
+                '{path:$p, id:$id, reason:"rule-manifest-ref-broken", reason_detail:("id-mismatch:sidecar="+$sid)}')")
+            fi
+          fi
+        fi
+      fi
+    done
+  fi
+
+  # BTS-666: bijection — orphan sidecar detection (AC-3). Every
+  # .claude/rules/*.manifest.yaml must be referenced by some rule's manifest_ref.
+  # A sidecar with no referencing rule is block-shape drift. Tier-0 rules with
+  # no manifest_ref are exempt (they declare no sidecar).
+  local _sidecar_files=(.claude/rules/*.manifest.yaml)
+  if [[ -e "${_sidecar_files[0]}" ]]; then
+    local _sc _sc_base
+    for _sc in "${_sidecar_files[@]}"; do
+      [[ -f "$_sc" ]] || continue
+      _sc_base="$(basename "$_sc")"
+      case " $_referenced_sidecars " in
+        *" $_sc_base "*) : ;;
+        *) drift_records+=("$(jq -nc --arg p "$_sc" --arg id "${_sc_base%.manifest.yaml}" \
+             '{path:$p, id:$id, reason:"rule-manifest-sidecar-orphan"}')") ;;
+      esac
     done
   fi
 

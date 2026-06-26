@@ -595,6 +595,19 @@ _caller_actually_calls_primitive() {
     local target="$project_dir/$caller_ref"
     [[ -f "$target" ]] || return 1
     grep -qE "$pattern" "$target" && return 0
+    # BTS-666: a rule's manifest may have relocated to a co-located sidecar.
+    # The relocated content is still part of what the rule declares, so grep the
+    # sidecar too — (rule body + sidecar) reconstructs the pre-relocation whole
+    # file, preserving identical caller-resolution verdicts (AC-4).
+    if [[ "$target" == *.md ]]; then
+      local _sref
+      _sref=$(awk '/^manifest_ref:[[:space:]]*/{print $2; exit}' "$target" 2>/dev/null)
+      _sref="${_sref%\"}"; _sref="${_sref#\"}"; _sref="${_sref%\'}"; _sref="${_sref#\'}"
+      if [[ -n "$_sref" ]]; then
+        local _scar="$(dirname "$target")/$_sref"
+        [[ -f "$_scar" ]] && grep -qE "$pattern" "$_scar" && return 0
+      fi
+    fi
     return 1
   fi
 

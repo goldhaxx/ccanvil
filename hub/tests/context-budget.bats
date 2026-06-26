@@ -23,6 +23,10 @@ setup() {
   # One rule file — 8 chars = 2 tokens
   printf '12345678' > "$FIXTURE/.claude/rules/test-rule.md"
 
+  # BTS-666: a manifest sidecar — must NOT be measured (not auto-loaded by the
+  # harness; the glob is *.md). Its presence must not change any total.
+  printf 'manifest:\n  id: test-rule\n' > "$FIXTURE/.claude/rules/test-rule.manifest.yaml"
+
   # Settings file — 12 chars = 3 tokens
   printf '{"perms": 1}' > "$FIXTURE/.claude/settings.json"
 
@@ -104,6 +108,12 @@ teardown() {
   run bash "$SCRIPT" check --project-dir "$FIXTURE" $NO_GLOBAL
   [ "$status" -eq 0 ]
   echo "$output" | jq -e '[.files[] | select(.path | endswith("settings.json"))] | length > 0'
+}
+
+@test "BTS-666: .manifest.yaml sidecars are NOT measured (not auto-loaded)" {
+  run bash "$SCRIPT" check --project-dir "$FIXTURE" $NO_GLOBAL
+  [ "$status" -eq 0 ]
+  echo "$output" | jq -e '[.files[] | select(.path | endswith(".manifest.yaml"))] | length == 0'
 }
 
 @test ".claudeignore is measured" {

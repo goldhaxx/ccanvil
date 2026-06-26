@@ -2,68 +2,20 @@
 tier: 0
 scope: universal
 stack: any
-anchors: {}
-manifest:
-  id: code-quality
-  purpose: Codify the project's code-quality discipline — pattern-first over ad-hoc descriptions, explicit error paths over silent swallowing, justified dependencies, one-concept-per-file organization, intent-revealing names, and the protected-files invariant (foundations.md as research source material).
-  input:
-    - "read-only: rule consumed during /plan and implementation"
-  output:
-    - "behavior-shape: shapes implementation choices toward established patterns; halts dependency-creep and silent-error-handling"
-  side-effect:
-    - "shapes-implementation-decisions (no file mutation; behavioral influence)"
-  failure-mode:
-    - "rule-ignored | exit=n/a | visible=convention-drift-and-review-rework | mitigation=/review-flag-or-stasis-evidence-gap-section"
-  contract:
-    - patterns-over-descriptions
-    - explicit-error-paths
-    - justified-dependencies
-    - one-concept-per-file
-    - intent-revealing-names
-    - foundations-md-is-protected
-  anchor:
-    - BTS-252 (manifest seed)
+anchors:
+  evidence:
+    - docs/research/code-quality-foundations.md
+manifest_ref: code-quality.manifest.yaml
 ---
 
 # Code Quality Rules
 
-## Patterns Over Descriptions
+- **Patterns over descriptions:** follow an established pattern exactly; name the file to copy ("same as [file]") rather than describing it. If none exists, establish + document one.
+- **Error handling:** every fallible function has an explicit error path; never swallow errors (log or propagate); use typed errors, not strings; external calls get try/catch with meaningful context.
+- **Dependencies:** justify each before adding (what it does / why not native / maintenance status); prefer stdlib + built-ins; pin versions — no `^` or `~`.
+- **Organization:** one concept per file (~200 lines is a split signal); imports top, exports bottom, logic middle; no circular deps; constants/config at top.
+- **Naming:** reveal intent (`getUserById` not `getData`, `isExpired` not `check`); booleans start is/has/can/should; promise-returning functions are verbs (`fetchUser`); avoid non-universal abbreviations.
 
-- When a codebase has an established pattern, follow it exactly.
-- Say "Follow the same pattern as [specific file]" rather than describing the pattern.
-- If no pattern exists, establish one explicitly and document it.
+`.ccanvil/guide/foundations.md` is protected research source — never modify without explicit user approval.
 
-## Error Handling
-
-- Every function that can fail must have an explicit error path.
-- Never swallow errors silently. Log them or propagate them.
-- Use typed errors, not generic strings. Create error classes or union types.
-- External service calls always get try/catch with meaningful error context.
-
-## Dependencies
-
-- Before adding a dependency, state: what it does, why a native solution won't work, and its maintenance status.
-- Prefer standard library and built-in APIs over third-party packages.
-- Pin dependency versions. No `^` or `~` in production dependencies.
-
-## Code Organization
-
-- One concept per file. If a file exceeds ~200 lines, consider splitting.
-- Imports at the top, exports at the bottom, logic in the middle.
-- No circular dependencies. If module A imports B and B imports A, refactor.
-- Constants and configuration at the top of the file or in a dedicated config module.
-
-## Protected Files
-
-- `.ccanvil/guide/foundations.md` is research source material — never modify it without explicit user approval. It documents the foundational research (transformer attention, TDD evidence, context management) that justifies every preset design decision. Only update for paradigm shifts, new research findings, or major industry practice changes.
-
-## Naming
-
-- Names should reveal intent. `getUserById` not `getData`. `isExpired` not `check`.
-- Boolean variables start with is/has/can/should.
-- Functions that return promises are named with verbs: `fetchUser`, `createOrder`.
-- Avoid abbreviations unless universally understood (id, url, api).
-
-<!-- NODE-SPECIFIC-START -->
-<!-- Add project-specific content below this line. -->
-<!-- Hub content above is updated via /ccanvil-pull. -->
+For the full per-category catalog and rationale: see evidence anchor `docs/research/code-quality-foundations.md`.

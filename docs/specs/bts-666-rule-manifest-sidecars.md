@@ -4,7 +4,7 @@
 > Work: linear:BTS-666
 > Created: 1782512847
 > Subject: Relocate rule manifests to discoverable sidecars
-> Status: In Progress
+> Status: Complete
 
 ## Summary
 

@@ -1626,15 +1626,24 @@ _diff_files_added() {
         sub(/^[[:space:]]+/, "", rest)
         ctx=rest
       }
-      hunk_ctx=ctx
+      # BTS-667: current_fn starts at the xfuncname header and is advanced as
+      # function definitions appear among the added lines (see the +-line block).
+      current_fn=ctx
       next
     }
     in_hunk && /^\+/ {
       line=$0
       sub(/^\+/, "", line)
+      # BTS-667: re-scope attribution when a function definition appears among the
+      # added lines. git xfuncname only sees the function ABOVE the hunk, so an inline
+      # marker inside a newly-added function would otherwise mis-attribute to the
+      # preceding function. Both POSIX name() and function-keyword forms are boundaries.
+      if (line ~ /^[A-Za-z_][A-Za-z0-9_]*\(\)/ || line ~ /^function[[:space:]]+[A-Za-z_]/) {
+        current_fn=line
+      }
       if (cur != "") {
         added[++count]=line
-        added_ctx[count]=hunk_ctx
+        added_ctx[count]=current_fn
       }
     }
     # context (" ") or removed ("-") lines — ignored intentionally.
@@ -1662,11 +1671,17 @@ _diff_files_added() {
 # return the manifested primitive id this hunk is inside, or empty.
 # Examples of context:
 #   "cmd_query() {"    → cmd_query
-#   "function foo() {" → foo
+#   "function foo() {" → foo   (BTS-667: keyword form now resolved)
+#   "function foo {"   → foo   (BTS-667)
 #   ""                  → empty (file-level scope or unknown)
 _diff_ctx_to_primitive_id() {
   local ctx="$1"
-  if [[ "$ctx" =~ ^([a-zA-Z_][a-zA-Z0-9_]*)\(\) ]]; then
+  # BTS-667: resolve the `function name` / `function name()` keyword forms by
+  # stripping the keyword. The POSIX name() branch alone cannot — it would capture
+  # `function` and then fail to match `\(\)`, returning empty.
+  if [[ "$ctx" =~ ^function[[:space:]]+([a-zA-Z_][a-zA-Z0-9_]*) ]]; then
+    echo "${BASH_REMATCH[1]}"
+  elif [[ "$ctx" =~ ^([a-zA-Z_][a-zA-Z0-9_]*)\(\) ]]; then
     echo "${BASH_REMATCH[1]}"
   fi
 }
@@ -1731,7 +1746,9 @@ _diff_normalize_caller_path() {
 # failure-mode: drift-detected | exit=2 | visible=stdout-envelope-status-drift
 # contract: empty-diff-emits-empty-drift-array
 # contract: drift-array-mirrors-cmd_validate-shape
+# contract: attributes-inline-markers-to-nearest-fn-def-within-hunk
 # anchor: BTS-268 (origin)
+# anchor: BTS-667 (hunk-fn attribution)
 cmd_diff_vs_manifest() {
   local diff_path=""
   while [[ $# -gt 0 ]]; do

@@ -71,3 +71,62 @@ setup() {
   # Specifically: the new skill path appears as the value in some new-caller drift entry.
   echo "$output" | jq -e '[.drift[] | select(.drift_type == "new-caller-not-declared" and .value == ".claude/skills/test-new-caller/SKILL.md")] | length >= 1'
 }
+
+# BTS-667 AC-1/AC-2: a new function defined INSIDE a hunk whose xfuncname header
+# points to a DIFFERENT existing function (cmd_extract). The new function's body
+# marker must attribute to the new function (cmd_query), not the surrounding one.
+@test "BTS-667 AC-1: new-fn body marker does NOT attribute to the surrounding fn (cmd_extract)" {
+  set -e
+  run bash "$SCRIPT" diff-vs-manifest --diff "$REPO_ROOT/hub/tests/fixtures/manifest/diffs/new-fn-reattribution-side-effect.diff"
+  [ "$status" -eq 2 ]
+  echo "$output" | jq -e '[.drift[] | select(.drift_type == "new-side-effect-not-declared" and .id == "cmd_extract")] | length == 0'
+}
+
+@test "BTS-667 AC-2: new-fn body marker re-attributes to the new fn (cmd_query)" {
+  set -e
+  run bash "$SCRIPT" diff-vs-manifest --diff "$REPO_ROOT/hub/tests/fixtures/manifest/diffs/new-fn-reattribution-side-effect.diff"
+  [ "$status" -eq 2 ]
+  echo "$output" | jq -e '[.drift[] | select(.drift_type == "new-side-effect-not-declared" and .id == "cmd_query" and .value == "writes-undeclared-marker")] | length >= 1'
+}
+
+# BTS-667 AC-3: parity — the same re-attribution applies to the other two
+# hunk-context-scoped drift types (depends-on, exit-path), not only side-effect.
+@test "BTS-667 AC-3a: new-fn depends-on re-attributes to the new fn (cmd_query)" {
+  set -e
+  run bash "$SCRIPT" diff-vs-manifest --diff "$REPO_ROOT/hub/tests/fixtures/manifest/diffs/new-fn-reattribution-depends-on.diff"
+  echo "$output" | jq -e '[.drift[] | select(.drift_type == "new-depends-on-not-declared" and .id == "cmd_query" and .value == "linear-query.sh")] | length >= 1'
+  echo "$output" | jq -e '[.drift[] | select(.drift_type == "new-depends-on-not-declared" and .id == "cmd_extract")] | length == 0'
+}
+
+@test "BTS-667 AC-3b: new-fn exit-path re-attributes to the new fn (cmd_query)" {
+  set -e
+  run bash "$SCRIPT" diff-vs-manifest --diff "$REPO_ROOT/hub/tests/fixtures/manifest/diffs/new-fn-reattribution-exit-path.diff"
+  echo "$output" | jq -e '[.drift[] | select(.drift_type == "new-exit-path-not-declared" and .id == "cmd_query" and .value == "7")] | length >= 1'
+  echo "$output" | jq -e '[.drift[] | select(.drift_type == "new-exit-path-not-declared" and .id == "cmd_extract")] | length == 0'
+}
+
+# BTS-667 AC-4: the `function name() {` and `function name {` keyword forms are
+# recognized AND resolved to the bare name, so the body marker attributes to the
+# new function (cmd_query) — requires extending _diff_ctx_to_primitive_id.
+@test "BTS-667 AC-4a: function-keyword form with parens re-attributes to the new fn" {
+  set -e
+  run bash "$SCRIPT" diff-vs-manifest --diff "$REPO_ROOT/hub/tests/fixtures/manifest/diffs/new-fn-reattribution-function-form.diff"
+  echo "$output" | jq -e '[.drift[] | select(.drift_type == "new-side-effect-not-declared" and .id == "cmd_query" and .value == "writes-undeclared-marker")] | length >= 1'
+  echo "$output" | jq -e '[.drift[] | select(.drift_type == "new-side-effect-not-declared" and .id == "cmd_extract")] | length == 0'
+}
+
+@test "BTS-667 AC-4b: function-keyword form without parens re-attributes to the new fn" {
+  set -e
+  run bash "$SCRIPT" diff-vs-manifest --diff "$REPO_ROOT/hub/tests/fixtures/manifest/diffs/new-fn-reattribution-function-noparen.diff"
+  echo "$output" | jq -e '[.drift[] | select(.drift_type == "new-side-effect-not-declared" and .id == "cmd_query" and .value == "writes-undeclared-marker")] | length >= 1'
+  echo "$output" | jq -e '[.drift[] | select(.drift_type == "new-side-effect-not-declared" and .id == "cmd_extract")] | length == 0'
+}
+
+# BTS-667 AC-6: a marker at file scope (empty xfuncname header, no function-def among
+# added lines) resolves to an empty prim_id and is skipped — the fix introduces no new
+# false positive.
+@test "BTS-667 AC-6: file-scope marker with no enclosing fn is skipped (no false drift)" {
+  set -e
+  run bash "$SCRIPT" diff-vs-manifest --diff "$REPO_ROOT/hub/tests/fixtures/manifest/diffs/new-fn-reattribution-file-scope.diff"
+  echo "$output" | jq -e '[.drift[] | select(.drift_type == "new-side-effect-not-declared" and .value == "writes-x")] | length == 0'
+}

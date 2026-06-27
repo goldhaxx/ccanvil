@@ -3404,16 +3404,6 @@ cmd_registry() {
 
 # registry-prune-stale: Remove registry entries whose path no longer exists on disk.
 # Usage: ccanvil-sync.sh registry-prune-stale [--dry-run]
-#
-# NOTE (BTS-605): the conditional registry-write side-effect is implied by
-# `purpose` rather than enumerated as a `side-effect:` key. Reason: the
-# diff-vs-manifest substrate mis-attributes a new inline
-# `# @side-effect: writes-…` marker (in this function's body) to the
-# cmd_registry function above via git's xfuncname header — Layer 3 would
-# flag cmd_registry as drifted because it doesn't declare a write. Until
-# the substrate walks new function definitions inside the hunk, the
-# manifest is honest-narrowed here: declaration omitted, behavior covered
-# by `purpose`. Substrate-fix follow-up captured in Linear.
 # @manifest
 # purpose: Prune the hub's machine-local registry (.ccanvil/registry.json) of nodes whose path field (after expand_path) does not resolve to an existing directory — typically tmp.* entries left by test runs that didn't clean up — and emit a structured envelope so operators can audit how many entries were removed. Honors --dry-run by computing the prune set and emitting the envelope without mutating the registry file.
 # input: --dry-run (optional; preview mode — emit envelope without writing)
@@ -3427,6 +3417,7 @@ cmd_registry() {
 # depends-on: get_hub_source_raw
 # depends-on: pwd
 # side-effect: reads-hub-registry
+# side-effect: writes-hub-registry-when-not-dry-run-and-prunes-found
 # failure-mode: unknown-flag | exit=2 | visible=stderr-Unknown-registry-prune-stale-flag | mitigation=use-documented-flag-name
 # failure-mode: no-registry | exit=0 | visible=stdout-pruned-0-kept-0 | mitigation=register-first-downstream-node
 # contract: dry-run-leaves-registry-byte-identical
@@ -3476,6 +3467,7 @@ cmd_registry_prune_stale() {
   kept_count=$(printf '%s' "$kept_keys" | grep -c '.' || true)
 
   # @side-effect: reads-hub-registry
+  # @side-effect: writes-hub-registry-when-not-dry-run-and-prunes-found
   if ! $dry_run && [[ "$pruned_count" -gt 0 ]]; then
     local tmp
     tmp=$(mktemp)

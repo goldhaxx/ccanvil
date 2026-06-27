@@ -3,7 +3,7 @@
 > Feature: bts-667-diff-vs-manifest-hunk-fn-attribution
 > Work: linear:BTS-667
 > Created: 1782530350
-> Status: In Progress
+> Status: Complete
 > Subject: Attribute diff markers to new functions defined inside the hunk
 
 ## Summary

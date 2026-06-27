@@ -31,7 +31,7 @@ Each criterion is independently testable. Binary pass/fail.
 ## Affected Files
 
 | File | Change |
-|------|--------|
+| -- | -- |
 | `.ccanvil/scripts/module-manifest.sh` | Modified — (1) `_diff_files_added` awk: track current-fn context across added lines, updating on a function-definition line before assigning per-line `ctx`; (2) `_diff_ctx_to_primitive_id`: extend to resolve the `function` keyword form to a bare name; (3) add a `contract:` line to `cmd_diff_vs_manifest`'s manifest documenting the behavior. |
 | `hub/tests/module-manifest-diff-vs-manifest.bats` | Modified — add AC-1…AC-6 cases. |
 | `hub/tests/fixtures/manifest/diffs/*.diff` | New — new-function re-attribution fixtures (side-effect, depends-on, exit-path, definition-form variants, file-scope edge). |
@@ -39,23 +39,23 @@ Each criterion is independently testable. Binary pass/fail.
 
 ## Dependencies
 
-- **Requires:** BTS-268 `diff-vs-manifest` substrate (shipped); `.ccanvil/manifest-allowlist.txt` already lists `cmd_registry_prune_stale` (line 147).
-- **Blocked by:** none.
+* **Requires:** BTS-268 `diff-vs-manifest` substrate (shipped); `.ccanvil/manifest-allowlist.txt` already lists `cmd_registry_prune_stale` (line 147).
+* **Blocked by:** none.
 
 ## Out of Scope
 
-- `new-caller-not-declared` — file-level (scans all added text for the fn name), not hunk-context-scoped; unaffected.
-- Mid-hunk context re-derivation *after* a function closes (trailing added lines that belong to a different existing function whose definition is not in the hunk) — remains best-effort, as today. The fix handles the new-function-definition boundary only.
-- Nested/inner function definitions (not a ccanvil convention).
-- Any change to drift_type names or the envelope shape.
+* `new-caller-not-declared` — file-level (scans all added text for the fn name), not hunk-context-scoped; unaffected.
+* Mid-hunk context re-derivation *after* a function closes (trailing added lines that belong to a different existing function whose definition is not in the hunk) — remains best-effort, as today. The fix handles the new-function-definition boundary only.
+* Nested/inner function definitions (not a ccanvil convention).
+* Any change to drift_type names or the envelope shape.
 
 ## Implementation Notes
 
-- **Seam (two coordinated edits, same file):** (1) the awk in `_diff_files_added` (`module-manifest.sh` ~1632) — today `added_ctx[count]=hunk_ctx` is constant per hunk; introduce `current_fn` (init `= hunk_ctx` at each `@@`) and, when an added line matches the boundary regex `^[A-Za-z_][A-Za-z0-9_]*\(\)` **or** `^function[[:space:]]+[A-Za-z_]`, set `current_fn` to that line *before* `added_ctx[count]=current_fn`. (2) `_diff_ctx_to_primitive_id` (~1667) — its regex resolves only `name()`; add a `^function[[:space:]]+([A-Za-z_][A-Za-z0-9_]*)` branch (tolerating an optional trailing `()`) so the keyword form resolves to a bare name. The awk boundary regex and this extraction regex must agree on both forms; the comment at ~line 1665 claiming `function foo()` already resolves is currently aspirational and must be made true by edit (2).
-- **Optional hardening:** reset `current_fn=""` on a column-0 `}` (function close) so trailing markers fall to file scope (skipped) rather than mis-attribute — strictly safer; plan decides whether to include.
-- **Fixtures:** follow the existing `hub/tests/fixtures/manifest/diffs/` pattern — synthetic diffs whose declared arrays are read from the real on-disk manifest via `cmd_extract`; the xfuncname header is the surrounding function and the added function-def line is the new boundary.
-- **AC-7:** `cmd_registry_prune_stale`'s logic is unchanged — only its `# @manifest` declaration, one inline `# @side-effect:` marker, and the NOTE block. This is the only behavioral-neutral edit to `ccanvil-sync.sh`.
-- **Meta:** editing `module-manifest.sh` (an allowlisted file) means the pre-merge `diff-vs-manifest` self-check runs on this very change — expect it to validate the new `contract:` line cleanly.
+* **Seam (two coordinated edits, same file):** (1) the awk in `_diff_files_added` (`module-manifest.sh` ~1632) — today `added_ctx[count]=hunk_ctx` is constant per hunk; introduce `current_fn` (init `= hunk_ctx` at each `@@`) and, when an added line matches the boundary regex `^[A-Za-z_][A-Za-z0-9_]*\(\)` **or** `^function[[:space:]]+[A-Za-z_]`, set `current_fn` to that line *before* `added_ctx[count]=current_fn`. (2) `_diff_ctx_to_primitive_id` (~1667) — its regex resolves only `name()`; add a `^function[[:space:]]+([A-Za-z_][A-Za-z0-9_]*)` branch (tolerating an optional trailing `()`) so the keyword form resolves to a bare name. The awk boundary regex and this extraction regex must agree on both forms; the comment at ~line 1665 claiming `function foo()` already resolves is currently aspirational and must be made true by edit (2).
+* **Optional hardening:** reset `current_fn=""` on a column-0 `}` (function close) so trailing markers fall to file scope (skipped) rather than mis-attribute — strictly safer; plan decides whether to include.
+* **Fixtures:** follow the existing `hub/tests/fixtures/manifest/diffs/` pattern — synthetic diffs whose declared arrays are read from the real on-disk manifest via `cmd_extract`; the xfuncname header is the surrounding function and the added function-def line is the new boundary.
+* **AC-7:** `cmd_registry_prune_stale`'s logic is unchanged — only its `# @manifest` declaration, one inline `# @side-effect:` marker, and the NOTE block. This is the only behavioral-neutral edit to `ccanvil-sync.sh`.
+* **Meta:** editing `module-manifest.sh` (an allowlisted file) means the pre-merge `diff-vs-manifest` self-check runs on this very change — expect it to validate the new `contract:` line cleanly.
 
 <!-- NODE-SPECIFIC-START -->
 <!-- Add project-specific content below this line. -->

@@ -104,6 +104,27 @@ EOF
   echo "$output" | jq -e '.files_changed[0].file == ".ccanvil/scripts/docs-check.sh"' >/dev/null
 }
 
+@test "BTS-666: changelog keeps commits touching rule manifest sidecars (distributable)" {
+  set -e
+  _setup_lock
+
+  # Add a commit touching a .claude/rules/*.manifest.yaml sidecar (BTS-666 added
+  # this glob to TRACKED_PATTERNS so sidecars propagate to downstream nodes).
+  cd "$HUB_DIR"
+  mkdir -p .claude/rules
+  printf 'manifest:\n  id: tdd\n' > .claude/rules/tdd.manifest.yaml
+  git add -A
+  git commit -q -m "feat: add tdd manifest sidecar"
+  cd - >/dev/null
+
+  cd "$NODE_DIR"
+  run bash "$SYNC" changelog
+  cd - >/dev/null
+  [ "$status" -eq 0 ]
+  [ "$(echo "$output" | jq '.commit_count')" -eq 1 ]
+  echo "$output" | jq -e '.files_changed[0].file == ".claude/rules/tdd.manifest.yaml"' >/dev/null
+}
+
 @test "BTS-382: changelog filters mixed commits — hub-only files dropped, distributable kept" {
   set -e
   _setup_lock

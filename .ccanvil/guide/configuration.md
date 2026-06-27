@@ -70,12 +70,13 @@ anchors:
   apply: []          # skill paths to load when applying the rule (Tier-1)
   evidence: []       # reference docs explaining rationale + war stories (Tier-2)
   related-rules: []  # peer rule files
-manifest:
-  ...                # existing manifest block (drift-detection)
+manifest_ref: <id>.manifest.yaml   # BTS-666: points to the co-located sidecar
 ---
 ```
 
 Atomized rules trim the body to the directive layer and route operational detail to the `anchors.evidence` reference doc. Files without frontmatter default to `tier=0 scope=universal stack=any anchors={}` (back-compat preserved).
+
+**Manifest sidecars (BTS-666).** The Layer-2 `manifest:` block no longer lives inline in the rule's frontmatter — it is relocated to a co-located sidecar `.claude/rules/<id>.manifest.yaml` (a YAML file with a top-level `manifest:` mapping), and the rule declares `manifest_ref: <id>.manifest.yaml` to point at it. This keeps the always-loaded `.md` lean (the manifest is machine-metadata the agent never acts on) while preserving full Layer-2 validation. To read a rule's contract, open its `<id>.manifest.yaml`. `module-manifest.sh extract <rule>.md` transparently follows `manifest_ref` and returns the same JSON it did when the block was inline. Rules with no manifest (e.g. `background-task-discipline.md`) declare no `manifest_ref` and have no sidecar — they are exempt.
 
 Resolve a rule's bundle: `bash docs-check.sh rule-resolve <rule-id> --project-dir .` returns `{rule, tier, scope, stack, anchors, body_path}`.
 
@@ -84,6 +85,9 @@ Resolve a rule's bundle: `bash docs-check.sh rule-resolve <rule-id> --project-di
 - `info[].rule-tier-budget-exceeded` — tier-0 rule whose whole-file token estimate (char-count / 4) exceeds 150. Advisory only; status stays `ok` (so existing consumers don't see false-alarm drift). Exit 0 by default; `--strict` flag escalates to exit 2.
 - `drift[].rule-frontmatter-malformed` — rule with malformed YAML frontmatter. Block-shape: always exit 2 with status=`drift`.
 - `info[].frontmatter-missing` — rule without frontmatter. Advisory only; the validator continues with the back-compat default envelope.
+- `drift[].rule-manifest-ref-broken` (BTS-666) — `manifest_ref` points to a missing sidecar, or the sidecar's `manifest.id` ≠ the rule id. Block-shape: exit 2.
+- `drift[].rule-manifest-sidecar-malformed` (BTS-666) — sidecar is not valid YAML or lacks a `manifest:` mapping. Block-shape: exit 2.
+- `drift[].rule-manifest-sidecar-orphan` (BTS-666) — a `.claude/rules/*.manifest.yaml` exists that no rule's `manifest_ref` points to. Block-shape: exit 2. Together with `-ref-broken`, this enforces the rule↔sidecar bijection so a manifest can never silently drift from its rule.
 
 The `info` array is always present in the JSON envelope (empty when no info entries). Status is `drift` only when block-shape entries exist in `drift[]`; warn-shape signal lives in `info[]` and is the discoverable "atomization needed" list without blocking PR finalize.
 

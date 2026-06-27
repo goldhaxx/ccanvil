@@ -327,9 +327,12 @@ OPERATIONS="$REPO_ROOT/.ccanvil/scripts/operations.sh"
 }
 
 @test "BTS-115 AC-10: self-review.md notes the dual-capture behavior" {
+  # BTS-666: the manifest block (carrying the "Determinism:" purpose text)
+  # relocated to the sidecar; the rule's full declaration is (body + sidecar).
   local r="$REPO_ROOT/.claude/rules/self-review.md"
-  grep -q 'Determinism:' "$r"
-  grep -qi 'dual.capture\|automatically captures' "$r"
+  local sidecar="$REPO_ROOT/.claude/rules/self-review.manifest.yaml"
+  cat "$r" "$sidecar" 2>/dev/null | grep -q 'Determinism:'
+  cat "$r" "$sidecar" 2>/dev/null | grep -qi 'dual.capture\|automatically captures'
 }
 
 @test "stasis skill: reads HEAD~1:docs/stasis.md for prior-state diff (AC-5, AC-10)" {

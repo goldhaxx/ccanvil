@@ -53,8 +53,11 @@ STASIS_TPL="$REPO_ROOT/.ccanvil/templates/stasis.md"
 
 @test "AC-2: rule is anchored on BTS-198 (origin incident) and BTS-201 (this ship)" {
   set -e
-  grep -qF 'BTS-198' "$RULE"
-  grep -qF 'BTS-201' "$RULE"
+  # BTS-666: anchor refs moved with the manifest block into the sidecar; the
+  # rule's full declaration is now (body + sidecar). Search both.
+  local sidecar="${RULE%.md}.manifest.yaml"
+  cat "$RULE" "$sidecar" 2>/dev/null | grep -qF 'BTS-198'
+  cat "$RULE" "$sidecar" 2>/dev/null | grep -qF 'BTS-201'
 }
 
 # =========================================================================

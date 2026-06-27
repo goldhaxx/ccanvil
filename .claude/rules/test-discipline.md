@@ -5,31 +5,7 @@ stack: any
 anchors:
   evidence:
     - docs/research/test-discipline-research.md
-manifest:
-  id: test-discipline
-  purpose: Codify state/intent/logic-driven gates for when long-running test substrates should run vs skip; full-suite + manifest validate run ONCE pre-merge
-  input:
-    - "read-only: rule consumed by Claude during /review, /pr, /stasis, and TDD cycles"
-  output:
-    - "behavior-shape: enforces single-pre-merge-gate thesis; skips redundant verification when state is unchanged"
-  caller:
-    - .claude/commands/review.md
-    - .claude/commands/pr.md
-    - .claude/skills/stasis/SKILL.md
-    - .claude/rules/tdd.md
-  depends-on:
-    - test-state
-  side-effect:
-    - "shapes-verification-flow (no file mutation; behavioral influence on Claude)"
-  failure-mode:
-    - "reflexive-full-suite | exit=n/a | visible=test-wait-time-blowout | mitigation=consult-test-state-before-running"
-  contract:
-    - full-suite-runs-once-pre-merge
-    - skip-validate-when-state-key-matches-and-nothing-changed
-    - fail-safe-when-state-uncertain
-  anchor:
-    - BTS-508 (origin)
-    - BTS-497 (origin incident; 2+ hours of redundant test-waits)
+manifest_ref: test-discipline.manifest.yaml
 ---
 
 # Test-Run Discipline

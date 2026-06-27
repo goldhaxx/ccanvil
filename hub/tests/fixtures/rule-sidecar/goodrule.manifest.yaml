@@ -1,0 +1,15 @@
+manifest:
+  id: goodrule
+  purpose: A fully-migrated rule whose manifest lives in its co-located sidecar
+  input:
+    - "read-only: rule consumed by Claude"
+  output:
+    - "behavior-shape: directive"
+  side-effect:
+    - "no-op (behavioral influence only)"
+  failure-mode:
+    - "rule-ignored | exit=n/a | visible=none | mitigation=none"
+  contract:
+    - good-contract
+  anchor:
+    - BTS-666 (migrated)

@@ -1,0 +1,5 @@
+manifest:
+  id: badyaml
+  purpose: this sidecar is intentionally malformed
+   bad_indent: "tab/space chaos"
+  - dangling

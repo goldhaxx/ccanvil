@@ -65,6 +65,9 @@ docs/                       # Active feature lifecycle (branch-local)
 ### Preset Guide — .ccanvil/guide/index.md
 **Read when:** Adding or modifying preset commands, rules, agents, skills, hooks, or scripts.
 
+### Rule manifests (BTS-666)
+Each tier-0 rule's Layer-2 manifest lives in a co-located sidecar `.claude/rules/<id>.manifest.yaml`, pointed to by `manifest_ref:` in the rule's frontmatter — this keeps the always-loaded `.md` lean. To read a rule's contract, open its `<id>.manifest.yaml`. `module-manifest.sh validate` enforces the rule↔sidecar bijection + id-match, so the manifest can never silently drift from its rule.
+
 ## Do Not
 - Do not modify `.ccanvil/guide/foundations.md` without explicit user approval — it is foundational research source material.
 - Do not modify files in `generated/`, `dist/`, or dependency directories.
